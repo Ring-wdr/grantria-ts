@@ -1384,7 +1384,7 @@ export class FieldScene implements Scene {
         const opt = stats.D[27 + k] ?? 0;
         if (!opt || this.rng.rand(100) > opt % 41) continue;
         const dur = Math.trunc((this.db.a.d8(0x253a7 + k) * 6 * (100 - (stats.D[36] ?? 0))) / 100);
-        if (k === 3) { if (m.stun <= 0) { m.state = 0xd; m.t = 0; m.stun = dur; } }
+        if (k === 3) { if (m.stun <= 0) m.startStun(dur); }
         else if (k === 2) { if (m.poison <= 0) m.poison = dur; }
         else if (k === 1) { if (m.dark <= 0) m.dark = dur; }
         else if (m.slow <= 0) m.slow = dur;
@@ -1730,7 +1730,11 @@ export class FieldScene implements Scene {
     if (this.warpT >= 0) this.ui.frame('cmf_status', this.statusCmf, 0x34 + (this.warpT >> 1), player.x - ox, player.y - 90 - oy, 'c');
     if (this.arriveT >= 0) this.ui.frame('cmf_status', this.statusCmf, 0x34 + (this.arriveT >> 1), player.x - ox, player.y - 90 - oy, 'c');
     if (this.ctx.options.minimap && !this.talk && !this.dead && this.showButtons)   // FUN_00022228 in state 0x10
-      this.minimap?.draw(this.ui, player.x, player.y, this.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y, monster: true })));
+      this.minimap?.draw(this.ui, player.x, player.y, [
+        ...this.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y, monster: true })),
+        // objects in slots 3..40 that are not monsters (type >= 43): actors created by the event (SPAWN_TYPE)
+        ...this.actors.filter((a) => a.spawned && a.visible && a.id >= 43).map((a) => ({ x: a.x, y: a.y, monster: false })),
+      ]);
     this.hud.draw({
       clock: clockFrame(this.dayCounter, this.dayPh),
       cls: model.cls, level: model.level, hp: vitals.hp, maxHp: stats.maxHp, mp: vitals.mp, maxMp: stats.maxMp,

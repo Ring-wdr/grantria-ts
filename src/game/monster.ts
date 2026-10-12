@@ -72,6 +72,15 @@ export class Monster {
   chill = 0;
   /** +0x8f == 3: c0 shoulder tackle / rush, a 10-tick stun when the hurt ends */
   stunAfter = false;
+  /** boxes frozen when the stun starts (FUN_000231e4 is not run while stunned, polish.md §1.4) */
+  private stunBody: Rect | null = null;
+  private stunAttack: Rect | null = null;
+  /** state 0xd for n ticks: the body and attack boxes stay as they were at this moment */
+  startStun(n: number): void {
+    this.stunBody = this.body();
+    this.stunAttack = this.attackBox();
+    this.state = 0xd; this.t = 0; this.stun = n;
+  }
   /** tick of the first hit since (re)spawn, for "killed within 5 seconds" (title 6..8) */
   firstHit = -1;
   dimIdx = -1;
@@ -129,11 +138,13 @@ export class Monster {
   private attackRec(): number { return this.ai[0] + (this.ai[6] === 4 ? this.F : (~this.lastV & 1)); }
 
   body(): Rect | null {
+    if (this.stun > 0 && this.stunBody) return this.stunBody;
     return frameBox(this.cmf, this.frame, 'body', this.x, this.y, this.dir);
   }
 
   /** Attack box on this tick's frame while attacking (frames without a box deal no damage). */
   attackBox(): Rect | null {
+    if (this.stun > 0) return this.alive ? this.stunAttack : null;   // an attack frame frozen by the stun keeps hitting (FUN_0006fd44)
     if (!this.alive || this.state !== 1 || this.phase !== 2) return null;
     return frameBox(this.cmf, this.frame, 'attack', this.x, this.y, this.dir);
   }
@@ -243,7 +254,7 @@ export class Monster {
       this.frame = this.fourDir ? [0, 6, 12][this.F] : this.V * 6;
       if (this.hurt >= this.hurtTable.length) {
         this.state = 2; this.rec = this.moveRec(); this.t = 0;
-        if (this.stunAfter) { this.stunAfter = false; this.stun = 10; }   // FUN_00068298: +0x8f == 3 -> stun 10
+        if (this.stunAfter) { this.stunAfter = false; this.startStun(10); }   // FUN_00068298: +0x8f == 3 -> stun 10
       }
       return null;
     }

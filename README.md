@@ -26,7 +26,7 @@ npm run dev                           # http://localhost:5173/game.html
 | `npm run build` | 타입 검사 + 정적 빌드 (`dist/`) |
 | `npm test` | 단위 테스트 (규칙 공식, 원본 세이브 XTEA·변환 등). 에셋이나 픽스처가 필요한 테스트는 없으면 건너뜁니다 |
 | `npm run fixtures` | 상점 공식 테스트용 픽스처를 원본 코드 실행으로 생성 (`tests/fixtures/`, 커밋하지 않음) |
-| `python -I tools/grantria_origverify.py DIR MEMBER` | 데이터 관리 화면에서 내보낸 원본 세이브(`save.dat`/`gamedata.dat`/`option.dat`와 평문 `*.plain`)를 원본 라이브러리의 암·복호화·체크섬 함수로 대조 |
+| `python -I tools/grantria_origverify.py DIR MEMBER` | 데이터 관리 화면에서 내보낸 원본 세이브(`save.dat`/`gamedata.dat`/`option.dat`)를 원본 라이브러리의 암·복호화·체크섬 함수로 대조 |
 
 ## 조작
 키보드: 방향키/WASD 이동, Z·Enter·Space = '5'(공격·대화·확인), X = '#', C = '*', 1/2/3/4 = 퀵슬롯 '1'/'3'/'7'/'9', Esc = 메뉴/취소, M = 지도, P = 저장. 터치(포인터)는 원본 touchdata 영역과 화면 버튼을 그대로 씁니다.

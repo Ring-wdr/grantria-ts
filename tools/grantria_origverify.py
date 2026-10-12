@@ -9,7 +9,7 @@ original functions of libGrantria.so on the same bytes:
   FUN_00021308                  option checksum (sum of 0x409668 .. 0x409698 = opt[0, 0x30))
 
 usage: python -I tools/grantria_origverify.py DIR MEMBER [--so apk/lib/armeabi/libGrantria.so]
-       DIR holds save.dat[.M], gamedata.dat[.M], option.dat[.M] and their plaintext *.plain (from the web).
+       DIR holds save.dat[.M], gamedata.dat[.M], option.dat[.M] (exported by the web); optional *.plain plaintexts.
 """
 import argparse
 import os
@@ -44,8 +44,16 @@ def main():
 
     def blocks(name):
         enc = open(os.path.join(a.dir, name + sfx), 'rb').read()
-        plain = open(os.path.join(a.dir, name + '.plain'), 'rb').read()
-        return enc, plain
+        pp = os.path.join(a.dir, name + '.plain')
+        if os.path.exists(pp):
+            return enc, open(pp, 'rb').read()
+        out = bytearray(enc)                           # no plaintext given: decrypt with the original code
+        for o in range(0, len(enc) - len(enc) % 8, 8):
+            m = emu.Mem(so)
+            m.write(0x60000000, enc[o:o + 8])
+            emu.CPU(m, PltStubs({-1: None})).call(G(0x35f94), [0x60000000, 0x60001000])
+            out[o:o + 8] = bytes(m.r8(0x60001000 + i) for i in range(8))
+        return enc, bytes(out)
 
     def check_cipher(name, enc, plain):
         nonlocal ok

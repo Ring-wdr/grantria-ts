@@ -72,6 +72,8 @@ export class Monster {
   chill = 0;
   /** +0x8f == 3: c0 shoulder tackle / rush, a 10-tick stun when the hurt ends */
   stunAfter = false;
+  /** tick of the first hit since (re)spawn, for "killed within 5 seconds" (title 6..8) */
+  firstHit = -1;
   dimIdx = -1;
   /** poison timer +0x58 (극독의 비약): a hit of player ATK/20 every 20 ticks, never below HP 1 (leftovers-combat.md §1) */
   poison = 0;
@@ -319,6 +321,9 @@ export class Monster {
     const { px, py } = w;
     const dist = Math.hypot(px - this.x, py - this.y);
     const inRange = w.playerAlive && dist < this.range;
+    // line attackers 13 / 15 / 27 / 31: attack while aligned within ±19, at any distance (FUN_00034300 33614 / 33671)
+    const line = this.type < 32 && ((1 << this.type) & 0x8800a000) !== 0;
+    const aligned = line && ((px - 19 <= this.x && this.x <= px + 19) || (py - 19 <= this.y && this.y <= py + 19));
     const bb = this.cmf.frames[this.frame]?.body_box ?? [0, 0, 0, 0];
     const bx = this.x + bb[0], by = this.y + bb[1];
     switch (this.state) {
@@ -337,11 +342,11 @@ export class Monster {
         // attack cycle: attack record, then two idle cycles (phase 2 -> 1 -> 0)
         if (this.phase === 2) { this.phase = 1; this.rec = this.idleRec(); this.t = 0; }
         else if (this.phase === 1) { this.phase = 0; this.t = 0; }
-        else if (inRange) this.startAttack(px, py);
+        else if (line ? aligned : inRange) this.startAttack(px, py);
         else { this.state = 2; this.rec = this.moveRec(); this.t = 0; this.wander = this.dir; this.timer = 0; }
         break;
       case 2:
-        if (inRange) { this.startAttack(px, py); break; }
+        if (inRange || aligned) { this.startAttack(px, py); break; }
         if (this.timer > 16) { this.state = 4; this.timer = 0; this.rec = this.moveRec(); this.t = 0; break; }
         { const r = this.moveRec(); if (r !== this.rec) { this.rec = r; this.t = 0; } }
         break;
@@ -384,7 +389,7 @@ export class Monster {
   }
 
   protected respawn(): void {
-    Object.assign(this, { x: this.spawnX, y: this.spawnY, hp: this.maxHp, alive: true, state: 0, phase: 0, t: 0, tint: 0, dir: 3, deathT: 0, timer: 0, wander: 0, slow: 0, poison: 0 });
+    Object.assign(this, { x: this.spawnX, y: this.spawnY, hp: this.maxHp, alive: true, state: 0, phase: 0, t: 0, tint: 0, dir: 3, deathT: 0, timer: 0, wander: 0, slow: 0, poison: 0, firstHit: -1 });
     this.rec = this.idleRec();
   }
 

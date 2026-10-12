@@ -1,7 +1,7 @@
 // Original save files: XTEA against tools/grantria_save.py, slot and gamedata round trips, checksums.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { SLOT_SIZE, buildGamedata, buildSlot, fileKind, memberFromName, parseGamedata, parseSlot, xtea } from '../src/game/origfile.ts';
+import { SLOT_SIZE, buildGamedata, buildOption, buildSlot, fileKind, memberFromName, parseGamedata, parseOption, parseSlot, xtea } from '../src/game/origfile.ts';
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex');
 const sum8 = (b: Uint8Array, end: number) => b.subarray(0, end).reduce((s, x) => s + x, 0) & 0xff;
@@ -62,4 +62,14 @@ test('gamedata round trip with trait caches and checksum', () => {
   assert.deepEqual([g.traitPoints, g.traits, g.traitBought, g.lap, g.day, g.memberNo, g.checksumOk], [3, acc.traits, 1, [0, 2, 1], [100, 0, 0], '77', true]);
   assert.deepEqual(g.book[3], { k: 12, d: 1, z: 2 });
   assert.equal(b[0x369], 2 * 4);                                     // track 4 cache = level × 4
+});
+
+test('option.dat round trip and checksum', () => {
+  const o = { volume: 0, vibration: 1, speed: 0, effects: 1, minimap: 0 };
+  const b = buildOption(o);
+  assert.equal(b.length, 0x90);
+  assert.equal(b[0x30], sum8(b, 0x30));
+  const back = parseOption(b);
+  assert.deepEqual([back.volume, back.vibration, back.speed, back.effects, back.minimap], [0, 1, 0, 1, 0]);
+  assert.deepEqual([...b.subarray(0x3c, 0x41)], [0, 1, 0, 0, 1]);    // working copy: volume, vibration, speed, minimap, effects
 });

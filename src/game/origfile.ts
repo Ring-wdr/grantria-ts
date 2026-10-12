@@ -225,6 +225,19 @@ export function buildGamedata(a: AccountData, d8: (o: number) => number, book: (
   return b;
 }
 
+/** option.dat 0x90 (account.md §4): values +0x45..+0x49, menu working copy +0x3c..+0x40, checksum +0x30 */
+const OPT_ORDER = ['volume', 'vibration', 'speed', 'effects', 'minimap'] as const;
+export function parseOption(b: Uint8Array): Record<(typeof OPT_ORDER)[number], number> & { raw: string } {
+  const o = Object.fromEntries(OPT_ORDER.map((k, i) => [k, b[0x45 + i]])) as Record<(typeof OPT_ORDER)[number], number>;
+  return { ...o, raw: b64(b) };
+}
+export function buildOption(o: Record<(typeof OPT_ORDER)[number], number>, raw?: string): Uint8Array {
+  const b = raw ? unb64(raw) : new Uint8Array(OPT_SIZE);
+  OPT_ORDER.forEach((k, i) => { b[0x45 + i] = o[k]; b[0x3c + [0, 1, 2, 4, 3][i]] = o[k]; });   // working copy order: volume, vibration, speed, minimap, effects
+  b[0x30] = sum8(b, 0x30);
+  return b;
+}
+
 /** identify by size: 0x9a68 save, 0x3d8 gamedata, 0x90 option */
 export function fileKind(size: number): 'save' | 'gamedata' | 'option' | null {
   return size === SAVE_SIZE ? 'save' : size === GD_SIZE ? 'gamedata' : size === OPT_SIZE ? 'option' : null;

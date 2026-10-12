@@ -1,14 +1,16 @@
 // Titles (칭호, 56, FUN_0004aa9c) and challenges (도전과제, 50, FUN_0004aa48), slot data
 // (analysis/features/account.md §3). Counters live in the story save; conditions follow
-// data/account/titles.json and challenges.json. Not ported (meaning or hook unclear): titles 3..8, 12..14,
-// 21, 22, 24, 25, 30..32, 35..38, 42..46, 50; challenge 45..47 use "all six equipped at least grade g".
+// data/account/titles.json and challenges.json. Not ported: 24 / 25 (fortune telling is a server feature);
+// challenge 45..47 use "all six equipped at least grade g".
 
 /** event kinds reported by the game */
 export type AchEvent =
   | { k: 'kill'; type: number; garden: boolean }
   | { k: 'death' } | { k: 'enhanceTry' } | { k: 'enhanceOk'; enh: number }
   | { k: 'craft' } | { k: 'combine' } | { k: 'dismantle' } | { k: 'gem' } | { k: 'inn' } | { k: 'potion' }
-  | { k: 'dimClear' };
+  | { k: 'dimClear' }
+  | { k: 'basicKill' } | { k: 'quickKill' } | { k: 'bigHit' } | { k: 'oneHitKill' } | { k: 'evade' }
+  | { k: 'lowHpReturn' } | { k: 'cure' } | { k: 'skillChain' } | { k: 'peacefulRoom' };
 
 export interface AchState {
   level: number;
@@ -22,6 +24,13 @@ export interface AchState {
   /** grades of equipped items (6, -1 empty) and the best grade owned among equipment */
   equipped: number[];
   bestGrade: number;
+  /** highest gem tier socketed in the equipment (-1 none), accessory subs (type 15) held, regions visited */
+  gemTier: number;
+  necklaces: number;
+  regions: number;
+  /** frames without moving, frames played at the slowest game speed */
+  idleFrames: number;
+  slowFrames: number;
 }
 
 const BOSS_CHALLENGE: Record<number, number> = { 5: 13, 8: 13, 11: 13, 14: 14, 17: 15, 20: 16, 26: 17, 29: 18, 32: 19, 39: 20, 35: 21, 23: 22, 38: 23 };
@@ -37,6 +46,15 @@ const STEPS: Record<string, [number, 't' | 'c', number][]> = {
   dismantle: [[1, 'c', 28], [50, 'c', 29], [100, 'c', 30]],
   gem: [[1, 'c', 5], [100, 'c', 6]],
   inn: [[70, 't', 33], [130, 't', 34]],
+  basicKill: [[100, 't', 30], [1000, 't', 31]],
+  quickKill: [[30, 't', 6], [90, 't', 7], [300, 't', 8]],
+  bigHit: [[100, 't', 42], [1000, 't', 43]],
+  oneHitKill: [[10, 't', 44]],
+  evade: [[200, 't', 46]],
+  lowHpReturn: [[100, 't', 45]],
+  cure: [[500, 't', 37]],
+  skillChain: [[10, 't', 21], [100, 't', 22]],
+  peacefulRoom: [[2000, 't', 35]],
   potion: [[1000, 't', 51], [10000, 't', 52]],
   gardenKills: [[1000, 't', 47], [10000, 't', 48], [100000, 't', 49]],
 };
@@ -67,6 +85,7 @@ export function achEvent(c: Record<string, number>, e: AchEvent): Awards {
     case 'inn': bump('inn'); break;
     case 'potion': bump('potion'); break;
     case 'dimClear': out.challenges.push(41); break;
+    default: bump(e.k); break;
   }
   return out;
 }
@@ -88,6 +107,12 @@ export function achCheck(s: AchState): Awards {
   if (s.questDone(0x97)) ch.push(48);
   [2, 3, 4].forEach((g, i) => { if (s.bestGrade >= g) ch.push(42 + i); });
   [2, 3, 4].forEach((g, i) => { if (s.equipped.length === 6 && s.equipped.every((x) => x >= g)) ch.push(45 + i); });
+  [1, 3, 4].forEach((g, i) => { if (s.equipped.length === 6 && s.equipped.every((x) => x >= g)) t.push(3 + i); });   // 고급 / 영웅 / 전설
+  [0, 2, 4].forEach((g, i) => { if (s.gemTier >= g) t.push(12 + i); });                                            // 하급 / 중급 / 최상급 보석 (gem tier = sub % 5)
+  if (s.necklaces >= 11) t.push(38);
+  if (s.regions >= 14) t.push(32);
+  if (s.idleFrames >= 5 * 60 * 20) t.push(50);
+  if (s.slowFrames >= 10 * 60 * 20) t.push(36);
   return { titles: t, challenges: ch };
 }
 

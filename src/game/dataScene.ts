@@ -2,7 +2,8 @@
 // original save.dat / gamedata.dat through file upload and download (account.md §5.3).
 import { account, resetAccountCache, saveAccount } from './account';
 import { AVK } from './input';
-import { SAVE_SIZE, SLOT_SIZE, backupJson, buildGamedata, buildSlot, fileKind, memberFromName, parseGamedata, parseSlot, restoreJson, xtea, type OrigAccount } from './origfile';
+import { SAVE_SIZE, SLOT_SIZE, backupJson, buildGamedata, buildOption, buildSlot, fileKind, memberFromName, parseGamedata, parseOption, parseSlot, restoreJson, xtea, type OrigAccount } from './origfile';
+import { loadOptions, saveOptions } from './options';
 import { SLOT_COUNT, loadSlot, saveSlot, type SaveData } from './save';
 import type { GameContext, Scene } from './scene';
 import { frozenTitle, render, TitleScene } from './screens';
@@ -28,11 +29,17 @@ function pickFiles(accept: string, multiple: boolean): Promise<File[]> {
 
 /** original files -> web slots and account data; returns a log line */
 export async function importOriginal(files: { name: string; bytes: Uint8Array }[]): Promise<string> {
-  let gd: OrigAccount | null = null, save: Uint8Array | null = null, member = 0n;
+  let gd: OrigAccount | null = null, save: Uint8Array | null = null, member = 0n, optionDone = false;
   for (const f of files) {
     const kind = fileKind(f.bytes.length);
     if (kind === 'gamedata') gd = parseGamedata(xtea(f.bytes, false));
     else if (kind === 'save') { save = xtea(f.bytes, false); member = memberFromName(f.name); }
+    else if (kind === 'option') {
+      const o = parseOption(xtea(f.bytes, false)), cur = loadOptions();
+      saveOptions({ volume: o.volume & 1, vibration: o.vibration & 1, speed: Math.min(2, o.speed), minimap: o.minimap & 1, effects: o.effects & 1 });
+      try { localStorage.setItem('grantria.option.raw', o.raw); } catch { /* storage unavailable */ }
+      void cur; optionDone = true;
+    }
   }
   const log: string[] = [];
   if (gd) {
@@ -53,6 +60,7 @@ export async function importOriginal(files: { name: string; bytes: Uint8Array }[
     if (member) { const a = account(); a.memberNo = member.toString(); saveAccount(); }
     log.push(`슬롯 ${n}개`);
   }
+  if (optionDone) log.push('option');
   return log.length ? `가져옴: ${log.join(', ')}` : '알 수 없는 파일입니다 (save.dat 0x9A68 / gamedata.dat 0x3D8)';
 }
 
@@ -72,7 +80,10 @@ export function exportOriginal(d8: (o: number) => number, m: bigint): { name: st
   const book = slots.find((s) => s?.story?.book)?.story?.book ?? Array.from({ length: 40 }, () => null);
   const gd = buildGamedata(account(), d8, book as never, slots.map((s) => s?.day ?? 0), m);
   const sfx = m ? `.${m}` : '';
-  return [{ name: `save.dat${sfx}`, bytes: xtea(plain, true) }, { name: `gamedata.dat${sfx}`, bytes: xtea(gd, true) }];
+  let optRaw: string | undefined;
+  try { optRaw = localStorage.getItem('grantria.option.raw') ?? undefined; } catch { /* storage unavailable */ }
+  const opt = buildOption(loadOptions(), optRaw);
+  return [{ name: `save.dat${sfx}`, bytes: xtea(plain, true) }, { name: `gamedata.dat${sfx}`, bytes: xtea(gd, true) }, { name: `option.dat${sfx}`, bytes: xtea(opt, true) }];
 }
 
 export class DataScene implements Scene {

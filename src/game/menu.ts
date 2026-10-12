@@ -85,6 +85,7 @@ export class GameMenu {
       const req = body === this.option ? this.option.request : null;
       if (req) { this.option.request = null; return req === 'save' ? 'save' : 'title'; }
     }
+    if (this.titles) { for (const k of presses) if (this.titles) this.titleKey(k); return null; }
     for (const k of presses) {
       if (k === AVK.K1) { this.type = (this.type + 7) & 7; this.page = 0; }      // FUN_00056198
       else if (k === AVK.K3) { this.type = (this.type + 1) & 7; this.page = 0; }
@@ -101,14 +102,51 @@ export class GameMenu {
     return this.type === 0 ? 6 : 1;
   }
 
-  /** Character page 0: 2x2 stat buttons, '5' spends a stat point (applied at once here). */
-  private charKey(k: number): void {
-    if (k === AVK.K0) {                                                             // cycle the worn title (list 0x31 not ported)
-      const fs = this.field, owned = [...fs.story.titles].sort((x, y) => x - y), i = owned.indexOf(fs.story.title);
-      fs.story.title = i + 1 < owned.length ? owned[i + 1] : 0xff;
-      fs.recompute();
+  /** title list 0x31 (FUN_0005b804 / keys FUN_00051b10): 12 pages × 5, detail MENUPOP 10 */
+  private titles: { page: number; sel: number; detail: boolean } | null = null;
+
+  private titleKey(k: number): void {
+    const tl = this.titles!, fs = this.field, id = tl.page * 5 + tl.sel;
+    if (tl.detail) {
+      if (k === AVK.OK && fs.story.titles.has(id)) { fs.story.title = fs.story.title === id ? 0xff : id; fs.recompute(); }   // wear / take off
+      if (k === AVK.OK || k === AVK.CLR) tl.detail = false;
       return;
     }
+    if (k === AVK.LEFT) { tl.page = (tl.page + 11) % 12; if (tl.page * 5 + tl.sel > 55) tl.sel = 0; }
+    else if (k === AVK.RIGHT) { tl.page = (tl.page + 1) % 12; if (tl.page * 5 + tl.sel > 55) tl.sel = 0; }
+    else if (k === AVK.UP) tl.sel = (tl.sel + 4) % 5;
+    else if (k === AVK.DOWN) tl.sel = (tl.sel + 1) % 5;
+    else if (k === AVK.OK) { if (id <= 55) tl.detail = true; }
+    else if (k === AVK.CLR) this.titles = null;
+    if (this.titles && this.titles.page * 5 + this.titles.sel > 55) this.titles.sel = 55 - this.titles.page * 5;
+  }
+
+  private drawTitles(u: Ui): void {
+    const tl = this.titles!, fs = this.field, t = this.ctx.assets.text;
+    u.glow(16, tl.sel * 28 + 54, 188, 26, this.t);
+    for (let i = 0; i < 5; i++) {
+      const id = tl.page * 5 + i;
+      if (id > 55) break;
+      u.button(18, 56 + 28 * i, 184, 22, 3, i === tl.sel ? 1 : 0);
+      u.hit(18, 56 + 28 * i, 184, 22, () => { if (tl.sel === i) return [AVK.OK]; tl.sel = i; });
+      const owned = fs.story.titles.has(id);
+      u.string(owned ? t[0xcff + id] ?? '' : t[0x1b63] ?? '???', 110, 59 + 28 * i, 'center', fs.story.title === id ? { pen: 0xffe0 } : undefined);
+    }
+    u.string(`${tl.page + 1}/12`, 110, 36, 'center');
+    u.hit(0, 190, 60, 27, () => [AVK.LEFT]); u.hit(160, 190, 60, 27, () => [AVK.RIGHT]);
+    if (tl.detail) {                                                  // MENUPOP 10: name, condition (0xD37 + n)
+      const id = tl.page * 5 + tl.sel, owned = fs.story.titles.has(id);
+      u.window(10, 70, 200, 100);
+      u.string(owned ? t[0xcff + id] ?? '' : t[0x1b63] ?? '???', 110, 78, 'center', { pen: 0xffe0 });
+      u.paragraph(t[0xd37 + id] ?? '', 110, 100, 180);
+      if (owned) u.string(fs.story.title === id ? '[5] 해제' : '[5] 장착', 110, 150, 'center');
+      u.hit(10, 70, 200, 100, () => [AVK.OK]);
+    }
+  }
+
+  /** Character page 0: 2x2 stat buttons, '5' spends a stat point (applied at once here). */
+  private charKey(k: number): void {
+    if (k === AVK.K0) { this.titles = { page: 0, sel: 0, detail: false }; return; }   // title list 0x31
     if (k === AVK.LEFT || k === AVK.RIGHT) this.statCur ^= 1;
     else if (k === AVK.UP || k === AVK.DOWN) this.statCur ^= 2;
     else if (k === AVK.OK && this.field.statPoints > 0) {
@@ -190,6 +228,7 @@ export class GameMenu {
     u.pushCenter220();
     const body = this.body;
     if (body) { body.draw(u); body.drawOverlay(u); }
+    else if (this.type === 0 && this.page === 0 && this.titles) this.drawTitles(u);
     else if (this.type === 0 && this.page === 0) this.drawCharPage0(u);
     else {
       u.textId(0x147 + this.type, 0x6e, 0x50, 'center');
@@ -209,7 +248,7 @@ export class GameMenu {
     const worn = fs.story.title;                                                   // worn title (+0x2eb8), 없음 when none
     if (worn === 0xff) u.textId(0x1a15, 0x90, 0x24, 'center', { pen: 0x37ff });      // 없음 (cyan 0x33FFFF)
     else u.textId(0xcff + worn, 0x90, 0x24, 'center', { pen: 0x37ff });
-    u.hit(0x4c, 0x23, 0x88, 0x10, () => [AVK.K0]);                                  // tap: next owned title
+    u.hit(0x4c, 0x23, 0x88, 0x10, () => [AVK.K0]);                                  // tap: title list 0x31
     u.image(`face_s_${m.cls}`, 0, 0, 0x38, 0x38, 10, 0x39);
     const lv = `LV ${m.level}`;
     u.string(lv, 0x8c, 0x3a);

@@ -249,6 +249,10 @@ export class FieldScene implements Scene {
 
   /** challenges waiting for popup 0x79 */
   private achQueue: number[] = [];
+  /** frames without moving (title 50), last skill use (title 21 / 22), a kill on this map (title 35) */
+  private idleFrames = 0;
+  private lastSkillTick = -1000;
+  private killedHere = true;
 
   /** report an achievement event (kills, crafts, ...) */
   achieve(e: AchEvent): void { this.grantAwards(achEvent(this.story.counters, e)); }
@@ -267,6 +271,9 @@ export class FieldScene implements Scene {
         level: this.model.level, gold: this.inv.gold, gatherLv: st.gather.lv, traitsSpent: account().traits.reduce((s, v) => s + v, 0),
         bookKinds: st.book.filter((b) => b && b.k > 0).length, subquests: st.qs.filter((v, q) => v === 4 && !this.sdb.mainQuest(q)).length,
         questDone: (q) => st.qs[q] === 4, equipped: eq, bestGrade: best,
+        gemTier: Math.max(-1, ...this.inv.equip.flatMap((it) => (it ? it.sockets.filter((g) => g !== 0xff).map((g) => (g % 50) % 5) : []))),
+        necklaces: new Set([...this.inv.items, ...this.inv.equip].filter((it) => it && it.type === 15).map((it) => it!.sub)).size,
+        regions: st.zones.size, idleFrames: this.idleFrames, slowFrames: st.counters.slowFrames ?? 0,
       }));
     }
     if (!this.popup && this.achQueue.length) {                       // FUN_0001f17c: popup 0x79 + reward gold
@@ -342,6 +349,8 @@ export class FieldScene implements Scene {
   }
 
   async enterMap(id: number, x?: number, y?: number, forEvent = false): Promise<void> {
+    if (!forEvent && !this.killedHere && !isSafeMap(this.field.mapId)) this.achieve({ k: 'peacefulRoom' });
+    this.killedHere = false;
     this.busy = true;
     const { field, player, ctx } = this;
     await field.load(id);
@@ -1012,6 +1021,7 @@ export class FieldScene implements Scene {
       if (this.ground.length < 25) this.ground.push(g);
     }
     this.achieve({ k: 'kill', type: m.type, garden: this.gardenMode === 1 });
+    this.killedHere = true;
     if (this.gardenMode !== 2) {
       this.quests.onKill(m.type);
       this.story.recordKill(m.type, this.field.map.header.zone);
@@ -1138,6 +1148,7 @@ export class FieldScene implements Scene {
     if (!it || it.count <= 0) return false;
     if (it.enh !== 0) return false;                                      // cooling down
     if (it.type === 0x11 && it.sub === 13) {                             // status cure: +0x54..+0x5a = 0
+      if (this.poison || this.player.slowT || this.player.stun) this.achieve({ k: 'cure' });
       this.poison = 0; this.player.slowT = 0; this.player.stun = 0;
       return this.consume(idx);
     }
@@ -1178,6 +1189,7 @@ export class FieldScene implements Scene {
     const t = this.db.a.text;
     if (this.player.action !== 0 || this.warpT >= 0) { this.hud.message(t[215] ?? ''); return false; }
     if (this.field.map.header.zone === 13 || this.mapType >= 2 || this.gardenMode === 2 || this.vitals.hp <= 0) { this.hud.message(t[0x1abe] ?? ''); return false; }
+    if (this.vitals.hp * 10 <= this.stats.maxHp) this.achieve({ k: 'lowHpReturn' });
     this.warpT = 0;
     this.vitals.invuln = 10;
     return this.consume(idx);
@@ -1251,6 +1263,8 @@ export class FieldScene implements Scene {
     if (this.vitals.mp < cost) return;
     this.vitals.mp -= cost;
     q.cd = q.maxCd;
+    if (this.tick - this.lastSkillTick <= 30) this.achieve({ k: 'skillChain' });
+    this.lastSkillTick = this.tick;
     this.player.startSkill(a);
   }
 
@@ -1294,7 +1308,15 @@ export class FieldScene implements Scene {
     if (fromPlayer && aid === 100 && this.player.action === 3 && model.cls !== 1) dmg = rdiv(dmg * 120, 100);   // 3rd hit x1.2
     if (r.crit && fromPlayer) hud.crit(srcX, srcY - 43);
     const tgt = m instanceof Boss && m.main ? m.main : m;
+    const full = tgt.hp >= tgt.maxHp;
+    if (tgt.firstHit < 0) tgt.firstHit = this.tick;
     tgt.hp -= dmg;
+    if (dmg * 2 >= tgt.maxHp) this.achieve({ k: 'bigHit' });
+    if (tgt.hp <= 0) {
+      if (full) this.achieve({ k: 'oneHitKill' });
+      if (fromPlayer && aid === 100) this.achieve({ k: 'basicKill' });
+      if (this.tick - tgt.firstHit <= 100) this.achieve({ k: 'quickKill' });
+    }
     this.ctx.audio.playSfx(0x20 + model.cls);                         // FUN_0006e120 hit sound
     hud.damage(dmg, m.x, b[1] - 33);
     // elixir effects in FUN_0006d2f8: explosion +dmg/5, freeze +dmg/10 and slow 25, plunder gold
@@ -1410,7 +1432,7 @@ export class FieldScene implements Scene {
     if (vitals.invuln || vitals.tint) return false;
     const r = monsterHit(this.rng, atk, { level: this.model.level, def: this.stats.def, evade: this.stats.evade + (src.dark > 0 ? 50 : 0), stunned: player.stun > 0 });
     vitals.invuln = 5;
-    if (r.miss) { hud.miss(player.x, player.y - 43); return false; }
+    if (r.miss) { hud.miss(player.x, player.y - 43); this.achieve({ k: 'evade' }); return false; }
     let dmg = r.dmg, knock: 0 | 6 | 7 = 0, pct = 100;
     switch (type) {
       case 5: if (action === 12) pct = 150; break;
@@ -1513,7 +1535,10 @@ export class FieldScene implements Scene {
     };
     for (const a of this.actors) a.update();
     this.updateGimmicks();
+    const px0 = this.player.x, py0 = this.player.y;
     this.player.update(this.ctx.input, this.field, blockers);
+    this.idleFrames = px0 === this.player.x && py0 === this.player.y ? this.idleFrames + 1 : 0;
+    if (this.ctx.options.speed === 0) this.story.counters.slowFrames = (this.story.counters.slowFrames ?? 0) + 1;
     if (this.player.sound) this.ctx.audio.playSfx(this.player.sound);
     this.resolvePlayerAttack();
     this.updateProjectiles();

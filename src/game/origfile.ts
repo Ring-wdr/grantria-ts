@@ -220,6 +220,7 @@ export function buildGamedata(a: AccountData, d8: (o: number) => number, book: (
   b[0x371] = a.traitBought;
   dv.setBigInt64(0x378, member, true);
   day.forEach((v, s) => dv.setUint16(0x3b0 + 2 * s, v & 0xffff, true));
+  (a.unsavedUse ?? []).forEach((u, s) => u.forEach((v, j) => dv.setUint16(0x3b6 + 10 * s + 2 * j, v & 0xffff, true)));
   b.set(a.lap.slice(0, 3), 0x3d4);
   b[0x3a8] = sum8(b, 0x3a8);
   return b;

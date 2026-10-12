@@ -13,6 +13,8 @@ export class Popup {
   private age = 0;
   /** extra drawing in popup coordinates (type 10 result popups: the item cell) */
   extra?: (u: import('./ui').Ui, w: number, h: number) => void;
+  /** the extra drawing replaces the body text (popup 0x55 fortune result) */
+  hideBody = false;
   /** format fills sprintf-style fields of the popup text (e.g. popup 0x29 "%s ... %d") */
   constructor(private ctx: GameContext, readonly id: number, private cls = 0, private format?: (s: string) => string) {
     const a = ctx.assets;
@@ -56,7 +58,7 @@ export class Popup {
       const lines = this.body().split('|@');
       const y0 = this.extra ? 92 : ((h - 0x1c) - lines.length * 15) >> 1;
       if (this.id === 0) u.textId(0x3e1 + this.cls, 0x69, 0x4b, 'center', { pen: 0xffe0 });
-      lines.forEach((ln, i) => u.string(ln, w >> 1, y0 + i * 15, 'center'));
+      if (!this.hideBody) lines.forEach((ln, i) => u.string(ln, w >> 1, y0 + i * 15, 'center'));
       if (this.yesNo) {
         const c = w >> 1;
         u.glow(c + this.sel * 0x4e - 0x48, h - 0x20, 0x42, 0x1a, this.age);

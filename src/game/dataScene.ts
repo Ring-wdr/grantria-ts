@@ -44,7 +44,7 @@ export async function importOriginal(files: { name: string; bytes: Uint8Array }[
   const log: string[] = [];
   if (gd) {
     const a = account();
-    Object.assign(a, { lap: gd.lap, traitPoints: gd.traitPoints, traits: gd.traits, traitBought: gd.traitBought, raw: gd.raw });
+    Object.assign(a, { lap: gd.lap, traitPoints: gd.traitPoints, traits: gd.traits, traitBought: gd.traitBought, raw: gd.raw, book: gd.book, day: gd.day, unsavedUse: gd.unsavedUse });
     if (gd.memberNo !== '0') a.memberNo = gd.memberNo;
     saveAccount(); resetAccountCache();
     log.push(`gamedata${gd.checksumOk ? '' : ' (체크섬 불일치)'}`);
@@ -77,8 +77,8 @@ export function exportOriginal(d8: (o: number) => number, m: bigint): { name: st
     }
     plain.set(b, i * SLOT_SIZE);
   });
-  const book = slots.find((s) => s?.story?.book)?.story?.book ?? Array.from({ length: 40 }, () => null);
-  const gd = buildGamedata(account(), d8, book as never, slots.map((s) => s?.day ?? 0), m);
+  const a = account(), book = a.book ?? slots.find((s) => s?.story?.book)?.story?.book ?? Array.from({ length: 40 }, () => null);
+  const gd = buildGamedata(a, d8, book as never, [0, 1, 2].map((i) => a.day?.[i] ?? slots[i]?.day ?? 0), m);
   const sfx = m ? `.${m}` : '';
   let optRaw: string | undefined;
   try { optRaw = localStorage.getItem('grantria.option.raw') ?? undefined; } catch { /* storage unavailable */ }

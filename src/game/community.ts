@@ -165,39 +165,55 @@ class PremiumShop {
   drawPopups(): void { this.popup?.p.draw(); }
 }
 
-/** State 0x29: the own bag (mode 0) or the local warehouse (mode 1), 4x4 cells × 3 pages; '5' moves the item across. */
+/** State 0x29 (FUN_0002b774 / keys FUN_000442f4): the inventory grid FUN_00058890 over the own bag (mode 0)
+ *  or the warehouse (mode 1, 3 bags = 48, local instead of the server). Buttons (8, 0xBD) / (0x4F, 0xBD) /
+ *  (0x96, 0xBD): mode 0 고급상점 / 골드전송 / 창고, mode 1 고급상점 / 창고정리 / 가방. '#' and '*' as in the
+ *  original, '5' moves the item across (창고로 / 내가방으로), '0' sorts the warehouse (창고정리, state 0x0F). */
 class Storage {
   mode: 0 | 1;
-  private page = 0;
+  private bag = 0;
   private sel = 0;
+  private focus: 0 | 1 = 1;
   private t = 0;
   popup: PopupState | null = null;
   request: 'premium' | null = null;
   constructor(private ctx: GameContext, private fs: FieldScene, mode: 0 | 1) { this.mode = mode; }
 
   private list(): (Item | undefined)[] { return this.mode === 0 ? this.fs.inv.items : loadWarehouse(); }
-  private pages(): number { return this.mode === 0 ? this.fs.inv.bags + 3 : 3; }
+  private bags(): number { return this.mode === 0 ? this.fs.inv.bags + 3 : 3; }
 
   update(presses: number[]): 'close' | null {
     this.t++;
     if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); } return null; }
     for (const k of presses) {
-      if (k === AVK.LEFT && this.sel > 0) this.sel--;
-      else if (k === AVK.RIGHT && this.sel < 15) this.sel++;
-      else if (k === AVK.UP) { if (this.sel >= 4) this.sel -= 4; else this.page = (this.page + this.pages() - 1) % this.pages(); }
-      else if (k === AVK.DOWN) { if (this.sel < 12) this.sel += 4; else this.page = (this.page + 1) % this.pages(); }
-      else if (k === AVK.POUND) { this.mode = 0; this.page = 0; }
-      else if (k === AVK.STAR) { this.mode = 1; this.page = 0; }
-      else if (k === AVK.K0) this.request = 'premium';
-      else if (k === AVK.OK) this.move();
-      else if (k === AVK.CLR) return 'close';
+      if (k === AVK.POUND) { if (this.mode === 1) { this.mode = 0; this.bag = 0; } else this.request = 'premium'; }
+      else if (k === AVK.STAR) { if (this.mode === 0) { this.mode = 1; this.bag = 0; } else this.request = 'premium'; }
+      else if (k === AVK.K0) { if (this.mode === 1) this.sortWarehouse(); }
+      else if (this.focus === 0) {
+        if (k === AVK.UP || k === AVK.DOWN) { const n = this.bags(); this.bag = (this.bag + (k === AVK.UP ? n - 1 : 1)) % n; this.sel = 0; }
+        else if (k === AVK.OK || k === AVK.RIGHT) this.focus = 1;
+        else if (k === AVK.CLR) return 'close';
+      } else {
+        if (k === AVK.LEFT) { if (this.sel & 3) this.sel--; else this.focus = 0; }
+        else if (k === AVK.RIGHT && (this.sel & 3) < 3) this.sel++;
+        else if (k === AVK.UP && this.sel >= 4) this.sel -= 4;
+        else if (k === AVK.DOWN && this.sel < 12) this.sel += 4;
+        else if (k === AVK.OK) this.move();
+        else if (k === AVK.CLR) this.focus = 0;
+      }
     }
     return null;
   }
 
+  /** 창고정리 (FUN_0003b3a8(2)): by type, sub, grade */
+  private sortWarehouse(): void {
+    const wh = loadWarehouse().sort((a, b) => a.type - b.type || a.sub - b.sub || b.grade - a.grade);
+    saveWarehouse(wh);
+  }
+
   /** '5': send to the warehouse (item menu 0x14 창고로) or back to the bag (0x185 내가방으로) */
   private move(): void {
-    const fs = this.fs, idx = this.page * 16 + this.sel;
+    const fs = this.fs, idx = this.bag * 16 + this.sel;
     if (this.mode === 0) {
       const it = fs.inv.items[idx];
       if (!it) return;
@@ -218,22 +234,35 @@ class Storage {
   }
 
   draw(u: Ui): void {
-    const list = this.list(), t = this.ctx.assets.text;
-    u.roundFill(8, 30, 204, 160, 0, 1);
-    u.string(this.mode === 0 ? (t[0x155] ?? '') : (t[0x156] ?? ''), 110, 34, 'center', { pen: 0xffe0 });
-    u.string(`${this.page + 1}/${this.pages()}`, 204, 34, 'right');
+    const list = this.list(), n = this.bags();
+    u.roundFill(55, 35, 150, 154, 0, 1);
     for (let k = 0; k < 16; k++) {
-      const x = 40 + (k % 4) * 36, y = 52 + Math.floor(k / 4) * 34, it = list[this.page * 16 + k];
-      u.roundFill(x, y, 26, 26, 0x203145, 1);
-      if (it) drawItemCell(u, this.fs, it, x, y);
-      if (k === this.sel) u.slotGlow(x - 2, y - 2, 30, 30, this.t);
-      u.hit(x, y, 26, 26, () => { if (this.sel === k) return [AVK.OK]; this.sel = k; });
+      const x = (k & 3) * 36 + 63, y = (k >> 2) * 35 + 47, it = list[this.bag * 16 + k];
+      if (this.focus === 1 && k === this.sel) u.glow(x - 2, y - 2, 30, 30, this.t);
+      u.bevel(x, y, 26, 26, 0x354e73, 0);
+      u.hit(x - 4, y - 4, 34, 34, () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; });
+      if (it) drawItemCell(u, this.fs, it, x + 1, y + 1);
     }
-    const it = list[this.page * 16 + this.sel];
-    if (it) u.string(it.name, 110, 182, 'center');
-    const btn = (x: number, id: number, key: number) => { u.button(x, 0xbd, 0x3e, 0x16, 3, 0); u.textId(id, x + 0x1f, 0xc1, 'center'); u.hit(x, 0xbd, 0x3e, 0x16, () => [key]); };
-    btn(8, this.mode === 0 ? 0x156 : 0x19e5, this.mode === 0 ? AVK.STAR : AVK.POUND);
-    btn(0x96, 0x19e3, AVK.K0);
+    if (this.focus === 0) u.glow(6, this.bag * 32 + 30, 34, 34, this.t);
+    for (let i = 0; i < 5; i++) {
+      u.alpha = i === this.bag ? 32 : 16;
+      u.button(8, 32 * (i + 1), 0x1e, 0x1e, 3, i >= n ? 3 : i === this.bag ? 1 : 0);
+      if (i < n) u.hit(6, 32 * (i + 1) - 2, 34, 32, () => { this.focus = 0; this.bag = i; this.sel = 0; });
+      u.image('t', 15, 24, 16, 16, 15, 38 + 32 * i);
+      u.alpha = 32;
+      if (i < n) u.number(Math.max(0, Math.min(16, list.length - 16 * i)), 11, 55 + 32 * i, 0, 0);
+    }
+    const btn = (x: number, id: number, key: number | null, cx: number) => {
+      u.button(x, 0xbd, 0x3e, 0x16, key === null ? 3 : 3, key === null ? 3 : 0);
+      u.textId(id, cx, 0xc1, 'center');
+      if (key !== null) u.hit(x, 0xbd, 0x3e, 0x16, () => [key]);
+    };
+    btn(8, 0x19e3, this.mode === 0 ? AVK.POUND : AVK.STAR, 0x27);                    // 고급상점
+    if (this.mode === 0) btn(0x4f, 0x19e2, null, 0x6e);                              // 골드전송 (server gift: off)
+    else btn(0x4f, 0x19da, AVK.K0, 0x6e);                                            // 창고정리
+    btn(0x96, this.mode === 0 ? 0x19e4 : 0x19e5, this.mode === 0 ? AVK.STAR : AVK.POUND, 0xb5);   // 창고 / 가방
+    const it = list[this.bag * 16 + this.sel];
+    if (it && this.focus === 1) u.string(it.name, 130, 175, 'center');
   }
   drawPopups(): void { this.popup?.p.draw(); }
 }

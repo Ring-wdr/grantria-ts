@@ -1,6 +1,6 @@
 // Titles (칭호, 56, FUN_0004aa9c) and challenges (도전과제, 50, FUN_0004aa48), slot data
 // (analysis/features/account.md §3). Counters live in the story save; conditions follow
-// data/account/titles.json and challenges.json. Not ported: 24 / 25 (fortune telling is a server feature);
+// data/account/titles.json and challenges.json (titles 24 / 25 come from the daily fortune, fortune.ts);
 // challenge 45..47 use "all six equipped at least grade g".
 
 /** event kinds reported by the game */

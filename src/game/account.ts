@@ -15,6 +15,48 @@ export interface AccountData extends GameData {
   memberNo?: string;
   /** imported gamedata plaintext (base64), to keep the unknown bytes on export */
   raw?: string;
+  /** gd 0..0x31f monster book (account-wide, misc-systems.md §8.1) */
+  book?: ({ k: number; d: number; z: number } | null)[];
+  /** gd+0x3b0 day/night counter per slot */
+  day?: number[];
+  /** gd+0x3b6 uses since the last save per slot of 0x1b sub 2, 3, 0x15, 0x16, 0x17 (reload prevention) */
+  unsavedUse?: number[][];
+}
+
+/** 0x1b subs counted by the reload prevention (account.md §1.2) */
+export const UNSAVED_SUBS = [2, 3, 0x15, 0x16, 0x17];
+
+/** the account monster book; the first time, it adopts the given slot book */
+export function accountBook(slotBook: ({ k: number; d: number; z: number } | null)[]): ({ k: number; d: number; z: number } | null)[] {
+  const a = account();
+  if (!a.book || a.book.length !== 40) { a.book = slotBook.map((b) => (b ? { ...b } : null)); saveAccount(); }
+  return a.book;
+}
+export function accountDay(slot: number, fallback: number): number { return account().day?.[slot] ?? fallback; }
+export function setAccountDay(slot: number, v: number): void { const a = account(); a.day = [0, 1, 2].map((i) => (i === slot ? v : a.day?.[i] ?? 0)); }
+
+/** FUN_00040498 47861: a counted consumable used; saved at once so a reload cannot undo it */
+export function countUnsavedUse(slot: number, sub: number): void {
+  const j = UNSAVED_SUBS.indexOf(sub);
+  if (j < 0) return;
+  const a = account();
+  a.unsavedUse ??= [[0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0]];
+  a.unsavedUse[slot][j]++;
+  saveAccount();
+}
+/** FUN_0001a494 4587: loading a slot with pending counts takes one of each item away, then clears them */
+export function takeUnsavedUses(slot: number): number[] {
+  const a = account(), u = a.unsavedUse?.[slot];
+  if (!u || u.every((v) => !v)) return [];
+  const subs = UNSAVED_SUBS.filter((_, j) => u[j]);
+  a.unsavedUse![slot] = [0, 0, 0, 0, 0];
+  saveAccount();
+  return subs;
+}
+/** FUN_0001eba8 7561: a save clears the counts */
+export function clearUnsavedUses(slot: number): void {
+  const a = account();
+  if (a.unsavedUse?.[slot]?.some((v) => v)) { a.unsavedUse[slot] = [0, 0, 0, 0, 0]; }
 }
 
 /** d+0x2543b + 3k: value per level of track k (1..12) */

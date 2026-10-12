@@ -175,7 +175,7 @@ export function frozenTitle(ctx: GameContext): void {
 }
 
 /** "%02d:%02d:%02d" play time (text 0x1B28); the web port counts 20 ticks per second. */
-function playTime(ticks: number): string {
+export function playTime(ticks: number): string {
   const s = Math.floor(ticks / 20);
   return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((v) => String(v).padStart(2, '0')).join(':');
 }
@@ -374,6 +374,7 @@ export class PlayScene implements Scene {
   private constructor(private ctx: GameContext, private slot: number, readonly field: FieldScene) {
     field.autosave = () => { saveSlot(slot, field.toSave()); };
     field.prevSave = () => loadSlot(slot);
+    field.bindSlot(slot);
   }
 
   static async start(ctx: GameContext, slot: number, save: SaveData): Promise<void> {
@@ -469,7 +470,7 @@ export class PlayScene implements Scene {
    *  popup 0x4E and then revive for 2 coupons (net 0x19 code 1, done locally), else 0x7D opens the coupon shop */
   private reviveChoice(): void {
     const f = this.field, inv = f.inv, t = this.ctx.assets.text;
-    if (countOf(inv, 0x1b, 3) > 0) { consume(inv, 0x1b, 3, 1); f.revive(); this.overTicks = 0; return; }
+    if (countOf(inv, 0x1b, 3) > 0) { consume(inv, 0x1b, 3, 1); f.countUse(3); f.revive(); this.overTicks = 0; return; }
     if (coupons(f) >= 4) {
       this.overPopup = { p: new Popup(this.ctx, 0x4e, 0, (s) => s.replace('%s', t[0xa0c + 3] ?? '')), then: () => {
         consume(inv, 0x1b, 0x1b, 2); f.revive(); this.overTicks = 0;

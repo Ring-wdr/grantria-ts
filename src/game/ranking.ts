@@ -7,7 +7,7 @@ import { Popup } from './popup';
 import { derive, type Derived } from './rules';
 import { SLOT_COUNT, loadGamedata, loadSlot, type SaveData } from './save';
 import type { GameContext, Scene } from './scene';
-import { frozenTitle, render, TitleScene } from './screens';
+import { frozenTitle, playTime, render, TitleScene } from './screens';
 
 export interface RankEntry {
   slot: number;
@@ -21,6 +21,7 @@ export interface RankEntry {
   mp: number;
   stats: number[];
   equip: (Item | null)[];
+  skills?: number[];
   at: number;
 }
 
@@ -50,6 +51,9 @@ export class RankingScene implements Scene {
   private slots: (SaveData | null)[] = [];
   private list: RankEntry[] = loadRanking();
   private popup: { p: Popup; yes?: () => void } | null = null;
+  private mine = false;
+  private eq = 0;
+  private skillView = false;
   private db: ItemDb;
   private ready = false;
 
@@ -70,7 +74,7 @@ export class RankingScene implements Scene {
     const lap = loadGamedata().lap[i] ?? 0;
     const titles = s.story?.titles?.length ?? 0;
     const e: RankEntry = { slot: i, cls: s.cls, level: s.level, lap, score: rankScore(equip, lap, titles, s.story?.dimClears ?? 0, s.story?.counters?.vermutKills ?? 0), dmg: d.atk, def: d.def,
-      hp: d.maxHp, mp: d.maxMp, stats: s.stats, equip, at: Date.now() };
+      hp: d.maxHp, mp: d.maxMp, stats: s.stats, equip, skills: s.skills, at: Date.now() };
     this.list = [...this.list.filter((x) => x.slot !== i), e];
     saveRanking(this.list);
     const pos = this.sorted().indexOf(e);
@@ -94,66 +98,88 @@ export class RankingScene implements Scene {
       } else if (this.state === 0x36) {                               // FUN_00043b04
         if (k === AVK.POUND) this.page = (this.page + 1) % pages;
         else if (k === AVK.STAR) this.page = (this.page + pages - 1) % pages;
+        else if (k === AVK.K0) {                                      // 1위부터 <-> 내랭킹 (net 7)
+          this.mine = !this.mine;
+          const pos = this.mine ? rows.findIndex((e) => e.slot === this.cur) : 0;
+          this.page = Math.max(0, Math.floor(pos / 3)); this.sel = Math.max(0, pos % 3);
+        }
         else if (k === AVK.UP) this.sel = (this.sel + 2) % 3;
         else if (k === AVK.DOWN) this.sel = (this.sel + 1) % 3;
-        else if (k === AVK.OK && rows[this.page * 3 + this.sel]) this.state = 0x37;
-        else if (k === AVK.CLR) this.state = 0x35;
-      } else if (k === AVK.CLR || k === AVK.OK) this.state = 0x36;   // 0x37 detail
+        else if (k === AVK.OK && rows[this.page * 3 + this.sel]) { this.state = 0x37; this.eq = 0; this.skillView = false; }
+        else if (k === AVK.CLR) this.ctx.go(new TitleScene(this.ctx));
+      } else {                                                        // 0x37 FUN_00043a2c
+        if (k === AVK.K0) this.skillView = !this.skillView;
+        else if (k === AVK.LEFT) this.eq = (this.eq + 5) % 6;
+        else if (k === AVK.RIGHT) this.eq = (this.eq + 1) % 6;
+        else if (k === AVK.CLR || k === AVK.OK) { if (this.skillView) this.skillView = false; else this.state = 0x36; }
+      }
     }
   }
 
   draw(): void {
     render(this.ctx, () => {
       frozenTitle(this.ctx);
-      const u = this.ctx.ui, t = this.ctx.assets.text, rows = this.sorted();
+      const u = this.ctx.ui, rows = this.sorted();
       u.pushCenter220();
-      if (this.state === 0x35) {
-        u.window(0x48, 0, 0x4c, 0x16);
-        u.textId(0xe1, 0x6e, 5, 'center');
+      if (this.state === 0x35) {                                      // FUN_00034028 / FUN_00033dcc
         for (let i = 0; i < 3; i++) {
-          const y = 0x18 + i * 0x42, iy = 0x16 + i * 0x42, sl = this.slots[i];
-          u.window(0, y, 0xdb, 0x3f);
-          if (this.cur === i) u.slotGlow(2, iy + 5, 0xd6, 0x39, this.t);
-          u.hit(0, y, 0xdb, 0x3f, () => { if (this.cur === i) return [AVK.OK]; this.cur = i; });
-          if (!sl) { u.cfont('EMPTY SPACE', 0x56, iy + 0x1b, 0); continue; }
-          u.textId(0x3e1 + sl.cls, 0x4d, iy + 8);
-          u.textId(0x1a3d, 0xac, iy + 8);
-          u.number(sl.level, 0xbb, iy + 8, 1);
-          const e = this.list.find((x) => x.slot === i);
-          u.string(e ? `SCORE ${e.score}` : '미등록', 0xda, iy + 0x2e, 'right', { pen: e ? 0xffe0 : 0x9cd3 });
+          const y = 22 + 66 * i, sl = this.slots[i];
+          u.window(0, 24 + 66 * i, 219, 63);
+          if (this.cur === i) u.slotGlow(2, y + 5, 0xd6, 0x39, this.t);
+          u.hit(0, 24 + 66 * i, 219, 63, () => { if (this.cur === i) return [AVK.OK]; this.cur = i; });
+          if (!sl) { u.cfont('EMPTY SPACE', 0x56, y + 0x1b, 0); continue; }
+          const cmfName = `cmf_c${sl.cls}`;
+          u.frame(cmfName, this.ctx.cmfs[cmfName], this.t % 6, sl.cls === 2 ? 0x23 : 0x26, y + (sl.cls === 2 ? 0x3a : 0x30));
+          u.textId(0x3e1 + sl.cls, 77, y + 8);
+          if ((loadGamedata().lap[i] ?? 0) === 2) u.textId(6716, 110, y + 8, 'left', { pen: 0xf800 });
+          u.textId(6717, 172, y + 8);
+          u.number(sl.level, 187, y + 8, 1);
+          u.textId(0x1d6 + (sl.zone ?? 0), 145, y + 30, 'center');
+          u.string(playTime(sl.playTicks), 218, y + 46, 'right');
         }
-        u.button(0x48, 0xd6, 0x4c, 0x16, 3, 1); u.textId(0x19df, 0x6e, 0xd9, 'center'); u.hit(0x48, 0xd6, 0x4c, 0x16, () => [AVK.K0]);
-      } else {
-        u.window(0, 0, 0xdc, 0xd4);
-        u.textId(this.state === 0x36 ? 6617 : 6640, 110, 5, 'center');
-        if (this.state === 0x36) {
-          const pages = Math.max(1, Math.ceil(rows.length / 3));
-          for (let i = 0; i < 3; i++) {
-            const e = rows[this.page * 3 + i], y = 24 + i * 58;
-            u.window(4, y, 0xd4, 54);
-            if (i === this.sel) u.slotGlow(6, y + 2, 0xd0, 50, this.t);
-            u.hit(4, y, 0xd4, 54, () => { if (this.sel === i) return [AVK.OK]; this.sel = i; });
-            if (!e) continue;
-            u.string(`${t[6727] ?? 'RANK'} ${this.page * 3 + i + 1}`, 12, y + 6);
-            u.textId(0x3e1 + e.cls, 70, y + 6);
-            u.string(`LV ${e.level}`, 150, y + 6);
-            u.string(`${t[6728] ?? 'SCORE'} ${e.score}`, 208, y + 24, 'right', { pen: 0xffe0 });
-            u.string(`${t[6729] ?? 'DMG'} ${e.dmg}   ${t[6730] ?? 'DEF'} ${e.def}`, 12, y + 36);
-          }
-          u.string(`${this.page + 1}/${pages}`, 110, 0xc4, 'center');
-        } else {
-          const e = rows[this.page * 3 + this.sel];
-          if (e) {
-            u.textId(0x3e1 + e.cls, 20, 30); u.string(`LV ${e.level}`, 150, 30);
-            u.string(`${t[6731] ?? 'HP'} ${e.hp}   ${t[6732] ?? 'MP'} ${e.mp}`, 20, 52);
-            u.string(`${t[6729] ?? 'DMG'} ${e.dmg}   ${t[6730] ?? 'DEF'} ${e.def}`, 20, 70);
-            e.stats.forEach((v, k) => u.string(`${t[21 + k] ?? ''} ${v}`, 15 + 70 * (k & 1), 105 + 15 * (k >> 1)));
-            e.equip.forEach((it, k) => {
-              if (!it) return;
-              const r = this.db.iconRect(it.icon);
-              u.image(r.image, r.sx, r.sy, 16, 16, 13 + 34 * k, 145);
-            });
-            u.string(`SCORE ${e.score}`, 110, 0xbc, 'center', { pen: 0xffe0 });
+      } else if (this.state === 0x36) {                               // FUN_00031a44
+        u.window(0, 0, 0xdc, 0xe8);
+        u.textId(6617, 110, 5, 'center');
+        u.button(158, 0, 62, 22, 3, 1); u.textId(this.mine ? 6639 : 6638, 189, 4, 'center'); u.hit(158, 0, 62, 22, () => [AVK.K0]);
+        const pages = Math.max(1, Math.ceil(rows.length / 3));
+        for (let i = 0; i < 3; i++) {
+          const e = rows[this.page * 3 + i], y = 30 + 62 * i;
+          u.window(4, y, 0xd4, 58);
+          if (i === this.sel) u.slotGlow(6, y + 2, 0xd0, 54, this.t);
+          u.hit(4, y, 0xd4, 58, () => { if (this.sel === i) return [AVK.OK]; this.sel = i; });
+          if (!e) continue;
+          u.textId(6727, 12, y + 6); u.number(this.page * 3 + i + 1, 50, y + 6, 1);
+          u.textId(0x3e1 + e.cls, 80, y + 6);
+          u.textId(6717, 150, y + 6); u.number(e.level, 165, y + 6, 1);
+          u.textId(6728, 12, y + 22); u.string(String(e.score), 208, y + 22, 'right', { pen: 0xffe0 });
+          u.textId(6729, 12, y + 38); u.string(String(e.dmg), 90, y + 38, 'right');
+          u.textId(6730, 110, y + 38); u.string(String(e.def), 200, y + 38, 'right');
+        }
+        u.string(`${this.page + 1}/${pages}`, 110, 226 - 50, 'center');
+      } else {                                                        // FUN_0003177c
+        const e = rows[this.page * 3 + this.sel];
+        u.window(0, 0, 0xdc, 0xe8);
+        u.textId(6640, 110, 5, 'center');
+        if (e) {
+          u.textId(0x3e1 + e.cls, 15, 30); u.textId(6717, 150, 30); u.number(e.level, 165, 30, 1);
+          u.textId(6731, 15, 50); u.string(String(e.hp), 90, 50, 'right');
+          u.textId(6732, 110, 50); u.string(String(e.mp), 200, 50, 'right');
+          u.textId(6729, 15, 66); u.string(String(e.dmg), 90, 66, 'right');
+          u.textId(6730, 110, 66); u.string(String(e.def), 200, 66, 'right');
+          e.stats.forEach((v, k) => { u.textId(21 + k, 15 + 70 * (k & 1), 105 + 15 * (k >> 1)); u.number(v, 60 + 70 * (k & 1), 105 + 15 * (k >> 1), 0); });
+          u.button(145, 110, 62, 22, 3, this.skillView ? 1 : 0); u.textId(6641, 176, 114, 'center'); u.hit(145, 110, 62, 22, () => [AVK.K0]);
+          e.equip.forEach((it, k) => {
+            const x = 13 + 34 * k;
+            u.bevel(x, 140, 26, 26, 0x354e73, 0);
+            if (k === this.eq) u.glow(x - 2, 138, 30, 30, this.t);
+            u.hit(x, 140, 26, 26, () => { this.eq = k; });
+            if (it) { const r = this.db.iconRect(it.icon); u.image(r.image, r.sx, r.sy, 16, 16, x + 5, 145); }
+          });
+          const it = e.equip[this.eq];
+          if (it) u.string(it.name, 110, 179, 'center');
+          if (this.skillView) {                                       // FUN_00027218 skill view
+            u.window(10, 40, 200, 150);
+            (e.skills ?? []).forEach((lv, k) => u.string(`${k < 9 ? 'A' : 'P'}${k < 9 ? k + 1 : k - 8}  LV ${lv}`, 20 + 95 * (k >> 3), 50 + 16 * (k & 7)));
           }
         }
       }

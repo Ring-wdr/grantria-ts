@@ -6,8 +6,9 @@ import { Buffs, DAY_EVENTS, TINT_BASE, clockFrame, dayPhase, isSafeMap, returnPo
 import { boxEquipment } from './boxes';
 import { Gimmick } from './gimmicks';
 import { Minimap } from './minimap';
+import { drawFortune, drawFortuneResult, today } from './fortune';
 import { achCheck, achEvent, challengeGold, titleBonus, type AchEvent, type Awards } from './achievements';
-import { account, secondDrop, traitBox, traitOnLevelUp, traitReset, traitStatBonus, traitVal } from './account';
+import { accountBook, accountDay, clearUnsavedUses, countUnsavedUse, saveAccount, setAccountDay, takeUnsavedUses, account, secondDrop, traitBox, traitOnLevelUp, traitReset, traitStatBonus, traitVal } from './account';
 import { dimStats, dungeonStart, generateFloor, newRun, resultValues, rollDimDrops, type DimRun } from './dimension';
 import { GATHER_CAP, GatherRun, gatherExp, spawnNodes, type GatherNode } from './gather';
 import { genDarkStock } from './shopRules';
@@ -85,7 +86,9 @@ export class FieldScene implements Scene {
   private run: GatherRun | null = null;
   /** warp stone move list (menu 0x17): registered rows and the cursor */
   warpList: { rows: number[]; cur: number } | null = null;
-  popup: { p: Popup; onYes?: () => void; onNo?: () => void } | null = null;
+  popup: { p: Popup; onYes?: () => void; onNo?: () => void; onCancel?: () => void } | null = null;
+  /** a new day: the fortune popup 0x54 opens on the first field frame (FUN_0001a494 / FUN_000200b8) */
+  private fortunePending = false;
   /** save once the pending warp has loaded (garden entry) */
   private saveAfterWarp = false;
   /** shop kind requested by NPC talk (the play scene opens the shop screen) */
@@ -130,6 +133,21 @@ export class FieldScene implements Scene {
   private minimap: Minimap | null = null;
   /** warp kind 8: the warning banner before the gate boss starts (32 frames) */
   private bannerT = -1;
+  /** save slot of this play (account-wide day counter, book and reload prevention) */
+  slot = -1;
+  /** bind to a slot: account day counter and book, reload prevention (FUN_0001a494) */
+  bindSlot(slot: number): void {
+    this.slot = slot;
+    this.dayCounter = accountDay(slot, this.dayCounter);
+    this.story.book = accountBook(this.story.book);
+    if (this.story.fortuneDay !== today()) { this.story.fortuneDay = today(); this.fortunePending = true; }
+    for (const sub of takeUnsavedUses(slot)) {
+      const i = this.inv.items.findIndex((it) => it.type === 0x1b && it.sub === sub);
+      if (i >= 0) { const it = this.inv.items[i]; if (it.count > 1) it.count--; else this.inv.remove(i); }
+    }
+  }
+  /** a counted consumable (0x1b sub 2, 3, 0x15..0x17) was used */
+  countUse(sub: number): void { if (this.slot >= 0) countUnsavedUse(this.slot, sub); }
   /** previous file of this slot, for the partial save in the garden (FUN_0001eba8) */
   prevSave: () => SaveData | null = () => null;
   private gardenEntry: [number, number] = [0, 0];
@@ -284,6 +302,30 @@ export class FieldScene implements Scene {
     }
   }
 
+  /** popup 0x54: OK draws the fortune (FUN_00052610(1)), CLR gives up today's fortune; both save */
+  private openFortune(): void {
+    this.popup = { p: new Popup(this.ctx, 0x54), onYes: () => this.runFortune(), onCancel: () => this.autosave() };
+  }
+
+  private runFortune(): void {
+    const res = drawFortune(this.db.a, this.rng, this.model.level), t = this.db.a.text;
+    let ok = false, item: { name: string; icon: { image: string; sx: number; sy: number } } | null = null;
+    if (res) {
+      ok = this.inv.gain(res.type, res.sub, 0, res.count, this.rng);
+      if (ok) { const it = this.inv.items.find((x) => x.type === res.type && x.sub === res.sub); if (it) item = { name: it.name, icon: this.db.iconRect(it.icon) }; }
+      if (res.grade === 1) {                                         // 대길 counter +0x2e24 (max 30), titles 0x18 / 0x19
+        const c = this.story.counters, n = c.daegil = Math.min(30, (c.daegil ?? 0) + 1);
+        if (n >= 10) this.awardTitle(0x18);
+        if (n >= 30) this.awardTitle(0x19);
+      }
+    }
+    const p = new Popup(this.ctx, 0x55);
+    p.extra = (u) => drawFortuneResult(u, t, ok ? res : null, item);
+    p.hideBody = true;
+    this.popup = { p };
+    this.autosave();
+  }
+
   /** FUN_0004aa9c: title n (once), toast "칭호 '%s' 획득" (0x1B29, name 0xCFF + n) */
   awardTitle(n: number): void {
     if (this.story.titles.has(n)) return;
@@ -303,6 +345,7 @@ export class FieldScene implements Scene {
 
   /** Snapshot for the save slot. */
   toSave(): SaveData {
+    if (this.slot >= 0) { setAccountDay(this.slot, this.dayCounter); clearUnsavedUses(this.slot); saveAccount(); }
     const d = this.fullSave();
     if (this.gardenMode === 0) return d;
     // FUN_0001eba8 partial save: event bits, visited maps / regions, keys and doors keep the file's values
@@ -1202,6 +1245,7 @@ export class FieldScene implements Scene {
     if (it.sub >= 0x15 && it.sub <= 0x17) {                              // 차원의 문 only: every other buff off, slot sub + 7
       if (this.gardenMode !== 2) { this.hud.message(this.db.a.text[0x1ac2] ?? ''); return false; }
       this.buffs.clear(); this.buffs.start(it.sub + 7); this.recompute();
+      this.countUse(it.sub);
       this.hud.message((this.db.a.text[0x1ac0] ?? '%s').replace('%s', it.name));
       return this.consume(idx);
     }
@@ -1218,7 +1262,7 @@ export class FieldScene implements Scene {
       this.consume(idx); this.autosave(); return true;
     }
     switch (it.sub) {
-      case 2: v.hp = Math.min(st.maxHp, v.hp + (st.maxHp >> 1)); v.mp = Math.min(st.maxMp, v.mp + (st.maxMp >> 1)); break;
+      case 2: v.hp = Math.min(st.maxHp, v.hp + (st.maxHp >> 1)); v.mp = Math.min(st.maxMp, v.mp + (st.maxMp >> 1)); this.countUse(2); break;
       case 6: traitReset(); this.recompute(); break;                     // 특성 초기화
       case 0x20: traitBox(Math.max(1, it.level)); break;               // 특성 스킬 상자: points += item level (FUN_00040498 48232)
       case 4: case 5: case 7:
@@ -1475,7 +1519,8 @@ export class FieldScene implements Scene {
     if (this.busy || this.dead) return;
     if (this.popup) {
       const r = this.popup.p.handle(presses);
-      if (r) { const { onYes, onNo } = this.popup; this.popup = null; if (r === 'yes') onYes?.(); else onNo?.(); }
+      if (this.popup.onCancel && presses.includes(AVK.CLR)) { const c = this.popup.onCancel; this.popup = null; c(); return; }
+      if (r) { const { onYes, onNo } = this.popup; this.popup = null; if (r === 'yes' || r === 'ok') onYes?.(); else onNo?.(); }
       return;
     }
     if (this.warpList) { this.warpKeys(presses); return; }
@@ -1510,6 +1555,7 @@ export class FieldScene implements Scene {
     if (this.arriveT >= 0 && ++this.arriveT >= 18) this.arriveT = -1;
     this.dimTick();
     this.achTick();
+    if (this.fortunePending && !this.popup && !this.events.active && !this.talk) { this.fortunePending = false; this.openFortune(); }
     if (this.bannerT >= 0 && ++this.bannerT >= 32) this.bannerT = -1;
     this.checkRestPoint();
     this.hud.tick();

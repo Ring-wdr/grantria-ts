@@ -89,6 +89,8 @@ export class Story {
   /** achievement counters (+0x2df4 ...) and finished challenges (+0x2c64 flags) */
   counters: Record<string, number> = {};
   challenges = new Set<number>();
+  /** day of the last fortune (+0x3291; the web keeps YYYYMMDD) */
+  fortuneDay = 0;
   /** type 0x1d collection bits +0x3171 (keys 1..3, sage stones 5..7), opened chests +0x3292, opened doors +0x32a1,
    *  registered warp stones +0x31d5, gather level / exp +0x2ec0 / +0x2ebc */
   collect = new Set<number>();
@@ -125,7 +127,7 @@ export class Story {
   toJSON(): StorySave {
     const done: number[] = [];
     this.done.forEach((v, i) => { if (v) done.push(i); });
-    return { done, qs: Array.from(this.qs), active: this.active.map((a) => ({ ...a })), zones: [...this.zones], maps: [...this.maps], dimClears: this.dimClears, titles: [...this.titles], title: this.title, counters: { ...this.counters }, challenges: [...this.challenges], book: this.book,
+    return { done, qs: Array.from(this.qs), active: this.active.map((a) => ({ ...a })), zones: [...this.zones], maps: [...this.maps], dimClears: this.dimClears, titles: [...this.titles], title: this.title, counters: { ...this.counters }, challenges: [...this.challenges], fortuneDay: this.fortuneDay, book: this.book,
       collect: [...this.collect], chests: [...this.chests], doors: [...this.doors], stones: [...this.stones], gather: { ...this.gather } };
   }
   static from(d: StorySave | undefined, cls: number): Story {
@@ -141,6 +143,7 @@ export class Story {
     s.title = d.title ?? 0xff;
     s.counters = { ...(d.counters ?? {}) };
     for (const n of d.challenges ?? []) s.challenges.add(n);
+    s.fortuneDay = d.fortuneDay ?? 0;
     if (d.book) s.book = d.book.map((b) => (b ? { ...b } : null));
     for (const [k, v] of [['collect', d.collect], ['chests', d.chests], ['doors', d.doors], ['stones', d.stones]] as const) for (const x of v ?? []) s[k].add(x);
     if (d.gather) s.gather = { ...d.gather };
@@ -148,5 +151,5 @@ export class Story {
   }
 }
 
-export interface StorySave { done: number[]; qs: number[]; active: ActiveQuest[]; zones?: number[]; maps?: number[]; dimClears?: number; titles?: number[]; title?: number; counters?: Record<string, number>; challenges?: number[]; book?: ({ k: number; d: number; z: number } | null)[];
+export interface StorySave { done: number[]; qs: number[]; active: ActiveQuest[]; zones?: number[]; maps?: number[]; dimClears?: number; titles?: number[]; title?: number; counters?: Record<string, number>; challenges?: number[]; fortuneDay?: number; book?: ({ k: number; d: number; z: number } | null)[];
   collect?: number[]; chests?: number[]; doors?: number[]; stones?: number[]; gather?: { lv: number; exp: number }; }

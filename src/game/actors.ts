@@ -10,13 +10,15 @@ import type { Equip } from '../sprites';
 
 const FACING = [1, 1, 2, 0] as const;
 
-interface PoseRec { n: number; frame: number[]; step: number[]; event: number[] }
+interface PoseRec { n: number; frame: number[]; step: number[]; event: number[]; sound?: number[] }
 /** poses whose frame ignores the facing (capture minigame poses; FUN_00063ab4 / 63948 / 637dc) */
 const NO_FACING = [[15, 18], [13], [15]];
 
 export class EvActor {
   /** player action tables (d+0x186ac / 0x18ed4 / 0x1958c) and multipliers d+0x24b3a, set by the field scene */
   static poses: { actions: PoseRec[][]; mult: number[][] } = { actions: [], mult: [] };
+  /** pose frame events: ev 9..26 spawn effect type ev − 8 (FUN_00069528), sound ids (FUN_0001af90) */
+  static onPose: (a: EvActor, ev: number, sound: number) => void = () => {};
   dir: Dir = 3;
   lastH: 0 | 1 = 0;
   lastV: 2 | 3 = 3;
@@ -115,7 +117,7 @@ export class EvActor {
   setPose(n: number): void { this.pose = n; this.poseT = 0; this.poseHold = false; }
 
   /** FUN_00070b68: frame[t % N] + mult·FACING[dir], step moves, ev 4 / 1 end, ev 30 holds the last frame.
-   *  Effects of ev 9..26 and the sounds are not spawned [근사]. Returns false when there is no record. */
+   *  ev 9..26 spawn effects and the sound column plays (EvActor.onPose). Returns false when there is no record. */
   private poseFrame(): boolean {
     const rec = EvActor.poses.actions[this.cls]?.[this.pose - 1];
     if (!rec) { this.pose = 0; return false; }
@@ -125,6 +127,7 @@ export class EvActor {
     const mv = rec.step[i];
     if (mv) { if (this.dir < 2) this.x += this.lastH === 0 ? -mv : mv; else this.y += this.lastV === 2 ? -mv : mv; }
     const ev = rec.event[i];
+    if ((ev >= 9 && ev <= 26) || rec.sound?.[i]) EvActor.onPose(this, ev, rec.sound?.[i] ?? 0);
     if (ev === 4 || ev === 1) { this.pose = 0; return true; }
     if (ev === 30) this.poseHold = true;
     if (!this.poseHold) this.poseT++;

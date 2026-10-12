@@ -217,6 +217,13 @@ export class FieldScene implements Scene {
     this.player.actions = ctx.assets.tables.playerActions[save.cls];
     this.player.mult = ctx.assets.tables.actionMult[save.cls];
     EvActor.poses = { actions: ctx.assets.tables.playerActions, mult: ctx.assets.tables.actionMult };
+    EvActor.onPose = (a, ev, sound) => {                             // party pose effects / sounds in events
+      if (sound) this.ctx.audio.playSfx(sound);
+      if (ev >= 9 && ev <= 26 && this.projectiles.length < 60) {
+        const rec = this.projRecord(ev - 8);
+        this.projectiles.push(new Projectile(ev - 8, rec, { x: a.x, y: a.y, dir: a.dir, lastH: a.lastH, lastV: a.lastV }, this.sheets[rec.type] ?? this.player.cmf, 0, 0, 0));
+      }
+    };
     this.sdb = new StoryDb(ctx.assets);
     this.story = Story.from(save.story, save.cls);
     this.quests = this.makeQuests();
@@ -1529,6 +1536,8 @@ export class FieldScene implements Scene {
       if (this.events.active) {
         const w: MonsterWorld = { field: this.field, rng: this.rng, gtick: this.tick, px: this.player.x, py: this.player.y, playerBox: this.player.box(), playerAlive: true };
         for (const m of this.monsters) if (m instanceof Boss) m.eventTick(w, this.events.id, this.events.progress);
+        for (const p of this.projectiles) p.update([]);            // pose effects play out, they hit nothing in events
+        this.projectiles = this.projectiles.filter((p) => !p.gone);
       }
       return;
     }

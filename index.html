@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grantria Map Viewer</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; font-size: 14px; }
+      body { margin: 0; background: #111; color: #ddd; }
+      header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 8px 12px; background: #1c1c1c; border-bottom: 1px solid #333; position: sticky; top: 0; z-index: 1; }
+      header label { display: inline-flex; gap: 4px; align-items: center; }
+      header input[type=number] { width: 64px; }
+      #title { font-weight: 600; min-width: 180px; }
+      #info { color: #999; font-size: 12px; }
+      main { padding: 12px; display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+      canvas { image-rendering: pixelated; display: block; }
+      figure { margin: 0; }
+      figcaption { font-size: 12px; color: #aaa; margin-bottom: 4px; }
+      #status { font-size: 12px; color: #9c9; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <button id="prev">◀</button>
+      <label>맵 <input id="map" type="number" min="0" max="446" value="18" /></label>
+      <button id="next">▶</button>
+      <span id="title"></span>
+      <label>배율 <select id="zoom"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+      <span id="layers"></span>
+      <label><input id="player" type="checkbox" /> 플레이어</label>
+      <button id="compare">참조 이미지와 비교</button>
+      <span id="status"></span>
+      <span id="info"></span>
+    </header>
+    <main>
+      <figure><figcaption>three.js</figcaption><div id="view"></div></figure>
+      <figure id="diffFig" hidden><figcaption id="diffCap"></figcaption><div id="diff"></div></figure>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

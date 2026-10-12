@@ -1,0 +1,23 @@
+{
+  "name": "grantria-ts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "assets": "python -I tools/build_web_assets.py",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "ref": "python -I tools/build_ref_maps.py",
+    "fixtures": "python -I tools/grantria_shop.py --assets apk/assets --so apk/lib/armeabi/libGrantria.so --out tests/fixtures/shop",
+    "test": "node --import ./tests/register.mjs --test \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.170.0",
+    "typescript": "5.6.3",
+    "vite": "7.3.7"
+  }
+}

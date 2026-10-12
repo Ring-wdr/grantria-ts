@@ -1,0 +1,14 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+
+# generated from your own copy of the original game (never commit)
+public/assets/
+public/ref/
+work/
+tests/fixtures/
+apk/
+*.apk
+*.so
+*.dat

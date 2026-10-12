@@ -138,27 +138,27 @@ export class RankingScene implements Scene {
           u.string(playTime(sl.playTicks), 218, y + 46, 'right');
         }
       } else if (this.state === 0x36) {                               // FUN_00031a44
-        u.window(0, 0, 0xdc, 0xe8);
+        u.window(0, 0, 0xdc, 0xd4);
         u.textId(6617, 110, 5, 'center');
         u.button(158, 0, 62, 22, 3, 1); u.textId(this.mine ? 6639 : 6638, 189, 4, 'center'); u.hit(158, 0, 62, 22, () => [AVK.K0]);
         const pages = Math.max(1, Math.ceil(rows.length / 3));
         for (let i = 0; i < 3; i++) {
-          const e = rows[this.page * 3 + i], y = 30 + 62 * i;
-          u.window(4, y, 0xd4, 58);
-          if (i === this.sel) u.slotGlow(6, y + 2, 0xd0, 54, this.t);
-          u.hit(4, y, 0xd4, 58, () => { if (this.sel === i) return [AVK.OK]; this.sel = i; });
+          const e = rows[this.page * 3 + i], y = 26 + 56 * i;
+          u.window(4, y, 0xd4, 52);
+          if (i === this.sel) u.slotGlow(6, y + 2, 0xd0, 48, this.t);
+          u.hit(4, y, 0xd4, 52, () => { if (this.sel === i) return [AVK.OK]; this.sel = i; });
           if (!e) continue;
           u.textId(6727, 12, y + 6); u.number(this.page * 3 + i + 1, 50, y + 6, 1);
           u.textId(0x3e1 + e.cls, 80, y + 6);
           u.textId(6717, 150, y + 6); u.number(e.level, 165, y + 6, 1);
-          u.textId(6728, 12, y + 22); u.string(String(e.score), 208, y + 22, 'right', { pen: 0xffe0 });
-          u.textId(6729, 12, y + 38); u.string(String(e.dmg), 90, y + 38, 'right');
-          u.textId(6730, 110, y + 38); u.string(String(e.def), 200, y + 38, 'right');
+          u.textId(6728, 12, y + 21); u.string(String(e.score), 208, y + 21, 'right', { pen: 0xffe0 });
+          u.textId(6729, 12, y + 36); u.string(String(e.dmg), 90, y + 36, 'right');
+          u.textId(6730, 110, y + 36); u.string(String(e.def), 200, y + 36, 'right');
         }
-        u.string(`${this.page + 1}/${pages}`, 110, 226 - 50, 'center');
+        u.string(`${this.page + 1}/${pages}`, 110, 0xc2, 'center');
       } else {                                                        // FUN_0003177c
         const e = rows[this.page * 3 + this.sel];
-        u.window(0, 0, 0xdc, 0xe8);
+        u.window(0, 0, 0xdc, 0xd4);
         u.textId(6640, 110, 5, 'center');
         if (e) {
           u.textId(0x3e1 + e.cls, 15, 30); u.textId(6717, 150, 30); u.number(e.level, 165, 30, 1);

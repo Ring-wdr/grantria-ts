@@ -64,3 +64,16 @@ web/
 - 권한은 `src-tauri/capabilities/default.json`: 저장소, 열기·저장 대화상자, 대화상자로 고른 파일의 읽기·쓰기만 연다.
 - 배포 CSP는 `tauri.conf.json`에 있다. Tauri는 빌드할 때 `style-src`에 nonce를 넣는데, 그러면 `'unsafe-inline'`이 무시되어 DOM UI의 런타임 스타일시트와 인라인 스타일이 막힌다. 그래서 `dangerousDisableAssetCspModification: ["style-src"]`로 `style-src`만 손대지 않게 했다. 스크립트는 `'self'`만 허용한다.
 - Rust 크레이트(`tauri`, `tauri-plugin-*`)는 npm 패키지와 같은 버전으로 고정한다(`Cargo.toml`의 `=x.y.z`). minor가 어긋나면 `tauri dev`가 버전 불일치 오류를 낸다.
+
+## Android (APK)
+
+| 대상 | 명령 | 결과 |
+|---|---|---|
+| 디버그 APK (디버그 키 서명, 바로 설치 가능) | `npm run tauri:android:build -- --debug` | `src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk` |
+| 릴리스 APK | `npm run tauri:android:build` | `.../apk/universal/release/app-universal-release.apk` (`keystore.properties`가 있으면 서명, 없으면 미서명) |
+| 기기·에뮬레이터 실행 | `npm run tauri:android:dev` | 연결된 기기에 설치 후 개발 서버에 붙는다 |
+
+- 필요한 것: Android SDK·NDK(`NDK_HOME`, 예: `%LOCALAPPDATA%\Android\Sdk\ndk\28.2.13676358`), JDK 17 이상, Rust 타깃 `aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`. Windows에서는 Tauri가 빌드한 `.so`를 심볼릭 링크로 연결하므로 **개발자 모드**가 켜져 있어야 한다(설정 → 시스템 → 개발자용).
+- 일부 ABI만: `-- --target aarch64` (실기기), `--target x86_64` (에뮬레이터).
+- Android 프로젝트는 `src-tauri/gen/android`(커밋 대상). 가로 고정(`sensorLandscape`), 시스템 바 숨김(`MainActivity.kt`), 릴리스 서명은 `app/keystore.properties`(git 제외: `storeFile`, `storePassword`, `keyAlias`, `keyPassword`).
+- 화면은 2배 이상 정수 배율이 안 나오면(휴대폰 가로) 화면에 맞춰 소수 배율로 늘린다(`web/app.ts` `fit()`). 터치 입력은 원본 touchdata 영역 그대로다.

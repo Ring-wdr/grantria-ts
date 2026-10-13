@@ -112,9 +112,12 @@ canvas.addEventListener('pointermove', (e) => {
   canvas.style.cursor = button ? 'pointer' : '';
 });
 
-/** integer scale of the whole stage (canvas and UI layers together, so CSS blend modes reach the field) */
+/** scale of the whole stage (canvas and UI layers together, so CSS blend modes reach the field): whole numbers
+  *  keep the pixels even; below 2x (a phone in landscape) the stage is fitted to the screen instead */
 function fit(): void {
-  const s = Math.max(1, Math.floor(Math.min(innerWidth / VIEW_W, (innerHeight - 32) / VIEW_H)));
+  const reserve = debug.offsetParent ? 32 : 0;                   // the debug line above the stage, when shown
+  const fitS = Math.min(innerWidth / VIEW_W, (innerHeight - reserve) / VIEW_H);
+  const s = Math.floor(fitS) >= 2 ? Math.floor(fitS) : fitS;
   stage.style.transform = `scale(${s})`;
   stage.parentElement!.style.width = `${VIEW_W * s}px`;
   stage.parentElement!.style.height = `${VIEW_H * s}px`;

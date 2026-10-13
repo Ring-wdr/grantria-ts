@@ -297,13 +297,16 @@ export interface HitResult {
   miss: boolean;
   crit: boolean;
   dmg: number;
+  /** damage after the critical multiplier, before the class bonus and level scaling (the drain base) */
+  pre?: number;
 }
 
 /**
- * Player basic attack on a monster (FUN_0006d2f8, game-rules.md §3.1). The basic attack uses
- * ATK x (100 + basic attack %)/100; status-effect and drain options are not applied here.
+ * Player hit on a monster (FUN_0006d2f8, game-rules.md §3.1). The basic attack uses ATK x (100 + D54)/100;
+ * bonusPct is El's INT/10 % while the player is in action 1, applied after the critical multiplier.
+ * A stunned target (+0x5a) loses the dodge term.
  */
-export function playerHit(rng: Rng, p: { level: number; atk: number; acc: number; crit: number; critDmg: number; basicPct?: number },
+export function playerHit(rng: Rng, p: { level: number; atk: number; acc: number; crit: number; critDmg: number; basicPct?: number; bonusPct?: number },
   m: { level: number; stunned?: boolean }, skillBase?: number): HitResult {
   const diff = p.level - m.level;
   const acc = diff > 49 ? Math.min(p.acc, 70) : p.acc;
@@ -314,10 +317,12 @@ export function playerHit(rng: Rng, p: { level: number; atk: number; acc: number
   const crit = roll < 50 * diff + 100 * p.crit;
   let dmg = skillBase ?? idiv(p.atk * (100 + (p.basicPct ?? 0)), 100);
   if (crit) dmg = rdiv(dmg * (200 + p.critDmg), 100);
+  const pre = dmg;
+  if (p.bonusPct) dmg = rdiv((100 + p.bonusPct) * dmg, 100);
   const sq = m.level * m.level;
   dmg = rdiv(dmg * (sq > 51000 ? 30 : 80 - idiv(sq, 1000)), 100);
   dmg = rdiv(dmg * 90 + rng.rand(dmg * 20), 100);
-  return { miss: false, crit, dmg };
+  return { miss: false, crit, dmg, pre };
 }
 
 /** Monster attack on the player (FUN_0006f370, game-rules.md §3.3), normal monsters only. */

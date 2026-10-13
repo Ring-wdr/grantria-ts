@@ -234,6 +234,7 @@
   background: conic-gradient(rgba(0, 0, 0, 0.62) calc(var(--cd) * 1turn), transparent 0);
   transition: none;
 }
+.t-nomp { border-radius: 50%; backdrop-filter: grayscale(1) brightness(0.7); background: rgba(0, 0, 0, 0.25); }
 .t-count {
   text-align: right;
   font-size: 10px;

@@ -7,7 +7,7 @@ import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
 import { QUICK_KEYS, slotPickerKey } from './keys';
 import type { Item } from './items';
-import { Popup } from './popup';
+import { Popup, QtyPopup } from './popup';
 import { buyBag, coupons } from './community';
 import { josa, ShopScreen } from './shop';
 import { cfmt } from './skillDetail';
@@ -178,6 +178,8 @@ export class InventoryTab {
   private detail: Item | null = null;
   private quick: { cur: number; idx: number } | null = null;
   private confirm: { popup: Popup; idx: number; yes?: () => void } | null = null;
+  /** drop quantity popup 0x0C for a stack (FUN_0005e23c case 4), then 0xB for that many */
+  private qty: { popup: QtyPopup; idx: number } | null = null;
   private message: Popup | null = null;
   /** popup 0x7D (bag expansion without coupons) confirmed: the menu opens the coupon shop */
   toCoupons = false;
@@ -188,7 +190,7 @@ export class InventoryTab {
 
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
-  get busy(): boolean { return !!(this.action || this.detail || this.quick || this.confirm || this.message || this.shop); }
+  get busy(): boolean { return !!(this.action || this.detail || this.quick || this.confirm || this.qty || this.message || this.shop); }
   /** the quick-slot picker is open (its slot keys must not page the menu) */
   get picking(): boolean { return !!this.quick; }
 
@@ -201,6 +203,24 @@ export class InventoryTab {
     if (this.shop) { if (this.shop.update(presses) === 'close') { this.shop = null; this.fs.recompute(); } return true; }
     if (this.message) {
       if (this.message.handle(presses)) { if (this.message.id === 0x7d) this.toCoupons = true; this.message = null; }   // 쿠폰 부족 → 쿠폰 구매
+      return true;
+    }
+    if (this.qty) {
+      const q = this.qty, r = q.popup.handle(presses), it = inv.items[q.idx];
+      if (r === 'cancel') this.qty = null;
+      else if (r === 'ok' && it) {                                     // FUN_0005f4f8: 0 -> 0x0D, more than held -> 0x58, else 0xB
+        const n = q.popup.qty;
+        if (n === 0) this.message = new Popup(this.ctx, 0x0d);
+        else if (it.count < n) this.message = new Popup(this.ctx, 0x58);
+        else {
+          this.qty = null;
+          this.confirm = { popup: new Popup(this.ctx, 0xb), idx: q.idx, yes: () => {
+            if (it.count > n) it.count -= n; else inv.remove(q.idx);
+            inv.remapQuick();
+            this.fs.recompute();
+          } };
+        }
+      }
       return true;
     }
     if (this.confirm) {
@@ -301,7 +321,10 @@ export class InventoryTab {
       if (!inv.usable(it, this.fs.model.level, this.fs.model.cls)) this.message = new Popup(this.ctx, 0x2b);
       else { inv.equipFrom(idx); this.fs.recompute(); }
     } else if (action === ACTION.QUICK) this.quick = { cur: Math.max(0, inv.quick.findIndex((q) => q.kind === 0)), idx };
-    else if (action === ACTION.DROP) this.confirm = { popup: new Popup(this.ctx, 0xb), idx };
+    else if (action === ACTION.DROP) {
+      if (this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18) this.qty = { popup: new QtyPopup(this.ctx, it.count), idx };
+      else this.confirm = { popup: new Popup(this.ctx, 0xb), idx };
+    }
   }
 
   /** '0' in the detail: gem list (FUN_000441e4) when an empty socket exists */
@@ -492,6 +515,7 @@ export class InventoryTab {
 
   drawPopups(): void {
     if (this.shop) { this.shop.drawOverlay(); return; }
+    if (this.qty && !this.message) this.qty.popup.draw();
     (this.message ?? this.confirm?.popup)?.draw();
   }
 }

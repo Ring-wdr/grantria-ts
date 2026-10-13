@@ -1,7 +1,7 @@
 // Game menu (state 0x1C, FUN_0005929c) and tab screens (0x1D..0x24, frame FUN_00059600, tab bar
 // FUN_0004b9dc, character page 0 FUN_0005c560), drawn on the 1.3x layer L1
 // (analysis/features/ui-screens.md §0.8–0.10, tools/grantria_ui.py screen_gamemenu / tab_frame /
-// screen_tab_char). Tab bodies other than character page 0 are placeholders until ui-tabs.md.
+// screen_tab_char). Tab bodies live in tabs.ts, skillTab.ts, questTab.ts, mapTab.ts, optionTab.ts and community.ts.
 import { cmfImages } from '../sprites';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
@@ -18,6 +18,7 @@ import { QuestTab } from './questTab';
 import { MapTab } from './mapTab';
 import { CommunityTab } from './community';
 import type { Ui } from './ui';
+import { Popup } from './popup';
 import { button, cSprite, gt, h, menuList, padBadge, slot, sprite, win, type VChild, type VNode } from './view';
 
 const STAT_HELP = [0x1a18, 0x1a19, 0x1a1a, 0x1a1b, 0x1a1c];
@@ -39,6 +40,10 @@ export class GameMenu {
   private collCur = 0;
   /** character page 0 d-pad focus: the stat grid, the title box above it ('0') or 퀵슬롯해제 to its right ('7') */
   private charFocus: 'stats' | 'title' | 'release' = 'stats';
+  /** stats and points before the first point spent here (DAT_0041596c / DAT_003b3c7e, flag DAT_003b3c7c) */
+  private statBackup: { stats: number[]; points: number } | null = null;
+  /** popup 0x73 "설정한 스탯을 저장하시겠습니까?" and the key or tab it was raised by (DAT_003b3c78) */
+  private statAsk: { p: Popup; replay: () => void } | null = null;
 
   private inventory: InventoryTab;
   private equipment: EquipTab;
@@ -88,6 +93,17 @@ export class GameMenu {
       }
       return null;
     }
+    if (this.statAsk) {                                                // FUN_0005e23c popup 0x73: yes keeps, no restores; then the key runs
+      const r = this.statAsk.p.handle(presses);
+      if (r) {
+        const b = this.statBackup!, replay = this.statAsk.replay;
+        if (r === 'no') { this.field.model.stats.splice(0, 4, ...b.stats); this.field.statPoints = b.points; this.field.recompute(); }
+        this.statBackup = null;
+        this.statAsk = null;
+        replay();
+      }
+      return null;
+    }
     if (paging) {
       // from anywhere inside a tab, sub screens and popups included: those are dropped
       for (const k of presses) if (k === AVK.TAB_L || k === AVK.TAB_R) this.goTab((this.type + (k === AVK.TAB_L ? 7 : 1)) & 7);
@@ -116,16 +132,26 @@ export class GameMenu {
       return null;
     }
     for (const k of presses) {
-      if (k === AVK.K1) { this.type = (this.type + 7) & 7; this.page = 0; }      // FUN_00056198
-      else if (k === AVK.K3) { this.type = (this.type + 1) & 7; this.page = 0; }
-      else if (k === AVK.STAR) { this.page = (this.page + this.pages() - 1) % this.pages(); this.collCur = 0; }
-      else if (k === AVK.POUND) { this.page = (this.page + 1) % this.pages(); this.collCur = 0; }
-      else if (k === AVK.CLR) { this.inTab = false; }
-      else if (this.type === 0 && this.page === 0) this.charKey(k);
-      else if (this.type === 0 && this.page >= 3) this.collectKey(k);
+      // FUN_000573c8: after a point was spent, any key but '5' on the stats and the arrows asks first
+      const statKey = k === AVK.UP || k === AVK.DOWN || k === AVK.LEFT || k === AVK.RIGHT || (k === AVK.OK && this.charFocus === 'stats');
+      if (this.statBackup && this.type === 0 && this.page === 0 && !statKey) {
+        this.statAsk = { p: new Popup(this.ctx, 0x73), replay: () => this.tabKey(k) };
+        break;
+      }
+      this.tabKey(k);
     }
     if (this.type !== 5 || !this.inTab) this.map.leaveFloor();
     return null;
+  }
+
+  private tabKey(k: number): void {
+    if (k === AVK.K1) { this.type = (this.type + 7) & 7; this.page = 0; }      // FUN_00056198
+    else if (k === AVK.K3) { this.type = (this.type + 1) & 7; this.page = 0; }
+    else if (k === AVK.STAR) { this.page = (this.page + this.pages() - 1) % this.pages(); this.collCur = 0; }
+    else if (k === AVK.POUND) { this.page = (this.page + 1) % this.pages(); this.collCur = 0; }
+    else if (k === AVK.CLR) { this.inTab = false; }
+    else if (this.type === 0 && this.page === 0) this.charKey(k);
+    else if (this.type === 0 && this.page >= 3) this.collectKey(k);
   }
 
   /** inventory bag expansion short of coupons (popup 0x7D confirmed) -> the coupon shop of the community tab */
@@ -147,6 +173,7 @@ export class GameMenu {
   /** L1 / R1 or a tab click: go to tab `type` from anywhere; a tab left in a sub screen or popup starts fresh */
   private goTab(type: number): void {
     if (type === this.type) return;
+    if (this.statBackup && this.statAsk === null) { this.statAsk = { p: new Popup(this.ctx, 0x73), replay: () => this.goTab(type) }; return; }   // FUN_000425bc
     const ctx = this.ctx, fs = this.field;
     if (this.body?.busy) {
       if (this.type === 1) { this.inventory = new InventoryTab(ctx, fs); fs.recompute(); }
@@ -213,7 +240,7 @@ export class GameMenu {
   }
 
   /**
-   * Character page 0: 2x2 stat buttons, '5' spends a stat point (applied at once here); '0' title list,
+   * Character page 0: 2x2 stat buttons, '5' spends a stat point (popup 0x73 before leaving keeps or restores them); '0' title list,
    * '7' 퀵슬롯해제. A pad has no '0' and its '7' (L1) pages the tabs, so the d-pad also walks to the
    * title box (UP from the top stat row) and the 퀵슬롯해제 button (RIGHT from the right column), OK opens them.
    */
@@ -238,6 +265,7 @@ export class GameMenu {
     else if (k === AVK.LEFT || k === AVK.RIGHT) this.statCur ^= 1;
     else if (k === AVK.UP || k === AVK.DOWN) this.statCur ^= 2;
     else if (k === AVK.OK && this.field.statPoints > 0) {
+      this.statBackup ??= { stats: this.field.model.stats.slice(0, 4), points: this.field.statPoints };
       this.field.model.stats[this.statCur]++;
       this.field.statPoints--;
       this.field.recompute();
@@ -247,6 +275,7 @@ export class GameMenu {
   drawOverlay(): void {
     const u = this.ctx.ui13;
     if (this.inTab) this.drawTab(u); else this.drawRing(u);
+    this.statAsk?.p.draw();
   }
 
   private drawRing(u: Ui): void {

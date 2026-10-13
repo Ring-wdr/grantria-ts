@@ -361,7 +361,7 @@ export abstract class Ui {
    * computed right edge. align 0 left (x += width), 1 centre (x += width/2), 2 right. The width
    * function (FUN_0004907c) only knows styles 0 and 1, as in the original.
    */
-  number(value: number, x: number, y: number, style = 0, align = 0, minDigits = 0, p7 = 0): void {
+  number(value: number, x: number, y: number, style = 0, align = 0, minDigits = 0, p7 = 0, fx?: SpriteFx): void {
     const st = NUMBER_STYLES[style];
     if (!st) return;
     let v = Math.abs(Math.trunc(value));
@@ -374,10 +374,13 @@ export abstract class Ui {
     for (let i = 0; i < digits; i++) {
       cx -= st.step;
       const d = v % 10;
-      this.image(st.img, st.sx(d), st.sy(d), st.w, st.h, cx, y, (scale - 1) << 4);
+      this.image(st.img, st.sx(d), st.sy(d), st.w, st.h, cx, y, (scale - 1) << 4, fx);
       v = Math.trunc(v / 10);
     }
   }
+
+  /** one digit centred on x (FUN_00078af4 with align 1), as the per-digit damage numbers draw it */
+  numberGlyph(d: number, x: number, y: number, style: number, fx?: SpriteFx): void { this.number(d, x, y, style, 1, 0, 0, fx); }
 }
 
 /** WebGL backend: quads in painter's order through the compositor (world-space effects). */

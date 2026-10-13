@@ -23,6 +23,11 @@ export class Buffs {
   isOn(i: number): boolean { return this.slots[i]?.on ?? false; }
   start(i: number): void { this.slots[i] = { t: 0, on: true }; this.aura = i; }
   clear(): void { for (const s of this.slots) { s.on = false; s.t = 0; } this.aura = -1; }
+  /** 0x1b sub 0x15..0x17: only the active flags of slots 0..31 go off (timers stay); 32..34 (특) keep running */
+  clearNormal(): void {
+    this.slots.forEach((s, i) => { if (i < 32 && s) s.on = false; });
+    if (this.aura >= 0 && this.aura < 32) this.aura = -1;
+  }
 
   /** FUN_0002c99c: one field frame; returns true when a buff ran out (stats must be rebuilt) */
   tick(a: Assets): boolean {

@@ -1,7 +1,7 @@
 // Popup (FUN_0005f948 + FUN_0005f4f8) on the 1.3x layer L1 (analysis/features/ui-screens.md §0.6).
 import { VIEW_H as H, VIEW_W as W } from './field';
 import { AVK } from './input';
-import { button, gt, h, type VChild } from './view';
+import { button, gt, h, sprite, type VChild } from './view';
 import type { GameContext } from './scene';
 
 /** Popup (FUN_0005f948 + FUN_0005f4f8) on the 1.3x layer: definition d.dat 0x4009d7 + id*6. */
@@ -73,3 +73,35 @@ export class Popup {
   }
 }
 
+
+/** Quantity popup 0x0C (type 7, as in shop.ts): ◀ ▶ ±1 (wrapping), +100 / -100, OK; CLR cancels. */
+export class QtyPopup {
+  qty = 0;
+  private readonly serial = ++serial;
+  constructor(private ctx: GameContext, readonly max: number) {}
+  handle(presses: number[]): 'ok' | 'cancel' | null {
+    for (const k of presses) {
+      if (k === AVK.RIGHT) this.qty = (this.qty + 1) % (this.max + 1);
+      else if (k === AVK.LEFT) this.qty = (this.qty + this.max) % (this.max + 1);
+      else if (k === AVK.UP) this.qty = Math.min(this.qty + 100, this.max);
+      else if (k === AVK.DOWN) this.qty = this.qty < 100 ? 0 : this.qty - 100;
+      else if (k === AVK.CLR) return 'cancel';
+      else if (k === AVK.OK) return 'ok';
+    }
+    return null;
+  }
+  draw(): void {
+    const t = this.ctx.assets.text;
+    const step = (label: number, key: number) => h('span.shop-step', { on: () => [key] }, `${t[label] ?? ''}100`);
+    const arrow = (right: boolean, key: number) => h('span.shop-arrow', { on: () => [key] }, sprite('t', 0, 19, 15, 19, { flip: right }));
+    this.ctx.ui13.view(`qty${this.serial}`, 0, 0, W, H, h('div.v-modal', { on: () => [] },
+      h('div.v-popup.v-pop-fade.v-row.shop-qty', null,
+        arrow(false, AVK.LEFT),
+        h('div.v-col.v-center.shop-qty-mid', null,
+          step(0x55, AVK.UP),
+          h('div.v-row.shop-qty-value', null, h('span.shop-label', null, t[0x52] ?? ''), h('span.shop-num', null, String(this.qty).padStart(4, '0'))),
+          step(0x56, AVK.DOWN)),
+        arrow(true, AVK.RIGHT),
+        button(gt(t[0x1a00] ?? ''), { sel: true, on: () => [AVK.OK], cls: 'shop-btn shop-qty-ok' }))));
+  }
+}

@@ -195,13 +195,15 @@ export class Monster {
   }
 
   /** Called by the player's hit (FUN_0006e120): hurt or knockback away from the attacker. */
-  onHit(attackerDir: Dir, knockback: boolean): void {
+  /** keepFacing: El's basic projectile leaves the facing and pushes the target backwards (FUN_00060d10). */
+  onHit(attackerDir: Dir, knockback: boolean, keepFacing = false): void {
     this.tint = 16;
     if (this.hp <= 0) { this.die(); return; }
     if (this.stun > 0) return;                                   // no hurt / knockback while stunned (combat.md §3.2)
     this.state = knockback ? 7 : 6;
     this.hurtTable = knockback ? KNOCK_STEPS : HURT_STEPS;
     this.hurt = 0;
+    if (keepFacing) { this.pushDir = (this.dir ^ 1) as Dir; return; }
     this.pushDir = attackerDir;
     this.setDir((attackerDir ^ 1) as Dir);                     // face the attacker
   }

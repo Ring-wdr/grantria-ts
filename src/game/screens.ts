@@ -466,11 +466,16 @@ export class PlayScene implements Scene {
         else if (k === AVK.OK) {
           if (this.overSel === 0 && f.dim) {                   // 차원의 문 나가기 (0x19E8): result popup, then reload
             this.overPopup = { p: f.dimResult(), then: () => { f.dead = false; f.leaveDimension(); } };
-          } else if (this.overSel === 0) {                      // 이어하기: reload the last save
-            const s = loadSlot(this.slot);
-            if (s) void PlayScene.start(this.ctx, this.slot, s);
-            else this.ctx.go(new TitleScene(this.ctx));
-          } else if (this.overSel === 2) this.ctx.go(new TitleScene(this.ctx));
+          } else if (this.overSel === 0) {                      // 이어하기: popup 0x1B, then reload the last save (none: popup 0x4F)
+            this.overPopup = { p: new Popup(this.ctx, 0x1b), then: (r) => {
+              if (r !== 'yes') return;
+              const s = loadSlot(this.slot);
+              if (s) void PlayScene.start(this.ctx, this.slot, s);
+              else this.overPopup = { p: new Popup(this.ctx, 0x4f) };
+            } };
+          } else if (this.overSel === 2) {                      // 타이틀화면으로: popup 10 first
+            this.overPopup = { p: new Popup(this.ctx, 10), then: (r) => { if (r === 'yes') this.ctx.go(new TitleScene(this.ctx)); } };
+          }
           else this.reviveChoice();
         }
       }

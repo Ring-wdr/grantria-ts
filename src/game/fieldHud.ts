@@ -27,10 +27,14 @@ export interface HudState {
   dimGate?: boolean;
   /** quick slots '1','3','7','9','*','#': skill, item (icon + count, -1 = no count) or empty */
   slots: (SlotView | null)[];
+  /** target panel (FUN_00025a88): DAT_003b3c49 or the monster just hit; ghost = trailing bar width or -1 */
+  target?: { name: string; level: number; hp: number; maxHp: number; ghost: number } | null;
+  /** HIT counter DAT_003b61c8: hits and the display timer */
+  hits?: { count: number; timer: number };
 }
 
 export type SlotView =
-  | { skill: number; cd: number; maxCd: number }
+  | { skill: number; cd: number; maxCd: number; noMp?: boolean }
   | { icon: { image: string; sx: number; sy: number }; count: number; cd: number; maxCd: number };
 
 /** Touch zones of the field screen (touchdata.dat state 0x10, game-flow-ui.md §5.2). */
@@ -63,7 +67,11 @@ const escapeHtml = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(
 
 /** World-space combat text. */
 interface FloatText {
-  kind: 'damage' | 'hurt' | 'miss' | 'crit' | 'label';
+  kind: 'damage' | 'pop' | 'miss' | 'crit' | 'extra' | 'label';
+  /** 'pop': red (the player was hit) */
+  red?: boolean;
+  /** damage numbers: the object they belong to (a new one pushes the older ones away) */
+  owner?: object;
   value: number;
   text: string;
   x: number;
@@ -71,7 +79,9 @@ interface FloatText {
   age: number;
 }
 
-const DAMAGE_ALPHA = [16, 32, 32, 32, 32, 16, 16];   // kind 2 (d+0x24d7a first bytes as alpha)
+/** d+0x24d7a (byte pairs): kind 2 reads them as (alpha, style) at 11 - c, kind 1 as (dy, style) per digit */
+const NUM_T: [number, number][] = [[0, 8], [-16, 8], [4, 7], [1, 7], [16, 9], [32, 10], [32, 10], [32, 10], [32, 9], [16, 9], [16, 9]];
+const popDigits = (v: number) => String(Math.abs(Math.trunc(v))).length;
 
 export class FieldHud {
   private frame = 0;
@@ -90,13 +100,26 @@ export class FieldHud {
     this.frame++;
     if (this.slide < 32) this.slide = Math.min(32, this.slide + 2);
     for (const f of this.floats) f.age++;
-    this.floats = this.floats.filter((f) => f.age < (f.kind === 'label' ? 30 : 12));
+    this.floats = this.floats.filter((f) => f.age < (f.kind === 'label' ? 30 : f.kind === 'damage' ? 7 : f.kind === 'pop' ? 9 : 12));
     for (const m of this.messages) m.age++;
     this.messages = this.messages.filter((m) => m.age < 60);
   }
 
-  damage(value: number, x: number, y: number): void { this.floats.push({ kind: 'damage', value, text: '', x, y, age: 0 }); }
-  hurt(value: number, x: number, y: number): void { this.floats.push({ kind: 'hurt', value, text: '', x, y, age: 0 }); }
+  /** FUN_00022090 kind 2: the whole number at once, 2x size (crit / EXTRA / second hits) */
+  damage(value: number, x: number, y: number, owner?: object): void { this.push({ kind: 'damage', value, text: '', x, y, age: 0, owner }); }
+  /** FUN_00022090: the owner's earlier numbers move by (c − 8, c − 16), c = what is left of their counter */
+  private push(f: FloatText): void {
+    if (f.owner) for (const o of this.floats) {
+      if (o.owner !== f.owner || (o.kind !== 'damage' && o.kind !== 'pop')) continue;
+      const c = o.kind === 'damage' ? 7 - o.age : popDigits(o.value) * 4 - o.age;
+      o.x += c - 8; o.y += c - 16;
+    }
+    this.floats.push(f);
+  }
+  /** FUN_00022090 kind 1: digits pop out one by one (normal hits); red when the player is hit */
+  pop(value: number, x: number, y: number, red = false, owner?: object): void { this.push({ kind: 'pop', value, text: '', x, y, age: 0, red, owner }); }
+  hurt(value: number, x: number, y: number, owner?: object): void { this.pop(value, x, y, true, owner); }
+  extra(x: number, y: number): void { this.floats.push({ kind: 'extra', value: 0, text: '', x, y, age: 0 }); }
   miss(x: number, y: number): void { this.floats.push({ kind: 'miss', value: 0, text: '', x, y, age: 0 }); }
   crit(x: number, y: number): void { this.floats.push({ kind: 'crit', value: 0, text: '', x, y, age: 0 }); }
   label(text: string, x: number, y: number): void { this.floats.push({ kind: 'label', value: 0, text, x, y, age: 0 }); }
@@ -122,10 +145,46 @@ export class FieldHud {
     const u = this.ui;
     if (s.mapId !== this.lastMap) { this.lastMap = s.mapId; this.slide = -33; }
     this.drawFloats(camX, camY);
+    if (s.target) this.targetPanel(s.target);
+    if (s.hits?.count) this.hitCounter(s.hits.count, s.hits.timer);
     this.statusBar(s);
     this.floorName(s.mapId);
     if (buttons) this.touchButtons(s);
     this.drawMessages();
+    u.alpha = 32;
+  }
+
+  /** FUN_00025a88: translucent c.pxl plate top right, name, "Lv" and level, HP bar 60 wide with its trailing ghost */
+  private targetPanel(t: NonNullable<HudState['target']>): void {
+    const u = this.ui;
+    u.alpha = 16;
+    u.image('c', 0x31, 0x8a, 0x29, 0x15, W - 0x5b, 2, 1);
+    u.image('c', 0x31, 0x8a, 8, 0x15, W - 0x32, 2);
+    u.image('c', 0x31, 0x8a, 0x29, 0x15, W - 0x2a, 2);
+    u.image('c', 0x31, 0xa3, 0x29, 5, W - 0x5b, 0x17, 1);
+    u.image('c', 0x31, 0xa3, 8, 5, W - 0x32, 0x17);
+    u.image('c', 0x31, 0xa3, 0x29, 5, W - 0x2a, 0x17);
+    u.alpha = 32;
+    u.string(t.name, W - 0x59, 4, 'left');
+    u.image('c', 0x3c, 0x1c, 0xe, 8, W - 0x5a, 0x11);
+    u.number(t.level, W - 0x4c, 0x12, 0, 0, 3);
+    u.image('c', 0x90, 0xb6, 0x3c, 6, W - 0x3e, 0x13);
+    if (t.ghost > 0) { u.alpha = 16; u.image('c', 0x90, 0xb0, t.ghost, 6, W - 0x3e, 0x13); u.alpha = 32; }
+    const w = Math.trunc((t.hp * 0x3c) / Math.max(1, t.maxHp));
+    if (w > 0) u.image('c', 0x90, 0xb0, w, 6, W - 0x3e, 0x13);
+  }
+
+  /** FUN_00029604 HIT counter: digits pop in like kind 1 numbers at the right edge, "HIT" (t.pxl 0,55) */
+  private hitCounter(count: number, timer: number): void {
+    const u = this.ui, s = String(count), n = s.length;
+    u.alpha = timer === 0 ? 8 : timer === 1 ? 12 : timer === 2 ? 16 : 32;
+    for (let i = 0; i < n; i++) {
+      const idx = Math.min(timer - i, 3);
+      if (idx < 0) break;
+      const d = +s[i], [dy, st] = NUM_T[idx];
+      u.numberGlyph(d, W - 0x22 - 12 * n + 12 * i + (d === 1 ? 2 : 0), dy + (H >> 1), st);
+    }
+    u.image('t', 0, 0x37, 0x1e, 0x12, W - 0x24, (H >> 1) - 1);
     u.alpha = 32;
   }
 
@@ -205,6 +264,7 @@ export class FieldHud {
           u.image(v.icon.image, v.icon.sx, v.icon.sy, 0x10, 0x10, x - 8, y - 9);   // FUN_0003bc80
           if (v.count >= 0) u.el('t-count', x - 14, y + 5, 28, 10, { text: String(v.count) });
         }
+        if ('skill' in v && v.noMp) u.el('t-nomp', x - 19, y - 19, 38, 38);   // FUN_00029108: MP below the cost -> greyed
         // cooldown (FUN_00029108 shrinking grey): a clockwise sweep over the ring
         if (v.cd > 0) u.el('t-cd', x - 19, y - 19, 38, 38, { vars: { '--cd': (Math.min(1, v.cd / Math.max(1, v.maxCd))).toFixed(3) } });
       }
@@ -241,16 +301,29 @@ export class FieldHud {
     const u = this.ui;
     for (const f of this.floats) {
       const x = f.x - camX, y = f.y - camY;
-      if (f.kind === 'damage') {
-        u.alpha = DAMAGE_ALPHA[Math.min(f.age, DAMAGE_ALPHA.length - 1)];
-        u.number(f.value, x, y - Math.min(f.age, 4) * 2, 9, 1);
-      } else if (f.kind === 'hurt') {
-        u.alpha = f.age > 8 ? 16 : 32;
-        u.number(f.value, x + 8, y - f.age, 6, 1);
+      if (f.kind === 'damage') {                            // style / alpha from NUM_T[11 - c], c = 7..1
+        const [a, st] = NUM_T[Math.min(4 + f.age, 10)];
+        u.alpha = a;
+        u.number(f.value, x, y, st, 1);
+      } else if (f.kind === 'pop') {                         // FUN_00029604 kind 1: digit i at idx min(age - i, 3)
+        const n = popDigits(f.value), s = String(Math.abs(Math.trunc(f.value)));
+        const fx = f.red ? { tint: [255, 0, 0] as [number, number, number], amount: 10 } : undefined;
+        for (let i = 0; i < n; i++) {
+          let idx = f.age - i;
+          if (idx < 0) break;
+          if (idx > 3) idx = 3;
+          const d = +s[i], [dy, st] = NUM_T[idx];
+          u.alpha = f.age === 7 ? 16 : 32;
+          u.numberGlyph(d, x - 12 * n + 12 * i + (d === 1 ? 2 : 0), y + dy, st, fx);
+        }
       } else if (f.kind === 'miss') {                       // frames 157..161: dy -9, -23, -26, -29, -31
         const dy = [-9, -23, -26, -29, -31][Math.min(4, f.age >> 1)];
         u.alpha = f.age > 9 ? 16 : 32;
         u.image('t', 139, 53, 43, 18, x - 20, y + dy);
+      } else if (f.kind === 'extra') {                      // frames 162..166, as MISS
+        const dy = [-9, -23, -26, -29, -31][Math.min(4, f.age >> 1)];
+        u.alpha = f.age > 9 ? 16 : 32;
+        u.image('t', 139, 71, 56, 18, x - 26, y + dy);
       } else if (f.kind === 'crit') {                       // frames 151..156, ghosts at +-10 on 151/156
         u.alpha = f.age > 9 ? 16 : 32;
         if (f.age < 2 || f.age >= 10) {

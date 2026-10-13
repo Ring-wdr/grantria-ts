@@ -11,7 +11,7 @@ import { Dialogue, drawCaption } from './dialogue';
 import { AVK } from './input';
 import type { Ui } from './ui';
 import { button, h, padBadge } from './view';
-import type { EvActor } from './actors';
+import { EvActor } from './actors';
 
 const W = 480, H = 320;
 export const PLAYER_ARG = 299;
@@ -364,6 +364,7 @@ export class EventRunner {
         break;
       }
       case 0x1c: { const a = this.actor(arg); if (a.party) a.setPose(1); break; }   // ATTACK: basic attack pose
+      case 0x1b: EvActor.freeze = arg === 0 ? -1 : arg; break;  // ANIM_FREEZE
       case 0x1d:                                               // CAPTION
         if (this.id === 0x6a) {                                // staff roll: [4,9,7,11,8,11,1] consecutive text ids
           const L = [4, 9, 7, 11, 8, 11, 1][++this.capIdx] ?? 1, lines: string[] = [];
@@ -379,6 +380,7 @@ export class EventRunner {
       case 0x26:                                               // FX_RESET
         this.grey = false; this.fill = 0; this.camTarget = this.camTarget ?? fs.lead; this.camCell = null;   // the darkness step stays
         for (const a of [fs.lead!, ...fs.actors]) { a.pose = 0; a.anim = -1; a.speed = 5; }
+        EvActor.freeze = -1;
         break;
       case 0x27: if (!fast) { this.waitUntil = performance.now() + arg; this.wait = 0x15; } break;
       case 0x28: break;                                        // REDRAW_BG

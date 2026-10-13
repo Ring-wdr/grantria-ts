@@ -319,6 +319,18 @@ export class Inventory {
     return true;
   }
 
+  /** whether gain() would take the item without a new slot or with room left (FUN_0003632c, for FUN_0001c5cc) */
+  canGain(type: number, sub: number, grade: number, count: number): boolean {
+    if (type === 0x1d || type === 0x1c) return true;
+    if (type === 0x1b && UNLOCK_1B.indexOf(sub as never) >= 0) return true;
+    if (type === 0x1a) return this.keys.length < 17;
+    if (this.db.stackable(type, sub)) {
+      const it = this.items.find((i) => i.type === type && i.sub === sub && i.grade === grade);
+      if (it) return it.count + count <= MAX_STACK;
+    }
+    return this.items.length < this.cap;
+  }
+
   private logGot(it: Item, count: number): void {
     const text = this.db.a.text;
     const name = it.name;

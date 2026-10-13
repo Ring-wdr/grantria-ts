@@ -16,13 +16,14 @@ import { GATHER_CAP, GatherRun, gatherExp, spawnNodes, type GatherNode } from '.
 import { genDarkStock } from './shopRules';
 import type { Item } from './items';
 import { EvActor } from './actors';
+import { pickGuide, type Guide } from './guide';
 import { Dialogue } from './dialogue';
 import { EventRunner } from './events';
 import { Popup } from './popup';
 import { QuestLog } from './quests';
 import { Story, StoryDb } from './story';
 import { Field, VIEW_H, VIEW_W, type Drawable } from './field';
-import { FIELD_ZONES, FieldHud } from './fieldHud';
+import { FIELD_ZONES, FieldHud, type HudState } from './fieldHud';
 import { GlUi } from './ui';
 import { button, gt, win } from './view';
 import type { DomUi } from './domUi';
@@ -34,7 +35,7 @@ import { Boss, BossGlobals, MonsterShot, bossDeathEvent, summonStats, type BoxTa
 import { Projectile, type ProjRecord } from './projectiles';
 import { skillMaxCd, skillRec } from './skillTab';
 import { Player, type Blockers, type Dir, type Rect } from './player';
-import { CLASSES, MAX_LEVEL, Rng, derive, effectiveSkillLevel, expNeed, idiv, killExp, monsterHit, playerHit, rdiv, skillBaseDamage, type Derived, type EquipTables, type PlayerModel } from './rules';
+import { CLASSES, MAX_LEVEL, Rng, cdiv, derive, effectiveSkillLevel, expNeed, idiv, killExp, monsterHit, playerHit, rdiv, skillBaseDamage, type Derived, type EquipTables, type PlayerModel } from './rules';
 
 /** action id a -> skill s (d+0x2558b) */
 const A2S = [0, 3, 6, 1, 4, 7, 2, 5, 8];
@@ -97,6 +98,18 @@ export class FieldScene implements Scene {
   /** event ground items (SPAWN_TYPE low ids): icons on the field until HIDE -100 or a map load */
   eventItems: { cat: number; sub: number; x: number; y: number }[] = [];
   private gatherFx: { x: number; y: number; t: number; kind: 'star' | 'spark' }[] = [];
+  /** FUN_000613fc ids 0xc9 / 0xd4 / 0xdf on the player (item use): screen position fixed at spawn, rises 3 px a tick */
+  private useFxs: { id: number; x: number; y: number; t: number }[] = [];
+  /** hit sparks DAT_00408428 (6 slots, FUN_0006101c / FUN_00030734): set 0 normal, 1 strong (full-screen rim at t 1..3); hidden = kind 0xFF */
+  private sparks: { x: number; y: number; t: number; set: number; hidden: boolean }[] = [];
+  private flashTick = -1;
+  /** target panel DAT_003b3c49 and its trailing bar (old HP DAT_003b3ab0, counter DAT_003b3aaa) */
+  private panelTarget: Monster | null = null;
+  private ghost: { m: Monster; old: number; n: number } | null = null;
+  /** HIT counter DAT_003b61c8 (hits, display timer) and the last hit's real time */
+  private hits = { count: 0, timer: 0, at: 0 };
+  /** guide marker DAT_003b1dc6 / 1dc8 / 3cc2 (guide.ts) */
+  private guide: Guide | null = null;
   /** c71: a '5' pickup is under way (cleared by a pickup or an attack start) */
   private picking = false;
   /** warp stone move list (menu 0x17): registered rows and the cursor */
@@ -535,6 +548,10 @@ export class FieldScene implements Scene {
     this.minimap.build(field.map, this.portalMarkers().filter((d) => d.frame >= 112 && d.frame < 120).map((d) => ({ x: d.x, y: d.y })));   // kind-0 markers only
     this.run = null;
     this.gatherFx = [];
+    this.useFxs = [];
+    this.sparks = [];
+    this.panelTarget = null; this.ghost = null;
+    EvActor.freeze = -1;                                              // FUN_00019dd0
     this.eventItems = [];
     this.picking = false;
     player.gatherSwing = null;
@@ -552,6 +569,7 @@ export class FieldScene implements Scene {
     }
     this.story.zones.add(id === 0x9b ? 5 : field.map.header.zone);  // markVisited (map 0x9b counts as region 5)
     this.story.maps.add(id);                                          // FUN_0006913c map bitset
+    this.updateGuide();
     if (!isSafeMap(id)) {                                            // FUN_0001e358: class start field rule
       const startMap = [0x71, 0x73, 0x70][this.model.cls], flag = [0x3f, 0x48, 0x8f][this.model.cls];
       if (id === startMap && this.returnZone === this.model.cls && !this.story.isDone(flag)) this.returnZone = 100;
@@ -710,7 +728,28 @@ export class FieldScene implements Scene {
     this.rebuildCandidates();
     this.quests.refresh();
     this.ctx.audio.playBgm(this.field.map.header.bgm);
+    this.updateGuide();                                               // FUN_0002cdc8
     void e;
+  }
+
+  /** FUN_00025a88 data: the target while alive (type < 43); the ghost bar shrinks 1 px per 2 ticks to the HP width */
+  private targetView(): HudState['target'] {
+    const m = this.panelTarget;
+    if (this.events.active || !m || !m.alive || m.hp <= 0 || m.maxHp <= 0 || m.type >= 43) return null;
+    let ghost = -1;
+    const g = this.ghost;
+    if (g && g.m === m) {
+      const w = Math.trunc((g.old * 60) / m.maxHp) - (g.n >> 1), cur = Math.trunc((m.hp * 60) / m.maxHp);
+      if (w > cur) ghost = w; else this.ghost = null;
+    }
+    return { name: this.db.a.text[0x3e1 + m.type] ?? '', level: m.level, hp: m.hp, maxHp: m.maxHp, ghost };
+  }
+
+  /** FUN_0001dd48 / FUN_0002cdc8: the class guide marker for this map and the first main quest (mode 0 only) */
+  private updateGuide(): void {
+    const g = this.gardenMode !== 0 ? null : pickGuide(this.model.cls, this.field.mapId, (m) => this.story.maps.has(m),
+      this.story.active.map((a) => a.q), (q) => this.sdb.mainQuest(q));
+    if (g !== 'keep') this.guide = g;
   }
 
   afterEvent(_e: number): void { /* a finished event started again: nothing to replay */ }
@@ -852,8 +891,7 @@ export class FieldScene implements Scene {
     if (r.map === this.field.mapId && (r.flag === -1 || this.story.isDone(r.flag))
       && p.x >= r.x0 && p.x <= r.x0 + 50 && p.y >= r.y0 && p.y <= r.y0 + 50) {
       if (this.story.stones.has(row)) {
-        const rows = [...this.story.stones].sort((x, y) => x - y);
-        this.warpList = { rows, cur: Math.max(0, rows.indexOf(row)) };
+        this.warpList = { rows: Array.from({ length: 11 }, (_, i) => i), cur: row };   // state 0x17: all 11 rows
       } else {
         this.story.stones.add(row); this.story.stones.add(3);           // row 3 (초원마을) is always registered too
         this.hud.message('공간이동석이 등록되었습니다.');
@@ -867,31 +905,44 @@ export class FieldScene implements Scene {
     return false;
   }
 
-  /** move list keys: up / down, '5' warps (FUN_000619a0), CLR closes */
+  /** zone name of a warp stone row (text 0x1D6 + zone; rows 0..3 = zones 0..3, 4 = zone 5, 5.. = zone row + 2) */
+  private stoneName(row: number): string {
+    return this.db.a.text[row < 4 ? 0x1d6 + row : row === 4 ? 0x1db : 0x1d8 + row] ?? '';
+  }
+
+  /** move list keys (FUN_00043f3c): up / down, '5' asks with popup 0x19 for a registered row (0x1A otherwise), CLR closes */
   private warpKeys(presses: number[]): void {
     const w = this.warpList!;
     for (const k of presses) {
-      if (k === AVK.UP) w.cur = (w.cur + w.rows.length - 1) % w.rows.length;
-      else if (k === AVK.DOWN) w.cur = (w.cur + 1) % w.rows.length;
+      if (k === AVK.UP) { if (w.cur > 0) w.cur--; }
+      else if (k === AVK.DOWN) { if (w.cur < 10) w.cur++; }
       else if (k === AVK.CLR) { this.warpList = null; return; }
       else if (k === AVK.OK) {
-        const r = this.stone(w.rows[w.cur]);
-        this.warpList = null;
-        if (r.map !== this.field.mapId) this.pendingWarp = { map: r.map, x: r.wx, y: r.wy };
+        const row = w.rows[w.cur];
+        if (!this.story.stones.has(row)) { this.popup = { p: new Popup(this.ctx, 0x1a) }; return; }
+        this.popup = { p: new Popup(this.ctx, 0x19, 0, (t) => t.replace('%s', this.stoneName(row))), onYes: () => {
+          const r = this.stone(row);                                   // FUN_000619a0
+          this.warpList = null;
+          if (r.map !== this.field.mapId) this.pendingWarp = { map: r.map, x: r.wx, y: r.wy };
+        } };
         return;
       }
     }
   }
 
+  /** FUN_0002a908: 11 rows, registered ones white (the cursor row yellow), the rest grey */
   private drawWarpList(): void {
-    const w = this.warpList!, u = this.ctx.ui13, t = this.db.a.text;
+    const w = this.warpList!, u = this.ctx.ui13;
     u.begin();
     u.pushCenter220();
-    u.view('warps', 20, 30, 180, 30 + w.rows.length * 26, win('.v-col.v-fill.v-center', { style: 'gap:4px;padding:10px 10px' },
-      w.rows.map((row, i) => button(gt(t[0x1e4 + this.stone(row).map] ?? ''), {
-        sel: i === w.cur, style: 'width:100%',
-        on: () => { if (w.cur === i) return [AVK.OK]; w.cur = i; },
-      }))));
+    u.view('warps', 20, 8, 180, 204, win('.v-col.v-fill.v-center', { style: 'gap:2px;padding:6px 10px' },
+      w.rows.map((row, i) => {
+        const on = this.story.stones.has(row);
+        return button(gt(this.stoneName(row), { pen: !on ? 0xc618 : i === w.cur ? 0xffe0 : 0xffff }), {
+          sel: i === w.cur, style: 'width:100%;min-height:16px',
+          on: () => { if (w.cur === i) return [AVK.OK]; w.cur = i; },
+        });
+      })));
     u.pop();
     u.closeButton();
     u.end();
@@ -1387,8 +1438,10 @@ export class FieldScene implements Scene {
     if (!it || it.count <= 0) return false;
     if (it.enh !== 0) return false;                                      // cooling down
     if (it.type === 0x11 && it.sub === 13) {                             // status cure: +0x54..+0x5a = 0
-      if (this.poison || this.player.slowT || this.player.stun) this.achieve({ k: 'cure' });
+      this.achieve({ k: 'cure' });                                       // +0x2e48 counts every use (title 37)
       this.poison = 0; this.player.slowT = 0; this.player.slowed = false; this.player.stun = 0;
+      this.useFx(0xd4);
+      this.inv.setGroupCooldown(it.type, it.sub, this.stats.potionCdReduction);   // FUN_000404d0 tail: 100 frames
       return this.consume(idx);
     }
     if (it.type === 0x11 && it.sub >= 14 && this.gardenMode === 2) { this.hud.message(this.db.a.text[0x1abf] ?? ''); return false; }   // not in the dimension
@@ -1409,10 +1462,23 @@ export class FieldScene implements Scene {
     if (hp) v.hp = Math.min(st.maxHp, v.hp + amount);
     if (mp) v.mp = Math.min(st.maxMp, v.mp + (it.sub >= 9 ? idiv((100 + st.potionPct) * 8 * T, 100) : amount));
     it.count--;
+    this.useFx(0xdf);
     this.achieve({ k: 'potion' });
     this.inv.setGroupCooldown(it.type, it.sub, st.potionCdReduction);
     if (it.count <= 0) this.inv.remove(idx);
     return true;
+  }
+
+  /** FUN_0006101c: a free slot of six; a strong spark is skipped while another strong one is up */
+  private spawnSpark(x: number, y: number, set: number, hidden = false): void {
+    if (this.sparks.length >= 6 || (set === 1 && this.sparks.some((f) => f.set === 1))) return;
+    this.sparks.push({ x, y, t: 1, set, hidden });
+  }
+
+  /** FUN_000613fc(0, id) for 0xc9 / 0xd4 / 0xdf: (x − 4 ± 2 by facing, y + 2·body dy + 15) in screen space */
+  private useFx(id: number): void {
+    const p = this.player;
+    this.useFxs.push({ id, x: p.x - 4 - this.cam.x + ((p.dir & 1) * 2 - 1) * 2, y: p.y - 1 - this.cam.y, t: 0 });
   }
 
   private consume(idx: number): boolean {
@@ -1440,14 +1506,16 @@ export class FieldScene implements Scene {
     const it = this.inv.items[idx]!, v = this.vitals, st = this.stats, m = this.model;
     if (it.sub >= 0x15 && it.sub <= 0x17) {                              // 차원의 문 only: every other buff off, slot sub + 7
       if (this.gardenMode !== 2) { this.hud.message(this.db.a.text[0x1ac2] ?? ''); return false; }
-      this.buffs.clear(); this.buffs.start(it.sub + 7); this.recompute();
+      this.buffs.clearNormal(); this.buffs.start(it.sub + 7); this.recompute();
       this.countUse(it.sub);
       this.hud.message((this.db.a.text[0x1ac0] ?? '%s').replace('%s', it.name));
+      this.inv.setGroupCooldown(it.type, it.sub, 0);                     // one group, 900 frames
       return this.consume(idx);
     }
     if (it.sub >= 0x23 && it.sub <= 0x26) {                              // special elixirs -> slots 31..34
       this.buffs.start(it.sub - 4); this.recompute();
       this.hud.message((this.db.a.text[0x1ac0] ?? '%s').replace('%s', it.name));
+      this.inv.setGroupCooldown(it.type, it.sub, 0);                     // each its own 900 frames
       return this.consume(idx);
     }
     const box = boxEquipment(this.db, this.inv, it.sub, m.level, m.cls, this.rng);   // equipment boxes and packages (§3)
@@ -1458,7 +1526,14 @@ export class FieldScene implements Scene {
       this.consume(idx); this.autosave(); return true;
     }
     switch (it.sub) {
-      case 2: v.hp = Math.min(st.maxHp, v.hp + (st.maxHp >> 1)); v.mp = Math.min(st.maxMp, v.mp + (st.maxMp >> 1)); this.countUse(2); break;
+      case 2:                                                             // 영웅의 물약: HP / MP half, refused when both are full
+        if (v.hp >= st.maxHp && v.mp >= st.maxMp) { this.hud.message(this.db.a.text[211] ?? ''); return false; }
+        v.hp = Math.min(st.maxHp, v.hp + (st.maxHp >> 1)); v.mp = Math.min(st.maxMp, v.mp + (st.maxMp >> 1));
+        this.useFx(0xdf);
+        this.hud.message((this.db.a.text[0x1ac0] ?? '%s').replace('%s', it.name));
+        this.countUse(2);
+        this.inv.setGroupCooldown(it.type, it.sub, 0);                   // 16 frames
+        break;
       case 6: traitReset(); this.recompute(); break;                     // 특성 초기화
       case 0x20: traitBox(Math.max(1, it.level)); break;               // 특성 스킬 상자: points += item level (FUN_00040498 48232)
       case 4: case 5: case 7:
@@ -1490,16 +1565,21 @@ export class FieldScene implements Scene {
     return this.consume(idx);
   }
 
+  /** MP cost of skill action a after trait track 4 절약 (FUN_000452a0, FUN_00029108) */
+  private skillCost(a: number): number {
+    const s = A2S[a], r = skillRec(this, s), D = this.stats.D;
+    const eff = effectiveSkillLevel(this.skills[s], s, D);
+    const idx = eff === 0 ? -1 : Math.min(eff + D[38] - 1, 14);
+    const cost = r[1] + idx * r[4];
+    return cost - Math.trunc((cost * traitVal(4)) / 100);
+  }
+
   /** FUN_000452a0 quick slot use: items, or skills (actTick 0, cooldown 0, MP >= cost). */
   private useQuick(slot: number): void {
     const q = this.inv.quick[slot];
     if (q.kind === 2 && q.cd === 0) { this.useItem(q.id); return; }
     if (q.kind !== 1 || q.cd !== 0 || this.player.actTick !== 0 || this.buffs.isOn(20)) return;
-    const a = q.id, s = A2S[a], r = skillRec(this, s), D = this.stats.D;
-    const eff = effectiveSkillLevel(this.skills[s], s, D);
-    const idx = eff === 0 ? -1 : Math.min(eff + D[38] - 1, 14);
-    let cost = r[1] + idx * r[4];
-    cost -= Math.trunc((cost * traitVal(4)) / 100);                 // track 4 절약 (FUN_000452a0)
+    const a = q.id, cost = this.skillCost(a);
     if (this.vitals.mp < cost) return;
     this.vitals.mp -= cost;
     q.cd = q.maxCd;
@@ -1533,24 +1613,42 @@ export class FieldScene implements Scene {
     }
   }
 
-  /** Damage of one hit by the player or a projectile with skill action id aid (100 = basic). */
-  private hitMonster(aid: number, m: Monster, b: Rect, srcX: number, srcY: number, dir: number, fromPlayer: boolean): void {
-    const { model, stats, hud } = this;
+  /** Damage of one hit by the player or a projectile with skill action id aid (100 = basic), FUN_0006d2f8.
+   *  keepFacing: El's basic projectile (type 1, action 1) does not turn the target (FUN_00060d10);
+   *  second: the EXTRA follow-up hit FUN_0006e120 makes with ~attacker (no EXTRA again, number 36px higher). */
+  private hitMonster(aid: number, m: Monster, b: Rect, srcX: number, srcY: number, dir: number, fromPlayer: boolean,
+    opt: { keepFacing?: boolean; second?: boolean; hitRect?: Rect } = {}): void {
+    const { model, stats, hud, vitals } = this, D = stats.D;
     let base: number | undefined;
     if (aid !== 100) {
       const s = A2S[aid], r = skillRec(this, s);
-      const lv = effectiveSkillLevel(this.skills[s], s, stats.D);
-      base = skillBaseDamage(stats.atk, r[0], r[3], lv, stats.D[46], s, this.ctx.assets.tables.actorElements[m.type]?.[0] ?? 0);
+      const lv = effectiveSkillLevel(this.skills[s], s, D);
+      base = skillBaseDamage(stats.atk, r[0], r[3], lv, D[46], s, this.ctx.assets.tables.actorElements[m.type]?.[0] ?? 0);
     }
-    const r = playerHit(this.rng, { level: model.level, atk: stats.atk, acc: stats.acc, crit: stats.crit, critDmg: stats.critDmg }, { level: m.level }, base);
+    const r = playerHit(this.rng, {
+      level: model.level, atk: stats.atk, acc: stats.acc, crit: stats.crit, critDmg: stats.critDmg,
+      basicPct: D[54] ?? 0,
+      bonusPct: model.cls === 1 && this.player.action === 1 ? rdiv(D[9] ?? 0, 10) : 0,     // El in action 1: +INT/10 %
+    }, { level: m.level, stunned: m.stun > 0 }, base);
+    this.panelTarget = m;                                              // DAT_003b3c49 = target
     if (r.miss) { hud.miss(srcX, srcY - 43); return; }
+    const extra = !opt.second && (D[42] ?? 0) !== 0;                   // FUN_0006dcd4: any extra-damage option fires
+    if (extra) { hud.extra(srcX, srcY - 43 - (r.crit ? 12 : 0)); this.spawnSpark(m.x, m.y, 0); }
+    // HP / MP drain (D40 / D41) on the damage after the critical multiplier, x max(5, 101 - level) / 10000
+    const drainMul = model.level > 100 ? 5 : Math.max(5, 101 - model.level), pre = r.pre ?? r.dmg;
+    if ((D[40] ?? 0) > 0) vitals.hp = Math.min(stats.maxHp, vitals.hp + cdiv(drainMul * pre * D[40], 10000));
+    if ((D[41] ?? 0) !== 0) vitals.mp = Math.min(stats.maxMp, vitals.mp + cdiv(drainMul * pre * D[41], 10000));
     let dmg = r.dmg;
     if (fromPlayer && aid === 100 && this.player.action === 3 && model.cls !== 1) dmg = rdiv(dmg * 120, 100);   // 3rd hit x1.2
+    if (dmg < 1) dmg = 1;
     if (r.crit && fromPlayer) hud.crit(srcX, srcY - 43);
     const tgt = m;                                                     // the hit object's own HP (FUN_0006e120)
     const full = tgt.hp >= tgt.maxHp;
     if (tgt.firstHit < 0) tgt.firstHit = this.tick;
-    tgt.hp -= dmg;
+    this.ghost = { m: tgt, old: tgt.hp, n: 1 };                         // DAT_003b3ab0 / 3ab4, DAT_003b3aaa = 1
+    tgt.hp -= dmg + rdiv(dmg * (D[42] ?? 0), 100);                     // extra damage % on every hit
+    const guarding = tgt.type === 0x1a && tgt.action === 12;          // Gardius in action 12 heals 3/2 of half the damage
+    if (guarding) tgt.hp = Math.min(tgt.maxHp, tgt.hp + 3 * (dmg >> 1));
     if (dmg * 2 >= tgt.maxHp) this.achieve({ k: 'bigHit' });
     if (tgt.hp <= 0) {
       if (full) this.achieve({ k: 'oneHitKill' });
@@ -1558,13 +1656,24 @@ export class FieldScene implements Scene {
       if (this.tick - tgt.firstHit <= 100) this.achieve({ k: 'quickKill' });
     }
     this.ctx.audio.playSfx(0x20 + model.cls);                         // FUN_0006e120 hit sound
-    hud.damage(dmg, m.x, b[1] - 33);
+    // number kind: crit / EXTRA and second hits show the big kind 2, plain hits (and Gardius guarding) kind 1
+    if (opt.second) hud.damage(dmg, m.x, b[1] - 33 - 36, m);
+    else if ((r.crit || extra) && !guarding) hud.damage(dmg, m.x, b[1] - 33, m);
+    else hud.pop(dmg, m.x, b[1] - 33, false, m);
     // elixir effects in FUN_0006d2f8: explosion +dmg/5, freeze +dmg/10 and slow 25, plunder gold
-    if (this.buffs.isOn(18) && this.rng.rand(1000) < 100) { tgt.hp -= Math.trunc(dmg / 5); hud.damage(Math.trunc(dmg / 5), m.x, b[1] - 48); }
-    if (this.buffs.isOn(19) && this.rng.rand(1000) < 100) { tgt.hp -= Math.trunc(dmg / 10); if (!m.isBoss) m.slow = 25; }
+    if (this.buffs.isOn(18) && this.rng.rand(1000) < 100) { tgt.hp -= Math.trunc(dmg / 5); hud.pop(Math.trunc(dmg / 5), m.x, b[1] - 33, false, m); }
+    if (this.buffs.isOn(19) && this.rng.rand(1000) < 100) { tgt.hp -= Math.trunc(dmg / 10); hud.pop(Math.trunc(dmg / 10), m.x, b[1] - 33, false, m); if (!m.isBoss) m.slow = 25; }
     if (this.buffs.isOn(27) && this.rng.rand(1000) < 50) {
       const L = m.level;
       this.inv.gain(0x1c, Math.trunc(((2 * L + 3 + rdiv(this.rng.rand(L), 3)) * 3) / 10), 0, 1, this.rng);
+    }
+    // HIT counter: +1 within 1000 ms of the last hit, else 1; spark at the overlap centre (the player's own swings;
+    // a projectile attacker's slot index lands outside cmf_status, so the original shows none for it)
+    const now = performance.now();
+    this.hits = { count: this.hits.count && now - this.hits.at <= 1000 ? this.hits.count + 1 : 1, timer: 0, at: now };
+    if (fromPlayer && opt.hitRect) {
+      const a = opt.hitRect, x0 = Math.max(a[0], b[0]), y0 = Math.max(a[1], b[1]), x1 = Math.min(a[2], b[2]), y1 = Math.min(a[3], b[3]);
+      this.spawnSpark(x0 + ((x1 - x0) >> 1), y0 + ((y1 - y0) >> 1), r.crit || extra || dmg >= 2 * pre ? 1 : 0);
     }
     if (fromPlayer || r.crit) this.addShake(r.crit);
     // FUN_0006d2f8: a skill / projectile hit vibrates, and again on a strong hit (crit, or twice the base damage)
@@ -1583,7 +1692,10 @@ export class FieldScene implements Scene {
       }
       if (fromPlayer && model.cls === 0 && (this.player.action === 4 || this.player.action === 5)) m.stunAfter = true;   // +0x8f = 3
     }
-    m.onHit(dir as Dir, false);
+    // FUN_0006e120: knockback (7) instead of a stagger (6) with the D31 option, rolled only for a non-boss target not stunned
+    const knock = !m.isBoss && m.stun <= 0 && this.rng.rand(100) < (D[31] ?? 0);
+    m.onHit(dir as Dir, knock, opt.keepFacing);
+    if (extra && m.alive && m.hp > 0) this.hitMonster(aid, m, b, srcX, srcY, dir, fromPlayer, { ...opt, second: true });
   }
 
   private updateProjectiles(): void {
@@ -1600,11 +1712,11 @@ export class FieldScene implements Scene {
           const b = m.body();
           if (!m.alive || !b || !overlaps(box, b)) continue;
           if (p.contactExplodes()) { hit = false; break; }
-          this.hitMonster(p.skillAid, m, b, p.x, p.y, p.dir, false);
+          this.hitMonster(p.skillAid, m, b, p.x, p.y, p.dir, false, { keepFacing: p.type === 1 && p.action === 1 });
           hit = true;
           // c1 ice column slow (skills.md §3.2)
           const slow = p.action === 5 ? (this.skills[1] >> 1) + 25 : p.action === 6 ? (this.skills[4] >> 1) + 30 : p.action === 7 ? this.skills[7] + 30 : 0;
-          if (p.type === 1 && slow && m.typeRec[1] !== 11) m.slow = slow;
+          if (p.type === 1 && slow && m.typeRec[1] !== 11 && m.stun <= 0) m.slow = slow;   // not a boss, not in state 0xd
           if (p.type === 1 && p.action >= 2 && p.action <= 4) m.burn = 12;          // +0x5c burn mark
           if (p.type === 1 && p.action >= 5 && p.action <= 7) m.chill = 9;          // +0x5e chill mark
           if (p.kind === 2) this.projectiles.push(new Projectile(19, this.projRecord(19), { ...this.player, dir: p.dir }, this.sheets[0], 0, m.x, b[1]));
@@ -1632,7 +1744,7 @@ export class FieldScene implements Scene {
     for (const { m, b } of targets) {
       // "+0x76 == 10" rule hits c0 drill sword: first contact turns the player up, no damage (§2.3)
       if (player.action === 10 && this.model.cls === 0 && player.dir !== 2) { player.dir = 2; player.lastV = 2; return; }
-      this.hitMonster(player.skillAid, m, b!, player.x, player.y, player.dir, true);
+      this.hitMonster(player.skillAid, m, b!, player.x, player.y, player.dir, true, { hitRect: atk });
     }
   }
 
@@ -1676,6 +1788,7 @@ export class FieldScene implements Scene {
       player.startKnock(6, src.x, src.y, { dir: c as Dir, bonus: 5 });
     } else if (type === 8 && action === 6) player.startKnock(6, src.x, src.y, { stun: true });
     if (vitals.invuln || vitals.tint) return false;
+    this.panelTarget = src;                                           // FUN_0006f370: DAT_003b3c49 = attacker
     const r = monsterHit(this.rng, atk, { level: this.model.level, def: this.stats.def, evade: this.stats.evade + (src.dark > 0 ? 50 : 0), stunned: player.stun > 0 });
     vitals.invuln = 5;
     if (r.miss) { hud.miss(player.x, player.y - 43); this.achieve({ k: 'evade' }); return false; }
@@ -1710,7 +1823,7 @@ export class FieldScene implements Scene {
     if (knock && !player.knock) player.startKnock(knock, src.x, src.y, down ? { dir: 2 } : {});
     vitals.hp -= dmg;
     vitals.tint = 5;
-    hud.hurt(dmg, player.x, player.y - 40);
+    hud.hurt(dmg, player.x, player.y - 40, player);
     vibrate(this.ctx.options.vibration);                               // FUN_0006f370: the player is hurt
     if (this.run) this.cancelGather(false);                          // even after success (FUN_0006f370)
     if (vitals.hp <= 0) { vitals.hp = 0; this.dead = true; player.action = 0; this.story.recordDeath(src.type); this.buffs.clear(); this.achieve({ k: 'death' }); }
@@ -1796,6 +1909,15 @@ export class FieldScene implements Scene {
     this.player.update(this.ctx.input, this.field, blockers);
     if (this.run && this.player.action === this.player.interactAction) this.run.playerTick();   // FUN_000618f4
     this.gatherFxTick();
+    this.useFxs = this.useFxs.filter((f) => { f.t++; f.y -= 3; return f.t <= 10; });   // FUN_0002c99c
+    this.sparks = this.sparks.filter((f) => ++f.t <= (f.set === 2 ? 4 : 6));
+    if (this.ghost) this.ghost.n++;
+    this.hits.timer++;
+    if (this.hits.count && performance.now() - this.hits.at > 1000) this.hits.count = 0;   // FUN_0006e8a8: 1000 ms
+    // FUN_00063ab4 / 63948 / 637dc: a skill action's 3rd tick flashes the screen rim (option 화면효과)
+    const pl = this.player, skillAct = pl.cls === 1 ? pl.action >= 2 && pl.action <= 10 : pl.action >= 4 && pl.action <= 12;
+    if (skillAct && pl.actTick === 3 && pl.actTick !== this.flashTick && this.ctx.options.effects) this.spawnSpark(0, 0, 1, true);
+    this.flashTick = skillAct ? pl.actTick : -1;
     this.run?.judge();
     this.idleFrames = px0 === this.player.x && py0 === this.player.y ? this.idleFrames + 1 : 0;
     if (this.ctx.options.speed === 0) this.story.counters.slowFrames = (this.story.counters.slowFrames ?? 0) + 1;
@@ -1959,6 +2081,30 @@ export class FieldScene implements Scene {
       if (f.t >= 8) continue;
       this.ui.alpha = 16; this.ui.effect(0xa7 + (f.t % 4), f.x - ox, f.y - oy); this.ui.alpha = 32;
     }
+    if (!this.events.active) for (const f of this.sparks) {           // FUN_00030734 (owner 0): bank frame t - 1 + d8(0x23632 + set)
+      const base = this.db.a.d8(0x23632 + f.set), cx = (VIEW_W >> 1) + this.cam.x - ox, cy = (VIEW_H >> 1) + this.cam.y - oy;
+      if (!f.hidden) this.ui.effect(f.t - 1 + base, f.x - ox, f.y - oy);
+      const k = base - 1 + f.t;                                        // set 1: the rim over the whole screen
+      if (k === 15) { this.ui.alpha = 16; this.ui.effect(6, cx, cy); }
+      else if (k === 16) { this.ui.alpha = 8; this.ui.effect(7, cx, cy); }
+      else if (k === 17) this.ui.effect(8, cx, cy);
+      this.ui.alpha = 32;
+    }
+    const gd = this.guide;
+    if (gd && (gd.x >= 0 || gd.y >= 0) && !this.events.active) {    // FUN_000331e8: t.pxl 35×49 (211, 70), alpha and bob by frame & 31
+      let u = this.tick & 0x1f;
+      if (u > 16) u = 32 - u;
+      this.ui.alpha = u << 1;
+      if (gd.variant === 0) this.ui.image('t', 211, 70, 35, 49, gd.x - ox, gd.y - oy + (u >> 1));
+      else if (gd.variant === 1) this.ui.image('t', 211, 70, 35, 49, gd.x - ox + (u >> 1), gd.y - oy, 0xc);   // turned 270°
+      this.ui.alpha = 32;
+    }
+    for (const f of this.useFxs) {                                    // FUN_00029604: frame id + t, alpha 24 then 36 - 3t, hidden from t 8
+      if (f.t >= 8) continue;
+      this.ui.alpha = f.t < 5 ? 24 : 36 - 3 * f.t;
+      this.ui.effect(f.id + f.t, f.x + this.cam.x - ox, f.y + this.cam.y - oy);
+    }
+    this.ui.alpha = 32;
     this.ui.end();
     if (this.ctx.options.minimap && !this.talk && !this.dead && this.showButtons)   // FUN_00022228 in state 0x10
       this.minimap?.draw(hud, player.x, player.y, [
@@ -1972,11 +2118,13 @@ export class FieldScene implements Scene {
       exp: vitals.exp, statPoints: this.statPoints, skillPoints: this.skillPoints, mapId: field.mapId,
       dimGate: this.gardenMode !== 0 || !this.canSave,
       slots: this.inv.quick.map((q) => {
-        if (q.kind === 1) return { skill: q.id, cd: q.cd, maxCd: q.maxCd };
+        if (q.kind === 1) return { skill: q.id, cd: q.cd, maxCd: q.maxCd, noMp: this.vitals.mp < this.skillCost(q.id) };
         const it = q.kind === 2 ? this.inv.items[q.id] : undefined;
         if (!it) return null;
         return { icon: this.db.iconRect(it.icon), count: this.db.showsCount(it) ? it.count : -1, cd: q.cd, maxCd: it.type === 0x11 && it.sub >= 14 ? 900 : 100 };
       }),
+      target: this.targetView(),
+      hits: this.events.active ? undefined : this.hits,
     }, this.cam.x - originX - sx, this.cam.y - sy, this.showButtons && !this.dead && !this.talk);
     if (this.flash) { hud.alpha = Math.min(32, this.flash * 4); hud.fill(0, 0, VIEW_W, VIEW_H, 0xffffff); hud.alpha = 32; }
     if (this.talk) { hud.hit(0, 0, VIEW_W, VIEW_H, () => [AVK.OK]); this.talk.d.draw(hud, this.tick); }

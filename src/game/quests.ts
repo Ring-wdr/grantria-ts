@@ -73,6 +73,7 @@ export class QuestLog {
     host.questPopup(0x1e, q);
     host.sfx(0x2b);
     story.qs[q] = a.pct < 100 ? 2 : 3;
+    host.message((db.a.text[0x3bf] ?? '%s').replace('%s', this.name(q)));   // FUN_0001e6e8(0xc): "%s 시작"
     this.refresh();
     return true;
   }
@@ -111,6 +112,13 @@ export class QuestLog {
   complete(q: number): void {
     const { story, db, host } = this;
     const ev = host.eventId?.() ?? -1;                               // keys taken by these events before the state check
+    if (ev < 0 && story.qs[q] === 3) {                               // outside events: the reward must fit (FUN_0001c5cc, hard mode passes)
+      const r = db.rewardOf(db.quests[q]);
+      if (r && !(host.hard?.() ?? false) && r.type !== 0x1c && host.inv.items.length >= host.inv.cap && !host.inv.canGain(r.type, r.sub, 0, Math.max(1, r.count))) {
+        host.message(db.a.text[0x3cc] ?? '');                        // FUN_0001e6e8(0x19); the quest stays reportable
+        return;
+      }
+    }
     const evKey = ev === 0x1b ? 8 : ev === 0x36 ? 0xe : ev === 0x10 ? 5 : -1;
     if (evKey >= 0) host.inv.removeKey(evKey);
     if (story.qs[q] !== 3) return;
@@ -138,6 +146,7 @@ export class QuestLog {
     const exp = hard ? (q >= 0x4f && q <= 0x97 ? HARD_EXP[q - 0x4f] : 300) * L : (Q.exp & 0x1fff) << 3;
     if (exp) host.grantExp(exp);
     story.active = story.active.filter((a) => a.q !== q);
+    host.message((db.a.text[0x3c1] ?? '%s').replace('%s', this.name(q)));   // FUN_0001e6e8(0xe): "%s 종료"
     this.refresh();
   }
 

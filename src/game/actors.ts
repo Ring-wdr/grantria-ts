@@ -20,6 +20,9 @@ export class EvActor {
   static poses: { actions: PoseRec[][]; mult: number[][] } = { actions: [], mult: [] };
   /** pose frame events: ev 9..26 spawn effect type ev − 8 (FUN_00069528), sound ids (FUN_0001af90) */
   static onPose: (a: EvActor, ev: number, sound: number) => void = () => {};
+  /** ANIM_FREEZE DAT_003b1dba (event 0x1B, -1 = none): the party member of that class (FUN_0007343c) or the actor
+   *  with that id (FUN_00069e9c) stops its animation counter; actor 0xEC also shows frame 5 */
+  static freeze = -1;
   dir: Dir = 3;
   lastH: 0 | 1 = 0;
   lastV: 2 | 3 = 3;
@@ -101,16 +104,18 @@ export class EvActor {
       this.walking = !this.arrived;
     }
     if (this.balloon) this.balloonT++;
-    if (this.party && this.pose && this.poseFrame()) { this.t++; return; }
+    const frozen = EvActor.freeze !== -1 && (this.party ? this.cls : this.id) === EvActor.freeze;
+    if (this.party && this.pose && this.poseFrame(frozen)) { if (!frozen) this.t++; return; }
     this.frame = this.pickFrame();
-    this.t++;
+    if (frozen && !this.party && this.id === 0xec) this.frame = 5;
+    if (!frozen) this.t++;
   }
 
   setPose(n: number): void { this.pose = n; this.poseT = 0; this.poseHold = false; }
 
   /** FUN_00070b68: frame[t % N] + mult·FACING[dir], step moves, ev 4 / 1 end, ev 30 holds the last frame.
    *  ev 9..26 spawn effects and the sound column plays (EvActor.onPose). Returns false when there is no record. */
-  private poseFrame(): boolean {
+  private poseFrame(frozen = false): boolean {
     const rec = EvActor.poses.actions[this.cls]?.[this.pose - 1];
     if (!rec) { this.pose = 0; return false; }
     const i = this.poseT % rec.n;
@@ -122,7 +127,7 @@ export class EvActor {
     if ((ev >= 9 && ev <= 26) || rec.sound?.[i]) EvActor.onPose(this, ev, rec.sound?.[i] ?? 0);
     if (ev === 4 || ev === 1) { this.pose = 0; return true; }
     if (ev === 30) this.poseHold = true;
-    if (!this.poseHold) this.poseT++;
+    if (!this.poseHold && !frozen) this.poseT++;
     return true;
   }
 

@@ -273,14 +273,14 @@ export class InventoryTab {
     const has = (t: number, sub: number) => countOf(inv, t, sub) > 0;
     if (action === ACTION.DETAIL) this.detail = it;
     else if (action === ACTION.USE && it.type === 0x19) {                   // recipe: the blacksmith combine screen
-      if (has(0x1b, 10)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'combine', idx });
+      if (inv.unlocked(10)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'combine', idx });
       else this.message = new Popup(this.ctx, 0x6d);
     } else if (action === ACTION.USE) this.fs.useItem(idx);
     else if (action === ACTION.ENHANCE) {                                    // needs the enhance scroll (0x1b, 0x0c)
       if (has(0x1b, 0x0c)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'enhance', idx });
       else this.message = new Popup(this.ctx, 0x6d);
-    } else if (action === ACTION.DECOMPOSE) {                                // needs the magic dismantler (0x1b, 9)
-      if (has(0x1b, 9)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'decompose', idx });
+    } else if (action === ACTION.DECOMPOSE) {                                // needs the magic dismantler (0x1b, 9: unlock bit)
+      if (inv.unlocked(9)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'decompose', idx });
       else this.message = new Popup(this.ctx, 0x6d);
     } else if (action === ACTION.SOCKET) {                                   // socket scroll (0x1b, 0x21)
       if (!has(0x1b, 0x21)) { this.message = new Popup(this.ctx, 0x77); return; }

@@ -222,6 +222,10 @@ export class ItemDb {
 export type LogKind = 'got' | 'gotN' | 'gold' | 'full' | 'text';
 
 /** Player-owned items: inventory (compacted), equipment 0..5, quick slots, gold. */
+/** d.dat 0x4031A9 (d+0x26e85): 0x1b subs kept as permanent unlock bits +0x32a5 instead of items, bit = index
+ *  (천상의 곡괭이 / 마법 해체기 / 대장장이의 모루 / 오토루팅) */
+export const UNLOCK_1B = [1, 9, 10, 13] as const;
+
 export class Inventory {
   items: Item[] = [];                       // compacted list, length <= cap
   equip: (Item | null)[] = [null, null, null, null, null, null];
@@ -231,6 +235,18 @@ export class Inventory {
   /** purchased bags +0x327C (0..2): capacity (bags + 3) * 16 = 48 / 64 / 80 */
   bags = 0;
   setBags(n: number): void { this.bags = Math.max(0, Math.min(2, n)); this.cap = (this.bags + 3) * 16; }
+  /** permanent unlock bits +0x32a5 (UNLOCK_1B index) */
+  unlocks = 0;
+  /** an unlock item (0x1b sub 1 / 9 / 10 / 13) is owned (FUN_0007b240 on +0x32a5) */
+  unlocked(sub: number): boolean { const b = UNLOCK_1B.indexOf(sub as never); return b >= 0 && !!(this.unlocks & (1 << b)); }
+  /** older saves held unlock items in the bag: turn them into bits (frees the slots) */
+  migrateUnlocks(): void {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const it = this.items[i], b = UNLOCK_1B.indexOf(it.sub as never);
+      if (it.type === 0x1b && b >= 0) { this.unlocks |= 1 << b; this.items.splice(i, 1); }
+    }
+    this.remapQuick();
+  }
   log: (kind: LogKind, text: string, n?: number) => void = () => {};
 
   private db: ItemDb;
@@ -243,6 +259,12 @@ export class Inventory {
   gain(type: number, sub: number, grade: number, count: number, rng: Rng, made?: Item): boolean {
     const text = this.db.a.text;
     if (type === 0x1d) { this.onCollect(sub); return true; }
+    const ub = type === 0x1b ? UNLOCK_1B.indexOf(sub as never) : -1;
+    if (ub >= 0) {                                                   // GRAN_GET: set the bit (FUN_0007b268), no bag slot
+      this.unlocks |= 1 << ub;
+      this.log('got', (text[0x3b6] ?? '%s').replace('%s', text[0x7fc + this.db.model(type, sub, 0)] ?? ''));
+      return true;
+    }
     if (type === 0x1c) {
       this.gold = Math.min(this.gold + sub, 999_999_999);
       this.log('gold', (text[0x3b8] ?? '%d').replace('%d', String(sub)), sub);

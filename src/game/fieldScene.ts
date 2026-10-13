@@ -192,6 +192,8 @@ export class FieldScene implements Scene {
     if (save.inv) {
       Object.assign(this.inv, { items: save.inv.items, equip: save.inv.equip, quick: save.inv.quick, gold: save.inv.gold });
       this.inv.setBags(save.inv.bags ?? 0);
+      this.inv.unlocks = save.inv.unlocks ?? 0;
+      this.inv.migrateUnlocks();
     } else {
       // new game (FUN_00053510 case 2): class weapon, 10 healing potions, 20 pickaxes,
       // quick slot '1' = skill 0, '#' = inventory cell 0 (items.md §0.7)
@@ -375,7 +377,7 @@ export class FieldScene implements Scene {
     if (this.gardenMode === 0) return d;
     // FUN_0001eba8 partial save: event bits, visited maps / regions, keys and doors keep the file's values
     const prev = this.prevSave()?.story;
-    if (prev && d.story) Object.assign(d.story, { done: prev.done, maps: prev.maps, zones: prev.zones, collect: prev.collect, doors: prev.doors });
+    if (prev && d.story) Object.assign(d.story, { done: prev.done, maps: prev.maps, zones: prev.zones, collect: prev.collect, collectDim: prev.collectDim, doors: prev.doors });   // +0x3173 too (garden.md)
     const file = this.prevSave();
     if (this.gardenMode === 2 && file) Object.assign(d, { map: file.map, zone: file.zone, x: file.x, y: file.y, dir: file.dir });
     return d;
@@ -388,7 +390,7 @@ export class FieldScene implements Scene {
       x: this.player.x, y: this.player.y, dir: this.player.dir, hp: this.vitals.hp, mp: this.vitals.mp,
       ...(this.gardenMode === 1 ? { map: 0x9f, zone: 7, x: 160, y: 400 } : {}),     // FUN_0001eba8: garden saves point at the entrance
       playTicks: this.playTicks, savedAt: Date.now(), buffs: this.buffs.toJSON(), day: this.dayCounter, returnZone: this.returnZone,
-      inv: { items: this.inv.items, equip: this.inv.equip, quick: this.inv.quick, gold: this.inv.gold, bags: this.inv.bags },
+      inv: { items: this.inv.items, equip: this.inv.equip, quick: this.inv.quick, gold: this.inv.gold, bags: this.inv.bags, unlocks: this.inv.unlocks },
       skills: [...this.skills], skillPoints: this.skillPoints, story: this.story.toJSON(),
     };
   }
@@ -704,8 +706,9 @@ export class FieldScene implements Scene {
     const n = this.nodes.find((x) => x.near(this.player.x, this.player.y));
     if (!n) return false;
     const t = this.db.a.text, zone = this.field.map.header.zone;
-    if (zone > GATHER_CAP[this.story.gather.lv]) { this.hud.message(t[0x1ade] ?? ''); return true; }
-    if (!this.inv.items.some((x) => x.type === 0x18)) { this.hud.message(t[0x1adf] ?? ''); return true; }
+    const perm = this.inv.unlocked(1);                               // 천상의 곡괭이: no level / pickaxe checks
+    if (zone > GATHER_CAP[this.story.gather.lv] && !perm) { this.hud.message(t[0x1ade] ?? ''); return true; }
+    if (!perm && !this.inv.items.some((x) => x.type === 0x18)) { this.hud.message(t[0x1adf] ?? ''); return true; }
     this.run = new GatherRun(n, this.rng);
     n.state = 'gather';
     return true;
@@ -731,11 +734,12 @@ export class FieldScene implements Scene {
     this.run = null;
     if (!this.inv.gain(n.type, n.sub, 0, count, this.rng)) { n.state = 'idle'; return true; }
     this.nodes = this.nodes.filter((x) => x !== n);
-    const [e, up] = gatherExp(this.story.gather, this.field.map.header.zone);
+    const perm = this.inv.unlocked(1);
+    const [e, up] = gatherExp(this.story.gather, this.field.map.header.zone, perm);
     const t = this.db.a.text;
     if (e) this.hud.message((t[0x1b39] ?? '%d').replace('%d', String(e)));
     if (up) this.hud.message(t[0x1b3a] ?? '');
-    const pick = this.inv.items.findIndex((x) => x.type === 0x18);    // one pickaxe per gather
+    const pick = perm ? -1 : this.inv.items.findIndex((x) => x.type === 0x18);   // one pickaxe per gather (none with 천상의 곡괭이)
     if (pick >= 0) { const it = this.inv.items[pick]; if (it.count > 1) it.count--; else this.inv.remove(pick); }
     this.quests.onItems();
     return true;
@@ -1195,6 +1199,20 @@ export class FieldScene implements Scene {
     this.vitals.mp = Math.min(this.vitals.mp, this.stats.maxMp);
   }
 
+  /** 오토루팅 (0x1b sub 13, +0x32a5 bit 3; FUN_0002f184 kind 0): every ground item is gained as it is drawn,
+   *  coupons (0x1b sub 0x1b) excepted; a refused one is marked failed like a '5' pickup (no pickup sound) */
+  private autoLoot(): void {
+    let got = false;
+    this.ground = this.ground.filter((g) => {
+      if (g.failed || (g.item?.type === 0x1b && g.item.sub === 0x1b)) return true;
+      const ok = g.item ? this.inv.gain(g.item.type, g.item.sub, g.item.grade, 1, this.rng, g.item) : this.inv.gain(0x1c, g.gold, 0, 1, this.rng);
+      if (!ok) g.failed = true;
+      got ||= ok;
+      return !ok;
+    });
+    if (got) this.quests.onItems();
+  }
+
   /** '5' on a ground item (FUN_00045570 pickup priority): gain it, or mark it failed. */
   private tryPickup(): boolean {
     const pb = this.player.box();
@@ -1586,6 +1604,7 @@ export class FieldScene implements Scene {
     if (this.shake.length) this.shake.shift();
     this.inv.tick();
     this.ground = this.ground.filter(updateGround);
+    if (this.inv.unlocked(13)) this.autoLoot();
     this.talkTarget = this.findTalkTarget();
     if (this.run) { if (this.gatherTick(presses)) return; }
     if (presses.includes(AVK.OK) && this.player.controllable && this.talkTarget && this.player.action === 0) { this.talkTo(this.talkTarget); return; }

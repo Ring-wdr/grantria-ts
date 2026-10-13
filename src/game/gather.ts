@@ -69,10 +69,12 @@ export function spawnNodes(a: Assets, field: Field, rng: Rng, zone: number, nigh
 export const GATHER_CAP = [3, 6, 8, 10, 12, 13];
 const GATHER_NEED = [60, 120, 240, 360, 600];
 
-/** FUN_00072f18: exp of one gather and the level up; returns [exp, levelled] */
-export function gatherExp(g: { lv: number; exp: number }, zone: number): [number, boolean] {
+/** FUN_00072f18: exp of one gather and the level up; returns [exp, levelled]. With 천상의 곡괭이 (perm) a zone
+ *  above the level's cap gives 3 instead of 0 (gimmicks.md §2.4). */
+export function gatherExp(g: { lv: number; exp: number }, zone: number, perm = false): [number, boolean] {
   const lv = g.lv;
-  const e = lv === 5 || zone > [3, 6, 8, 10, 12][lv] ? 0 : (lv > 0 && zone < [0, 4, 7, 9, 11][lv]) ? 2 : 3;
+  const e = perm ? (lv === 0 ? 3 : lv === 5 ? 0 : zone < [0, 4, 7, 9, 11][lv] ? 2 : 3)
+    : lv === 5 || zone > [3, 6, 8, 10, 12][lv] ? 0 : (lv > 0 && zone < [0, 4, 7, 9, 11][lv]) ? 2 : 3;
   g.exp += e;
   if (lv < 5 && g.exp >= GATHER_NEED[lv]) { g.lv++; g.exp = 0; return [e, true]; }
   return [e, false];

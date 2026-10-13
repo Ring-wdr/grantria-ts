@@ -21,7 +21,7 @@ const FLASH = [32, 32, 32, 24, 24, 16, 8, 6, 24, 16, 8, 4, 2, 0, 0];
 const REPEATABLE = [0x6e, 0x6f, 0x70, 0x71, 0x79, 0x7c, 0x7f, 0x80, 0x81, 0x82, 0x83, 0x8a, 0x8d, 0x8e, 0x90, 0x92, 0x93, 0x94, 0x96];
 /** end handler flag changes (FUN_0002cdc8) */
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
-const END_HOOK: Record<number, { set?: number[]; clr?: number[] }> = {
+const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[] }> = {
   0: { set: [...range(10, 29), ...range(0x7f, 0x86), ...range(0x92, 0xa3)] },
   10: { set: [...range(1, 9), ...range(0x14, 0x1d), ...range(0x6d, 0x79), ...range(0x92, 0xa3)] },
   0x14: { set: [...range(1, 0x14), ...range(0x6d, 0x79), ...range(0x7f, 0x86)] },
@@ -40,7 +40,7 @@ const END_HOOK: Record<number, { set?: number[]; clr?: number[] }> = {
   0x3f: { set: [0x8d], clr: [0x40] }, 0x48: { set: [0x8e], clr: [0x49] },
   0x4e: { set: [0x96] }, 0x5b: { set: [0x8a] }, 0x5e: { set: [0x65] }, 0x8f: { set: [0x90] },
   0x53: { clr: [0x52, 0x90] },
-  0x58: { set: [0x57] },
+  0x58: { set: [0x57], dim: [9, 5, 6, 7] }, 0x31: { dim: [4] }, 0x5d: { dim: [8] },   // dim: +0x3173 bit toggles
   0x5f: { set: [0x89], clr: [0x60] }, 100: { clr: [0x65, 0x8c] },
 };
 
@@ -427,6 +427,7 @@ export class EventRunner {
     const hook = END_HOOK[e];
     for (const f of hook?.set ?? []) story.set(f);
     for (const f of hook?.clr ?? []) story.set(f, false);
+    for (const b of hook?.dim ?? []) if (!story.collectDim.delete(b)) story.collectDim.add(b);
     if (REPEATABLE.includes(e)) story.set(e, false);
     this.fs.endEvent(e);
   }

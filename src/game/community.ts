@@ -4,7 +4,7 @@
 // shared by the three slots (state 0x29 / 0x0F; the original kept it on the server).
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
-import type { Item } from './items';
+import { UNLOCK_1B, type Item } from './items';
 import { Popup } from './popup';
 import { Rng } from './rules';
 import { loadWarehouse, saveWarehouse } from './save';
@@ -161,13 +161,15 @@ class PremiumShop {
 
   private buy(): void {
     const fs = this.fs, [id, price, qty] = PREMIUM[this.cur];
-    const capped = id === 8 ? fs.inv.bags >= 2 : STACKED.has(id) && countOf(fs.inv, 0x1b, id) + qty > COUPON_MAX;
+    // FUN_00054cb8: bag at most 2, stacks at most 9999, unlock items (1 / 9 / 10 / 13) once (+0x32a5 bit) -> 0x65
+    const unlock = (UNLOCK_1B as readonly number[]).includes(id);
+    const capped = id === 8 ? fs.inv.bags >= 2 : unlock ? fs.inv.unlocked(id) : STACKED.has(id) && countOf(fs.inv, 0x1b, id) + qty > COUPON_MAX;
     if (capped) { this.popup = { p: new Popup(this.ctx, 0x65) }; return; }
     if (coupons(fs) < price) { this.popup = { p: new Popup(this.ctx, 0x7d), ok: () => { this.request = 'coupon'; } }; return; }
     this.popup = { p: new Popup(this.ctx, 0x74), yes: () => {
       if (id === 8) { consume(fs.inv, COUPON[0], COUPON[1], price); fs.inv.setBags(fs.inv.bags + 1); grantSave(fs);
         this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4e9] ?? '') }; return; }
-      if (fs.inv.items.length >= fs.inv.cap && !(STACKED.has(id) && countOf(fs.inv, 0x1b, id))) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
+      if (!unlock && fs.inv.items.length >= fs.inv.cap && !(STACKED.has(id) && countOf(fs.inv, 0x1b, id))) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
       consume(fs.inv, COUPON[0], COUPON[1], price);
       fs.inv.gain(0x1b, id, 0, qty, fs.rng);
       grantSave(fs);

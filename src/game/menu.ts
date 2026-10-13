@@ -8,6 +8,8 @@ import { AVK } from './input';
 import { padGlyph } from './gamepad';
 import { QUICK_KEYS, slotPickerKey } from './keys';
 import { expNeed } from './rules';
+import { rankScore } from './ranking';
+import { cellView } from './tabs';
 import type { GameContext } from './scene';
 import { EquipTab, InventoryTab } from './tabs';
 import { SkillTab } from './skillTab';
@@ -16,7 +18,7 @@ import { QuestTab } from './questTab';
 import { MapTab } from './mapTab';
 import { CommunityTab } from './community';
 import type { Ui } from './ui';
-import { button, gt, h, menuList, padBadge, slot, sprite, win } from './view';
+import { button, cSprite, gt, h, menuList, padBadge, slot, sprite, win, type VChild, type VNode } from './view';
 
 const STAT_HELP = [0x1a18, 0x1a19, 0x1a1a, 0x1a1b, 0x1a1c];
 
@@ -33,6 +35,8 @@ export class GameMenu {
   private page = 0;
   /** character page 0 stat cursor (0..3 = STR AGI VIT INT) */
   private statCur = 0;
+  /** character pages 3..5 (collections) cursor 0..9 (FUN_0004a418, 2 rows × 5) */
+  private collCur = 0;
   /** character page 0 d-pad focus: the stat grid, the title box above it ('0') or 퀵슬롯해제 to its right ('7') */
   private charFocus: 'stats' | 'title' | 'release' = 'stats';
 
@@ -114,10 +118,11 @@ export class GameMenu {
     for (const k of presses) {
       if (k === AVK.K1) { this.type = (this.type + 7) & 7; this.page = 0; }      // FUN_00056198
       else if (k === AVK.K3) { this.type = (this.type + 1) & 7; this.page = 0; }
-      else if (k === AVK.STAR) this.page = (this.page + this.pages() - 1) % this.pages();
-      else if (k === AVK.POUND) this.page = (this.page + 1) % this.pages();
+      else if (k === AVK.STAR) { this.page = (this.page + this.pages() - 1) % this.pages(); this.collCur = 0; }
+      else if (k === AVK.POUND) { this.page = (this.page + 1) % this.pages(); this.collCur = 0; }
       else if (k === AVK.CLR) { this.inTab = false; }
       else if (this.type === 0 && this.page === 0) this.charKey(k);
+      else if (this.type === 0 && this.page >= 3) this.collectKey(k);
     }
     if (this.type !== 5 || !this.inTab) this.map.leaveFloor();
     return null;
@@ -299,6 +304,7 @@ export class GameMenu {
     if (body) { body.draw(u); body.drawOverlay(u); }
     else if (this.type === 0 && this.page === 0 && this.titles) this.drawTitles(u);
     else if (this.type === 0 && this.page === 0) { this.drawCharPage0(u); if (this.release) this.drawRelease(u); }
+    else if (this.type === 0) u.mount('tab', `char${this.page}`, this.page <= 2 ? this.charStatsView(this.page) : this.collectView(this.page));
     else u.mount('tab', 'soon', h('div.v-col.v-fill.v-center', { style: 'gap:16px' },
       gt(this.ctx.assets.text[0x147 + this.type] ?? ''), gt('준비 중', { pen: 0x9cd3 })));
     u.pop();
@@ -318,6 +324,93 @@ export class GameMenu {
         padBadge(this.ctx.input, QUICK_KEYS[i], 'v-pad-slot'));
     });
     u.view('charRelease', -50, 15, 31, 6 * 35, h('div.v-col', { style: 'gap:4px' }, slots));
+  }
+
+  /** FUN_00049134 on the 5 × 2 collection grid (pages 3..5) */
+  private collectKey(k: number): void {
+    const c = this.collCur;
+    if (k === AVK.LEFT) this.collCur = c % 5 ? c - 1 : c + 4;
+    else if (k === AVK.RIGHT) this.collCur = c % 5 < 4 ? c + 1 : c - 4;
+    else if (k === AVK.UP || k === AVK.DOWN) this.collCur = (c + 5) % 10;
+  }
+
+  /**
+   * Character pages 1 / 2 (FUN_00058cd8; D[i] = DAT_003d1b6c + 4i). Page 1: the three element values
+   * D[12..14] (c.pxl 8 + icon 3+k), 채집레벨 with its gauge (exp·123 / need, full at level 5; need d+0x21588),
+   * ATK D[0] / DEF D[2], then 적중률 D[5], 회피율 D[26] ("%d.5%%" while 재빠른 움직임's level is odd: its
+   * trunc(lv/2) dropped half a percent), 크리티컬 D[4], 크리티컬 데미지 D[44]. Page 2: 장비획득율 D[17],
+   * 골드획득율 D[16], 중독 D[34] / 기절 D[35] / 암흑 D[33] / 슬로우 D[32] 내성, 업적 점수 FUN_00061864.
+   */
+  private charStatsView(page: number): VNode {
+    const fs = this.field, a = this.ctx.assets, t = a.text, D = fs.stats.D;
+    // sprintf: '%s', '%d', then '%%' -> '%'
+    const fmt = (f: string, label: number, v: number | string) => f.replace('%s', t[label] ?? '').replace('%d', String(v)).replace('%%', '%');
+    const pct = (id: number, v: number) => gt(fmt(t[0x1ae5] ?? '%s %d%%', id, v));
+    const num = (id: number, v: number) => gt((t[0x1a74] ?? '%s %d').replace('%s', t[id] ?? '').replace('%d', String(v)));
+    if (page === 2) {
+      const st = fs.story, score = rankScore(fs.inv.equip, fs.lap, st.titles.size, st.dimClears ?? 0, st.counters.vermutKills ?? 0);
+      return h('div.v-col.v-fill.v-tab.ch-stats', null,
+        h('div.v-col.ch-lines.ch-fixed.ch-top', null, pct(0x1aeb, D[17]), pct(0x1aec, D[16])),     // y 38 / 54
+        h('div.v-rule'),
+        h('div.v-col.ch-lines.ch-fixed', null, num(0x1aef, D[34]), num(0x1af0, D[35]), num(0x1af1, D[33]), num(0x1af2, D[32]), num(0x1af3, score)));
+    }
+    const g = fs.story.gather, need = a.d16(0x21588 + 2 * g.lv);
+    const p = g.lv === 5 ? 1 : Math.min(1, g.exp / Math.max(1, need));
+    const lv = fs.skills[9 + 6] ?? 0, odd = lv >= 1 && (lv + D[53]) % 2 === 1;
+    const evade = odd ? gt(fmt(t[0x1ae7] ?? '%s %d.5%%', 0x1ae8, D[26] < 0 ? D[26] + 1 : D[26]))
+      : pct(0x1ae8, D[26]);
+    return h('div.v-col.v-fill.v-tab.ch-stats', null,
+      h('div.v-row.ch-elems', null, [0, 1, 2].map((k) => h('div.v-row.ch-elem', null,
+        h('span.ch-elem-icon', null, cSprite(a, 8), cSprite(a, 3 + k, 'ch-elem-fg')), h('span.ch-num', null, String(D[12 + k]))))),
+      h('div.v-row.v-stat-bar.ch-gather', null,
+        gt(t[0x1a4e] ?? ''), h('span.ch-num', null, String(g.lv + 1)),
+        h('div.v-bar.exp', { style: `--p:${p.toFixed(3)}` }),
+        h('span.v-bar-value', null, `${g.exp}/${need}`)),
+      h('div.v-rule'),
+      h('div.v-col.ch-atk', null, num(0x1aed, D[0]), num(0x1aee, D[2])),
+      h('div.v-rule'),
+      h('div.v-col.ch-lines.v-grow', null, pct(0x1ae6, D[5]), evade, pct(0x1ae9, D[4]), pct(0x1aea, D[44])));
+  }
+
+  /**
+   * Character pages 3..5 (FUN_0005c24c): title 0x1A0B + page over a 5 × 2 grid, then the name (0x7FC + model)
+   * and description of the cursor's entry. 3 키아이템: type 0x1D collection bits (+0x3171; +0x3173 dims),
+   * desc 0xC82 + i. 4 퀘스트아이템: the key store (records 106.. = type 0x1A items; the web keeps them in the
+   * bag, so its type 0x1A items in order), desc 0xC37 + sub. 5 귀속아이템: d.dat 0x4031A9 ids (0x1B; 0xFF = none),
+   * dimmed / grey text while not owned (+0x32A5 bit i), desc 0xC48 + id.
+   */
+  private collectView(page: number): VNode {
+    const fs = this.field, a = this.ctx.assets, t = a.text, db = fs.db, st = fs.story;
+    const keys = fs.inv.items.filter((it) => it.type === 0x1a).slice(0, 10);
+    const entry = (i: number): { icon: VChild; model: number; desc: number; dim: boolean } | null => {
+      if (page === 3) {
+        if (!st.collect.has(i)) return null;
+        const r = db.iconRect(db.icon(0x1d, i));
+        return { icon: sprite(r.image, r.sx, r.sy, 16, 16), model: db.model(0x1d, i, 0), desc: 0xc82 + i, dim: st.collectDim.has(i) };
+      }
+      if (page === 4) {
+        const it = keys[i];
+        return it ? { icon: cellView(fs, it, { cls: 'ch-item' }), model: db.model(0x1a, it.sub, 0), desc: 0xc37 + it.sub, dim: false } : null;
+      }
+      const id = a.d8(0x4031a9 - 0x3dc324 + i);
+      if (id === 0xff) return null;
+      const r = db.iconRect(db.icon(0x1b, id));
+      return { icon: sprite(r.image, r.sx, r.sy, 16, 16), model: db.model(0x1b, id, 0), desc: 0xc48 + id, dim: !fs.inv.unlocked(id) };
+    };
+    const cells = Array.from({ length: 10 }, (_, i) => {
+      const e = entry(i);
+      return h(`div.ch-cell${i === this.collCur ? '.v-sel' : ''}${e?.dim ? '.dim' : ''}`, {
+        on: () => { this.collCur = i; },
+      }, e?.icon);
+    });
+    const cur = entry(this.collCur);
+    return h('div.v-col.v-fill.v-tab.ch-coll', null,
+      h('div.v-box.v-col.ch-coll-box', null,
+        gt(t[0x1a0b + page] ?? '', { cls: 'ch-coll-title' }),
+        h('div.ch-grid', null, cells)),
+      h('div.v-box.v-col.v-grow.ch-coll-info', null,
+        cur && gt(t[0x7fc + cur.model] ?? '', { pen: 0xffe0 }),
+        cur && gt(t[cur.desc] ?? '', { pen: page === 5 && cur.dim ? 0x3186 : undefined, cls: 'v-left' })));
   }
 
   /** FUN_0005c560 character page 0: title, portrait with level / bars, stats 2x2, points, help line. */

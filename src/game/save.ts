@@ -37,7 +37,7 @@ export interface SaveData {
   returnZone?: number;
   /** event flags and quests (absent in a new game) */
   story?: StorySave;
-  inv?: { items: Item[]; equip: (Item | null)[]; quick: QuickSlot[]; gold: number; bags?: number };
+  inv?: { items: Item[]; equip: (Item | null)[]; quick: QuickSlot[]; gold: number; bags?: number; unlocks?: number };
 }
 
 export function loadSlot(i: number): SaveData | null {

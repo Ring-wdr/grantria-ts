@@ -416,6 +416,34 @@
 .v-bar-value { width: 64px; flex: none; text-align: right; }
 .v-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .v-points { gap: 4px; padding: 0 6px; min-height: 18px; }
+/* character pages 2..3 (FUN_00058cd8): element values, gather gauge, centred stat lines */
+.ch-stats { gap: 1px; padding: 2px 6px 0; }
+.ch-stats > .v-rule { margin: 2px 0; }
+.ch-stats .v-text { line-height: 15px; }
+.ch-elems { justify-content: space-around; }
+.ch-elem { gap: 4px; }
+.ch-elem-icon { position: relative; display: inline-flex; }
+.ch-elem-icon > .ch-elem-fg { position: absolute; left: 1px; top: 1px; }
+.ch-num { color: #fff; font-variant-numeric: tabular-nums; }
+.ch-gather > .v-text { flex: none; }
+.ch-gather > .ch-num { width: 14px; flex: none; }
+.ch-gather > .v-bar-value { width: 56px; }
+.ch-atk { padding-left: 72px; }
+.ch-lines { align-items: center; justify-content: space-evenly; }
+/* page 3: the original's 16 px line pitch (y 38, 54 | rule 78 | 95 .. 159) */
+.ch-fixed { justify-content: flex-start; padding-top: 8px; }
+.ch-fixed > .v-text { line-height: 16px; }
+.ch-top { padding: 8px 0 10px; }
+/* character pages 4..6 (FUN_0005c24c): titled 5 × 2 collection grid over an info box */
+.ch-coll { gap: 6px; padding-top: 2px; }
+.ch-coll-box { align-items: center; gap: 4px; padding: 4px 0 8px; }
+.ch-coll-title { color: #fff; }
+.ch-grid { display: grid; grid-template-columns: repeat(5, 26px); grid-auto-rows: 26px; gap: 10px 10px; }
+.ch-cell { position: relative; display: flex; align-items: center; justify-content: center; border-radius: 3px;
+  background: #000; box-shadow: inset 0 0 0 1px #354e73; }
+.ch-cell.dim > * { opacity: 0.31; }
+.ch-cell > .tb-cell { box-shadow: none; background: none; }
+.ch-coll-info { gap: 3px; padding: 5px 6px; min-height: 0; }
 .v-detail { position: relative; width: 196px; min-height: 96px; padding: 10px 10px 8px; gap: 6px; text-align: center; align-items: center; }
 .v-dim-note { color: #9cd3ff; }
 .ui-view .v-win { position: relative; }

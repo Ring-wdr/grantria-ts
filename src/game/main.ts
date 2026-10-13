@@ -57,7 +57,7 @@ const ctx: GameContext = {
     document.documentElement.style.setProperty('--tick', `${tickMs}ms`);
   },
   input: new Input(canvas, VIEW_W, VIEW_H),
-  go(s) { scene = s; },
+  go(s) { scene = s; ctx.input.padField = false; },
 };
 ctx.applyOptions();
 scene = new LogoScene(ctx);

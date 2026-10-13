@@ -388,7 +388,7 @@
 
 /* character page */
 .v-char { gap: 6px; padding: 0 2px; }
-.v-title-box { min-height: 18px; display: flex; align-items: center; justify-content: center; }
+.v-title-box { position: relative; min-height: 18px; display: flex; align-items: center; justify-content: center; }
 .v-portrait { border-radius: 4px; box-shadow: 0 0 0 1px #5d7092; }
 .v-stat-bar { gap: 4px; height: 12px; }
 .v-bar-label { width: 20px; flex: none; color: #c8d6ee; }
@@ -446,6 +446,8 @@
 /* pad shortcut badge on a button's top-right corner (view.ts padBadge) */
 .v-btn:has(> .v-pad-corner) { position: relative; overflow: visible; }
 .v-pad-corner { position: absolute; right: -3px; top: -6px; }
+/* pad glyph left of a quick-slot picker slot (keys.ts QUICK_KEYS) */
+.v-pad-slot { position: absolute; left: auto; right: calc(100% + 3px); top: 50%; transform: translateY(-50%); }
 .mf-pad { position: absolute; top: 50%; transform: translateY(-50%); }
 .mf-pad.l1 { left: -40px; }
 .mf-pad.r1 { right: -40px; }

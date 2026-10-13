@@ -5,6 +5,7 @@
 import type { Cmf } from '../assets';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
+import { QUICK_KEYS, slotPickerKey } from './keys';
 import type { Item } from './items';
 import { Popup } from './popup';
 import { buyBag } from './community';
@@ -12,7 +13,7 @@ import { ShopScreen } from './shop';
 import { combineNeeds, countOf, consume } from './shopRules';
 import type { GameContext } from './scene';
 import type { Ui } from './ui';
-import { button, cSprite, gt, h, sprite, type KeyAct, type VChild, type VNode } from './view';
+import { button, cSprite, gt, h, padBadge, sprite, type KeyAct, type VChild, type VNode } from './view';
 import './css/tabs.css';
 
 const IMAGE_BASE = `${import.meta.env.BASE_URL}assets/images/`;
@@ -184,6 +185,8 @@ export class InventoryTab {
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
   get busy(): boolean { return !!(this.action || this.detail || this.quick || this.confirm || this.message || this.shop); }
+  /** the quick-slot picker is open (its slot keys must not page the menu) */
+  get picking(): boolean { return !!this.quick; }
 
   private get idx(): number { return this.bag * 16 + this.sel; }
 
@@ -207,16 +210,16 @@ export class InventoryTab {
       const it = this.detail;
       for (const k of presses) {
         if (k === AVK.OK || k === AVK.CLR) { this.detail = null; break; }
-        if (k === AVK.K0 && it.type < 0x10) this.openGems(it);
+        if ((k === AVK.K0 || k === AVK.STAR) && it.type < 0x10) this.openGems(it);   // '0' (pad: L2)
         else if (k === AVK.POUND && it.type < 0x10) this.extractGems(it);
       }
       return true;
     }
     if (this.quick) {
       for (const k of presses) {
-        if (k === AVK.LEFT) this.quick.cur = (this.quick.cur + 5) % 6;
-        else if (k === AVK.RIGHT) this.quick.cur = (this.quick.cur + 1) % 6;
-        else if (k === AVK.OK) { inv.registerQuick(this.quick.cur, 2, this.quick.idx); this.quick = null; break; }
+        const m = slotPickerKey(k, this.quick.cur);
+        if (m) this.quick.cur = m.cur;
+        if (m?.pick || k === AVK.OK) { inv.registerQuick(this.quick.cur, 2, this.quick.idx); this.quick = null; break; }
         else if (k === AVK.CLR) { this.quick = null; break; }
       }
       return true;
@@ -228,8 +231,9 @@ export class InventoryTab {
     }
     for (const k of presses) {
       if (this.focus === 0) {
-        if (k === AVK.UP || k === AVK.DOWN) { const n = inv.bags + 3; this.bag = (this.bag + (k === AVK.UP ? n - 1 : 1)) % n; this.sel = 0; this.f = 0; }
-        else if (k === AVK.OK) this.focus = 1;
+        // the cursor also reaches the first locked bag (5 at most), where OK asks to buy it (popup 0x7E)
+        if (k === AVK.UP || k === AVK.DOWN) { const n = Math.min(5, inv.bags + 4); this.bag = (this.bag + (k === AVK.UP ? n - 1 : 1)) % n; this.sel = 0; this.f = 0; }
+        else if (k === AVK.OK) { if (this.bag >= inv.bags + 3) this.askBag(); else this.focus = 1; }
         else return false;                                            // common tab keys
       } else {
         const before = this.sel;
@@ -350,9 +354,7 @@ export class InventoryTab {
     const bagButtons = Array.from({ length: 5 }, (_, i) => {
       if (i >= bags) {                                          // locked bag: popup 0x7E (25 coupons, FUN_00047488)
         return button([sprite('t', 15, 24, 16, 16), sprite('c', 208, 63, 7, 9, { cls: 'tb-lock' })], {
-          cls: 'tb-bag locked', on: () => {
-            this.confirm = { popup: new Popup(this.ctx, 0x7e), idx: -1, yes: () => { this.message = buyBag(this.ctx, this.fs); } };
-          },
+          sel: i === this.bag, glow: this.focus === 0, cls: 'tb-bag locked', on: () => this.askBag(),
         });
       }
       const n = Math.max(0, Math.min(16, inv.items.length - 16 * i));   // FUN_0004c514 "n/16"
@@ -386,6 +388,11 @@ export class InventoryTab {
           button(gt(t[0x1a1d] ?? ''), { cls: 'tb-wide' }))));
   }
 
+  /** locked bag: popup 0x7E (25 coupons, FUN_00047488) */
+  private askBag(): void {
+    this.confirm = { popup: new Popup(this.ctx, 0x7e), idx: -1, yes: () => { this.message = buyBag(this.ctx, this.fs); } };
+  }
+
   /** item detail with the gem buttons ('0' attach, '#' extract) and the gem list (FUN_000441e4) */
   private drawDetail(u: Ui, it: Item): void {
     const fs = this.fs, inv = fs.inv;
@@ -395,8 +402,8 @@ export class InventoryTab {
       const empty = it.sockets.filter((g) => g !== 0xff).length < it.count;
       const extract = it.sockets.some((g) => g !== 0xff) && countOf(inv, 0x1b, 0x0b) > 0;
       footer = h('div.v-row.tb-detail-foot', null,
-        button(gt(this.ctx.assets.text[0x19e6] ?? ''), { cls: `tb-wide${empty ? '' : ' off'}`, on: () => [AVK.K0] }),
-        button(gt(this.ctx.assets.text[0x19e7] ?? ''), { cls: `tb-wide${extract ? '' : ' off'}`, on: () => [AVK.POUND] }));
+        button([gt(this.ctx.assets.text[0x19e6] ?? ''), padBadge(this.ctx.input, AVK.STAR, 'v-pad-corner')], { cls: `tb-wide${empty ? '' : ' off'}`, on: () => [AVK.K0] }),
+        button([gt(this.ctx.assets.text[0x19e7] ?? ''), padBadge(this.ctx.input, AVK.POUND, 'v-pad-corner')], { cls: `tb-wide${extract ? '' : ' off'}`, on: () => [AVK.POUND] }));
       if (this.gems) {
         const g = this.gems, top = Math.max(0, Math.min(g.cur - 3, g.list.length - 4));
         const cells = Array.from({ length: 4 }, (_, k) => {
@@ -428,7 +435,8 @@ export class InventoryTab {
         !cur && s.kind === 2 && inv.items[s.id] && itemIcon(fs, inv.items[s.id], 'tb-qicon dim'),
         !cur && s.kind === 1 && sprite('sIcon', (s.id % 10) * 24, fs.model.cls * 24, 24, 24, { cls: 'tb-qskill dim' }),
         reg && itemIcon(fs, reg, 'tb-qicon'),
-        reg && fs.db.showsCount(reg) && h('span.tb-count', null, String(reg.count)));
+        reg && fs.db.showsCount(reg) && h('span.tb-count', null, String(reg.count)),
+        padBadge(this.ctx.input, QUICK_KEYS[i], 'v-pad-slot'));                // the slot's own button picks it
     });
     u.view('invQuick', -50, 15, 31, 6 * 35, h('div.v-col', { style: 'gap:4px' }, slots));
   }

@@ -3,6 +3,7 @@
 // sub-tab (account traits) is drawn but its points (gamedata 0x35c) are not ported.
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
+import { QUICK_KEYS, slotPickerKey } from './keys';
 import { Popup } from './popup';
 import { account, traitCheck, traitCommit } from './account';
 import { effectiveSkillLevel, rdiv } from './rules';
@@ -44,6 +45,8 @@ export class SkillTab {
   private detail = false;
 
   get busy(): boolean { return !!(this.popup || this.quick || this.detail); }
+  /** the quick-slot picker is open (its slot keys must not page the menu) */
+  get picking(): boolean { return !!this.quick; }
 
   private learned(idx: number): number {
     return this.sub === 0 ? this.fs.skills[idx] : this.sub === 1 ? this.fs.skills[9 + idx] : account().traits[idx] ?? 0;
@@ -64,9 +67,9 @@ export class SkillTab {
     }
     if (this.quick) {
       for (const k of presses) {
-        if (k === AVK.LEFT) this.quick.cur = (this.quick.cur + 5) % 6;
-        else if (k === AVK.RIGHT) this.quick.cur = (this.quick.cur + 1) % 6;
-        else if (k === AVK.OK) { this.fs.inv.registerQuick(this.quick.cur, 1, this.quick.action, skillMaxCd(this.fs, this.quick.action)); this.quick = null; break; }
+        const m = slotPickerKey(k, this.quick.cur);
+        if (m) this.quick.cur = m.cur;
+        if (m?.pick || k === AVK.OK) { this.fs.inv.registerQuick(this.quick.cur, 1, this.quick.action, skillMaxCd(this.fs, this.quick.action)); this.quick = null; break; }
         else if (k === AVK.CLR) { this.quick = null; break; }
       }
       return true;
@@ -244,7 +247,8 @@ export class SkillTab {
       return h(`div.sk-qslot${cur ? '.cur' : ''}`, { on: () => { if (q.cur === i) return [AVK.OK]; q.cur = i; } },
         sprite('touch', 0, 18, 31, 31, { cls: 'sk-qpad' }),
         cur ? sprite('sIcon', q.action * 24, cls * 24, 24, 24, { cls: 'sk-qicon' })
-          : s.kind === 1 && sprite('sIcon', (s.id % 10) * 24, cls * 24, 24, 24, { cls: 'sk-qicon dim' }));
+          : s.kind === 1 && sprite('sIcon', (s.id % 10) * 24, cls * 24, 24, 24, { cls: 'sk-qicon dim' }),
+        padBadge(this.ctx.input, QUICK_KEYS[i], 'v-pad-slot'));                // the slot's own button picks it
     });
     u.view('skill-quick', -50, 15, 31, 35 * 6 - 4, h('div.v-col.v-fill.sk-quick', null, slots));
   }

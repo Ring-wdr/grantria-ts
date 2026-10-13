@@ -48,6 +48,10 @@ export class Input {
   zones: { x: number; y: number; w: number; h: number; key: number }[] = [];
   /** UI mode (menus, popups, dialogue): pointer downs become taps instead of zones / stick */
   uiMode = false;
+  /** field play with nothing open (PlayScene sets it every tick, a scene change clears it): the pad's d-pad
+   *  presses the HUD buttons (PAD_FIELD). Not uiMode: the title / slot / class screens turn uiMode off for
+   *  their touch zones but still need the d-pad as directions. */
+  padField = false;
   private taps: { x: number; y: number }[] = [];
   private zoneKeys = new Map<number, number>();
   /** the device used last (on-screen hints follow it) */
@@ -116,7 +120,7 @@ export class Input {
       if (Math.hypot(r.lx, r.ly) > Math.hypot(lx, ly)) { lx = r.lx; ly = r.ly; }
       if (Math.abs(r.ry) > PAD_DEAD) { kind ??= padKind(p.id); if (Math.abs(r.ry) > Math.abs(ry)) ry = r.ry; }
     }
-    for (const b of now) if (!this.padHeld.has(b)) this.padHeld.set(b, padKeysOf(b, !this.uiMode));
+    for (const b of now) if (!this.padHeld.has(b)) this.padHeld.set(b, padKeysOf(b, this.padField));
     for (const b of [...this.padHeld.keys()]) if (!now.has(b)) this.padHeld.delete(b);
     for (const ks of this.padHeld.values()) for (const k of ks) keys.add(k);
     this.padScrollY = ry ? Math.sign(ry) * (Math.abs(ry) - PAD_DEAD) / (1 - PAD_DEAD) : 0;
@@ -205,7 +209,9 @@ export class Input {
   /** Most recently pressed key still held (for button highlighting, like DAT_003b3af8). */
   lastHeld(): number {
     if (this.stick.key) return this.stick.key;
-    return this.order[this.order.length - 1] ?? 0;
+    // TAB_L / TAB_R ride along with the pad's K7 / K9 and light no button: report the slot key
+    for (let i = this.order.length - 1; i >= 0; i--) if (this.order[i] !== AVK.TAB_L && this.order[i] !== AVK.TAB_R) return this.order[i];
+    return 0;
   }
 
   isHeld(k: number): boolean {

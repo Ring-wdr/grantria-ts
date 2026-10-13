@@ -12,6 +12,7 @@ import { Popup } from './popup';
 import { VIEW_H as H, VIEW_W as W } from './field';
 import { AVK } from './input';
 import { HUD } from './keys';
+import { padButtonFor, padGlyph } from './gamepad';
 import { SLOT_COUNT, deleteSlot, loadGamedata, loadSlot, newGame, saveSlot, setLap, type SaveData } from './save';
 import { Story } from './story';
 import type { GameContext, Scene } from './scene';
@@ -136,6 +137,8 @@ class RatingScene implements Scene {
 }
 
 const TITLE_RANKING = -40, TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43;
+/** pad key -> title icon key, icon x: 옵션 (□/X = '1'), 도움말 (△/Y = '3'), 데이터 (L2 = '*') */
+const TITLE_PAD: [number, number, number][] = [[AVK.K1, TITLE_OPTION, 0x157], [AVK.K3, TITLE_HELP, 0x187], [AVK.STAR, TITLE_DATA, 0x1b6]];
 
 /** States 0x08 (110-frame intro) and 0x09 (menu). */
 export class TitleScene implements Scene {
@@ -159,6 +162,8 @@ export class TitleScene implements Scene {
       return;
     }
     for (const k of presses) if (k === AVK.LEFT || k === AVK.RIGHT) this.sel ^= 1;
+    // the three top-right icons are touch zones only; a pad reaches them with □ / △ / L2 (TITLE_PAD)
+    presses = presses.map((k) => TITLE_PAD.find(([key]) => key === k)?.[1] ?? k);
     if (presses.includes(TITLE_DATA)) { this.ctx.go(new DataScene(this.ctx)); return; }
     if (presses.includes(TITLE_OPTION)) { this.ctx.go(new TitleOptionScene(this.ctx, 'settings')); return; }   // state 0x0C
     if (presses.includes(TITLE_HELP)) { this.ctx.go(new TitleOptionScene(this.ctx, 'help')); return; }         // state 0x0D
@@ -170,6 +175,11 @@ export class TitleScene implements Scene {
       titleBackground(this.ctx, this.t, this.state);
       if (performance.now() < this.badgeUntil) this.ctx.ui.image('title_bg', 0xf0, 0, 0x66, 0x78, W - 0x66, 0);
       if (this.state === 9) titleButtons(this.ctx.ui, this.sel);
+      const inp = this.ctx.input;
+      if (this.state === 9 && inp.device === 'pad') for (const [key, , x] of TITLE_PAD) {
+        const b = padButtonFor(key);
+        if (b) this.ctx.ui.padHint(padGlyph(inp.padKind, b), inp.padKind, b, x + 22, 7 + 24);
+      }
     });
   }
 }
@@ -420,6 +430,7 @@ export class PlayScene implements Scene {
     // touch (UI mode): taps run the topmost area registered while drawing (menus / popups first, then the field UI)
     const f = this.field;
     this.ctx.input.uiMode = !!(this.field.ending || this.overShop || this.overPopup || this.menu || this.shop || this.pause || this.notice || this.askSave || f.popup || f.busyTalking || f.dead);
+    this.ctx.input.padField = !this.ctx.input.uiMode;
     for (const t of this.ctx.input.takeTaps()) {
       const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? this.ctx.hud.tapAt(t.x, t.y);
       if (keys) presses = [...presses, ...keys];

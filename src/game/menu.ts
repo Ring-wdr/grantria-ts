@@ -6,6 +6,7 @@ import { cmfImages } from '../sprites';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
 import { padGlyph } from './gamepad';
+import { QUICK_KEYS, slotPickerKey } from './keys';
 import { expNeed } from './rules';
 import type { GameContext } from './scene';
 import { EquipTab, InventoryTab } from './tabs';
@@ -15,7 +16,7 @@ import { QuestTab } from './questTab';
 import { MapTab } from './mapTab';
 import { CommunityTab } from './community';
 import type { Ui } from './ui';
-import { button, gt, h, menuList, slot, sprite, win } from './view';
+import { button, gt, h, menuList, padBadge, slot, sprite, win } from './view';
 
 const STAT_HELP = [0x1a18, 0x1a19, 0x1a1a, 0x1a1b, 0x1a1c];
 
@@ -32,6 +33,8 @@ export class GameMenu {
   private page = 0;
   /** character page 0 stat cursor (0..3 = STR AGI VIT INT) */
   private statCur = 0;
+  /** character page 0 d-pad focus: the stat grid, the title box above it ('0') or 퀵슬롯해제 to its right ('7') */
+  private charFocus: 'stats' | 'title' | 'release' = 'stats';
 
   private inventory: InventoryTab;
   private equipment: EquipTab;
@@ -63,9 +66,12 @@ export class GameMenu {
   }
 
   update(input: number[]): MenuResult {
-    // L1 / R1 (TAB_L / TAB_R) page the tabs; the pad also sent their quick-slot keys K7 / K9, dropped here
-    const paging = input.some((k) => k === AVK.TAB_L || k === AVK.TAB_R);
-    let presses = paging ? input.filter((k) => k !== AVK.K7 && k !== AVK.K9) : input;
+    // L1 / R1 (TAB_L / TAB_R) page the tabs; the pad also sent their quick-slot keys K7 / K9, dropped here.
+    // In a quick-slot picker L1 / R1 stay slot keys (slots 3 / 4) and do not page.
+    const picking = this.inTab && !!(this.release || this.skill.picking || this.inventory.picking);
+    const tabKey = (k: number) => k === AVK.TAB_L || k === AVK.TAB_R;
+    const paging = !picking && input.some(tabKey);
+    let presses = paging ? input.filter((k) => k !== AVK.K7 && k !== AVK.K9) : picking ? input.filter((k) => !tabKey(k)) : input;
     this.t++;
     if (!this.inTab) {
       this.f++;
@@ -98,9 +104,9 @@ export class GameMenu {
       for (const k of presses) {
         const r = this.release;
         if (!r) break;
-        if (k === AVK.LEFT) r.cur = (r.cur + 5) % 6;
-        else if (k === AVK.RIGHT) r.cur = (r.cur + 1) % 6;
-        else if (k === AVK.OK) { this.field.inv.clearQuick(r.cur); this.release = null; }
+        const m = slotPickerKey(k, r.cur);
+        if (m) r.cur = m.cur;
+        if (m?.pick || k === AVK.OK) { this.field.inv.clearQuick(r.cur); this.release = null; }
         else if (k === AVK.CLR) this.release = null;
       }
       return null;
@@ -193,11 +199,30 @@ export class GameMenu {
     if (detail) u.mount('tab-over', 'titleDetail', detail);
   }
 
-  /** Character page 0: 2x2 stat buttons, '5' spends a stat point (applied at once here). */
+  /**
+   * Character page 0: 2x2 stat buttons, '5' spends a stat point (applied at once here); '0' title list,
+   * '7' 퀵슬롯해제. A pad has no '0' and its '7' (L1) pages the tabs, so the d-pad also walks to the
+   * title box (UP from the top stat row) and the 퀵슬롯해제 button (RIGHT from the right column), OK opens them.
+   */
   private charKey(k: number): void {
     if (k === AVK.K0) { this.titles = { page: 0, sel: 0, detail: false }; return; }   // title list 0x31
     if (k === AVK.K7) { this.release = { cur: 0 }; return; }                          // 퀵슬롯해제 overlay
-    if (k === AVK.LEFT || k === AVK.RIGHT) this.statCur ^= 1;
+    const f = this.charFocus, c = this.statCur;
+    if (f === 'title') {
+      if (k === AVK.DOWN) this.charFocus = 'stats';
+      else if (k === AVK.RIGHT) this.charFocus = 'release';
+      else if (k === AVK.OK) this.titles = { page: 0, sel: 0, detail: false };
+      return;
+    }
+    if (f === 'release') {
+      if (k === AVK.LEFT || k === AVK.DOWN) { this.charFocus = 'stats'; this.statCur = k === AVK.DOWN ? 3 : c | 1; }
+      else if (k === AVK.UP) this.charFocus = 'title';
+      else if (k === AVK.OK) this.release = { cur: 0 };
+      return;
+    }
+    if (k === AVK.UP && c < 2) this.charFocus = 'title';
+    else if (k === AVK.RIGHT && c & 1) this.charFocus = 'release';
+    else if (k === AVK.LEFT || k === AVK.RIGHT) this.statCur ^= 1;
     else if (k === AVK.UP || k === AVK.DOWN) this.statCur ^= 2;
     else if (k === AVK.OK && this.field.statPoints > 0) {
       this.field.model.stats[this.statCur]++;
@@ -289,7 +314,8 @@ export class GameMenu {
       return h(`div.cq-slot${i === r.cur ? '.cur' : ''}`, { on: () => { if (r.cur === i) return [AVK.OK]; r.cur = i; } },
         sprite('touch', 0, 18, 31, 31),
         q.kind === 1 && sprite('sIcon', (q.id % 10) * 24, fs.model.cls * 24, 24, 24, { cls: 'cq-icon skill' }),
-        ir && sprite(ir.image, ir.sx, ir.sy, 16, 16, { cls: 'cq-icon' }));
+        ir && sprite(ir.image, ir.sx, ir.sy, 16, 16, { cls: 'cq-icon' }),
+        padBadge(this.ctx.input, QUICK_KEYS[i], 'v-pad-slot'));
     });
     u.view('charRelease', -50, 15, 31, 6 * 35, h('div.v-col', { style: 'gap:4px' }, slots));
   }
@@ -305,13 +331,14 @@ export class GameMenu {
         h(`div.v-bar.${cls}`, { style: `--p:${Math.max(0, Math.min(1, cur / Math.max(1, max))).toFixed(3)}` }),
         h('span.v-bar-value', null, `${cur}/${max}`));
     const c = this.statCur;
+    const cf = this.charFocus;
     const stats = Array.from({ length: 4 }, (_, i) => button(`${t[0x15 + i] ?? ''} ${m.stats[i]}`, {
-      sel: i === c, on: () => { if (this.statCur === i) return [AVK.OK]; this.statCur = i; },
+      sel: cf === 'stats' && i === c, on: () => { this.charFocus = 'stats'; if (this.statCur === i) return [AVK.OK]; this.statCur = i; },
     }));
     u.mount('tab', 'char', h('div.v-col.v-fill.v-tab.v-char', null,
       h('div.v-row', { style: 'gap:6px' },
         button(gt(t[0x1a14] ?? ''), { sel: true, glow: false, style: 'width:62px' }),             // 칭호
-        h('div.v-box.v-grow.v-title-box', { on: () => [AVK.K0] },                                 // tap: title list 0x31
+        h(`div.v-box.v-grow.v-title-box${cf === 'title' ? '.v-sel' : ''}`, { on: () => [AVK.K0] },   // tap / d-pad OK: title list 0x31
           gt(worn === 0xff ? t[0x1a15] ?? '' : t[0xcff + worn] ?? '', { pen: 0x37ff }))),
       h('div.v-row', { style: 'gap:8px;align-items:flex-start' },
         sprite(`face_s_${m.cls}`, 0, 0, 0x38, 0x38, { cls: 'v-portrait' }),
@@ -323,7 +350,7 @@ export class GameMenu {
       h('div.v-row', { style: 'gap:6px;align-items:stretch' },
         h('div.v-stat-grid.v-grow', null, stats),
         h('div.v-col', { style: 'gap:6px;width:62px' },
-          button(gt(t[0x1a16] ?? ''), { sel: true, glow: false, on: () => [AVK.K7] }),            // 퀵슬롯해제 = '7'
+          button(gt(t[0x1a16] ?? ''), { sel: true, glow: cf === 'release', on: () => [AVK.K7] }),   // 퀵슬롯해제 = '7' (d-pad: RIGHT)
           h('div.v-box.v-row.v-points', null, sprite('c', 0xb7, 0x58, 0xe, 0xe), h('span.v-grow', { style: 'text-align:right' }, String(fs.statPoints))))),
       h('div.v-box.v-note', null, gt(t[STAT_HELP[c]] ?? ''))));
   }

@@ -9,7 +9,7 @@ import { SLOT_COUNT, loadGamedata, loadSlot, type SaveData } from './save';
 import type { GameContext, Scene } from './scene';
 import { frozenTitle, playTime, render, TitleScene } from './screens';
 import type { Ui } from './ui';
-import { button, gt, h, sprite, type VNode } from './view';
+import { button, gt, h, padBadge, sprite, type VNode } from './view';
 import './css/screens-misc.css';
 
 export interface RankEntry {
@@ -89,7 +89,8 @@ export class RankingScene implements Scene {
     for (const tap of this.ctx.input.takeTaps()) { const k = this.ctx.ui.tapAt(tap.x, tap.y); if (k) presses = [...presses, ...k]; }
     if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); } return; }
     const rows = this.sorted(), pages = Math.max(1, Math.ceil(rows.length / 3));
-    for (const k of presses) {
+    // '0' (list / 1위부터·내랭킹 / skill view) has no pad button: △ / Y stands in for it on these screens
+    for (const k of presses.map((k) => (k === AVK.K3 ? AVK.K0 : k))) {
       if (this.state === 0x35) {                                      // FUN_00041b20
         if (k === AVK.UP) this.cur = (this.cur + 2) % 3;
         else if (k === AVK.DOWN) this.cur = (this.cur + 1) % 3;
@@ -147,6 +148,9 @@ export class RankingScene implements Scene {
       h('div.v-grow.v-center.v-row', null, gt(t[0x1d6 + (sl.zone ?? 0)] ?? '')),
       h('div.sm-time', null, playTime(sl.playTicks)))));
     u.view('rank-slots', 0, 24, 219, 3 * 66 - 3, h('div.v-col.v-fill', { style: 'gap:3px' }, cards));
+    // '0' opens the list without registering; the original had no button for it (keypad only)
+    u.view('rank-open', 0, 0, 219, 20, h('div.v-row', { style: 'height:100%;justify-content:flex-end' },
+      button([gt('순위 보기'), padBadge(this.ctx.input, AVK.K3, 'v-pad-corner')], { glow: false, style: 'height:18px;padding:0 8px', on: () => [AVK.K0] })));
     for (let i = 0; i < 3; i++) {
       const y = 22 + 66 * i, sl = this.slots[i];
       if (!sl) { u.cfont('EMPTY SPACE', 0x56, y + 0x1b, 0); continue; }
@@ -176,7 +180,7 @@ export class RankingScene implements Scene {
       h('div.v-row.sm-head', null,
         h('span.sm-head-side'),
         gt(t[6617] ?? '', { cls: 'v-grow sm-title' }),
-        button(gt(t[this.mine ? 6639 : 6638] ?? ''), { sel: true, glow: false, cls: 'sm-head-side', on: () => [AVK.K0] })),
+        button([gt(t[this.mine ? 6639 : 6638] ?? ''), padBadge(this.ctx.input, AVK.K3, 'v-pad-corner')], { sel: true, glow: false, cls: 'sm-head-side', on: () => [AVK.K0] })),
       h('div.v-col.v-grow', { style: 'gap:4px' }, cards),
       h('div.v-row.v-pager', null,
         h('span.v-page-btn', { on: () => [AVK.STAR] }, '◀'), `${this.page + 1}/${pages}`, h('span.v-page-btn', { on: () => [AVK.POUND] }, '▶')));
@@ -194,7 +198,7 @@ export class RankingScene implements Scene {
         kv(t[6731] ?? '', e.hp), kv(t[6732] ?? '', e.mp), kv(t[6729] ?? '', e.dmg), kv(t[6730] ?? '', e.def)),
       h('div.v-row', { style: 'gap:6px;align-items:stretch' },
         h('div.v-box.sm-pair.sm-block.v-grow', null, e.stats.map((v, k) => kv(t[21 + k] ?? '', v))),
-        h('div.v-col.v-center', null, button(gt(t[6641] ?? ''), { sel: this.skillView, glow: false, cls: 'sm-skill-btn', on: () => [AVK.K0] }))),
+        h('div.v-col.v-center', null, button([gt(t[6641] ?? ''), padBadge(this.ctx.input, AVK.K3, 'v-pad-corner')], { sel: this.skillView, glow: false, cls: 'sm-skill-btn', on: () => [AVK.K0] }))),
       h('div.v-row.sm-equips', null, e.equip.map((it, k) => {
         const r = it && this.db.iconRect(it.icon);
         return h(`div.sm-eq${k === this.eq ? '.v-sel.cur' : ''}`, { on: () => { this.eq = k; } }, r && sprite(r.image, r.sx, r.sy, 16, 16));

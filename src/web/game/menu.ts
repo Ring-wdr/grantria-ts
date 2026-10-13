@@ -5,7 +5,6 @@
 import { cmfImages } from '../render/sprites';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { padGlyph } from '../input/gamepad';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
 import { expNeed } from '../../core/rules/rules';
 import { rankScore } from './ranking';
@@ -20,6 +19,7 @@ import { CommunityTab } from './community';
 import type { Ui } from '../render/ui';
 import { Popup } from './popup';
 import { button, cSprite, gt, h, menuList, padBadge, slot, sprite, win, type VChild, type VNode } from '../render/view';
+import { tabHint } from '../input/keyHints';
 
 const STAT_HELP = [0x1a18, 0x1a19, 0x1a1a, 0x1a1b, 0x1a1c];
 
@@ -325,8 +325,10 @@ export class GameMenu {
       h('span.mf-arrow.left', { on: () => [AVK.STAR] }, sprite('t', 0, 0x13, 0xf, 0x13)),
       `${this.page + 1}/${this.pages()}`,
       h('span.mf-arrow.right', { on: () => [AVK.POUND] }, sprite('t', 0, 0x13, 0xf, 0x13, { flip: true })));
-    const inp = this.ctx.input, pad = (b: 'l1' | 'r1') => inp.device === 'pad'
-      && h(`span.u-pad.wide.mf-pad.${b}.${inp.padKind}`, null, padGlyph(inp.padKind, b));     // L1 / R1 page the tabs
+    const inp = this.ctx.input, pad = (b: 'l1' | 'r1') => {                                  // L1 / R1 (Q / E) page the tabs
+      const k = tabHint(inp, b);
+      return k && h(`span.u-pad.wide.mf-pad.${b}.${k.cls.split(' ').join('.')}`, null, k.glyph);
+    };
     u.view('menuFrame', -24, -12, 294, 234, h('div.mf', { cls: (this.body?.busy || this.titles?.detail || this.release) && 'mf-inert' },
       h('div.v-row.mf-tabs', null, tabs, pad('l1'), pad('r1')),
       win('.v-col.mf-window', null, slot('tab'), pager, slot('tab-over')),

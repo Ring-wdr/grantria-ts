@@ -38,9 +38,13 @@ await Promise.all([assets.init(), font.load().then((f) => document.fonts.add(f))
 installBlink(assets.tables.blinkColors as [number, number][]);
 const compositor = new Compositor(renderer);
 // DOM layers in paint order: field HUD, screen UI, the 1.3x overlay layer L1
+// the screen UI and L1 stay inside 480x320 (.stage-clip); only the HUD may reach into the side margins (edge layout)
+const clip = document.createElement('div');
+clip.className = 'stage-clip';
 const hud = new DomUi(assets, compositor, stage, 'hud');
-const ui = new DomUi(assets, compositor, stage, 'main');
-const ui13 = new DomUi(assets, compositor, stage, 'zoom', 1.3);
+stage.append(clip);
+const ui = new DomUi(assets, compositor, clip, 'main');
+const ui13 = new DomUi(assets, compositor, clip, 'zoom', 1.3);
 const cmfs: Record<string, Cmf> = {};
 await Promise.all(MENU_CMFS.map(async (n) => { cmfs[n] = await assets.cmf(n); }));
 const layer = new SpriteLayer(assets);
@@ -113,15 +117,24 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 /** scale of the whole stage (canvas and UI layers together, so CSS blend modes reach the field): whole numbers
-  *  keep the pixels even; below 2x (a phone in landscape) the stage is fitted to the screen instead */
+  *  keep the pixels even; below 2x (a phone in landscape) the stage is fitted to the screen instead.
+  *  On a touch-first screen wider than 3:2 the frame spans the window and the field controls move into the
+  *  side margins (Input.edge), so the stick and the buttons sit under the thumbs at the screen edges. */
+const touchFirst = matchMedia('(pointer: coarse)');
 function fit(): void {
   const reserve = debug.offsetParent ? 32 : 0;                   // the debug line above the stage, when shown
   const fitS = Math.min(innerWidth / VIEW_W, (innerHeight - reserve) / VIEW_H);
   const s = Math.floor(fitS) >= 2 ? Math.floor(fitS) : fitS;
+  const side = Math.max(0, Math.floor((innerWidth / s - VIEW_W) / 2));
+  const edge = touchFirst.matches && side >= 16 ? side : 0;
+  ctx.input.edge = edge;
+  stage.classList.toggle('edge', edge > 0);
   stage.style.transform = `scale(${s})`;
-  stage.parentElement!.style.width = `${VIEW_W * s}px`;
+  stage.style.marginLeft = `${edge * s}px`;
+  stage.parentElement!.style.width = `${(VIEW_W + 2 * edge) * s}px`;
   stage.parentElement!.style.height = `${VIEW_H * s}px`;
 }
+touchFirst.addEventListener('change', fit);
 addEventListener('resize', fit);
 fit();
 

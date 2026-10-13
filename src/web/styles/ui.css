@@ -16,6 +16,9 @@
   transform-origin: 0 0;
   overflow: hidden;
 }
+/* edge layout (app.ts fit()): the HUD's touch controls reach into the side margins; the rest stays clipped */
+#stage.edge { overflow: visible; }
+.stage-clip { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 #stage > canvas {
   position: absolute;
   left: 0;
@@ -556,3 +559,6 @@
 .prompt-box input { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit; }
 .prompt-box div { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
 .prompt-box button { padding: 3px 12px; font: inherit; }
+
+/* keyboard key hints (input/keyHints.ts): a keycap instead of a pad button */
+.u-pad.kb { border-radius: 2px; background: #e8e8ec; color: #1b1f27; box-shadow: 0 1px 0 1px #6c707a; font-weight: bold; }

@@ -13,7 +13,6 @@ import { Popup } from './popup';
 import { VIEW_H as H, VIEW_W as W } from '../render/field';
 import { AVK } from '../input/input';
 import { HUD } from '../../core/keys';
-import { padButtonFor, padGlyph } from '../input/gamepad';
 import { SLOT_COUNT, deleteSlot, loadGamedata, loadSlot, newGame, saveSlot, setLap, type SaveData } from '../../core/save/save';
 import { Story } from '../../core/data/story';
 import type { GameContext, Scene } from './scene';
@@ -23,6 +22,7 @@ import { greyUniform, setGrey } from '../render/sprites';
 import { RankingScene } from './ranking';
 import { DataScene } from './dataScene';
 import { OptionTab } from './optionTab';
+import { keyHint } from '../input/keyHints';
 
 export const MENU_IMAGES = ['c', 't', 'f', 'logo', 'h_logo', 'title_bg', 'title_bg2', 'char_slot'];
 export const MENU_CMFS = ['cmf_title', 'cmf_c0', 'cmf_c1', 'cmf_c2'];
@@ -178,9 +178,9 @@ export class TitleScene implements Scene {
       if (performance.now() < this.badgeUntil) this.ctx.ui.image('title_bg', 0xf0, 0, 0x66, 0x78, W - 0x66, 0);
       if (this.state === 9) titleButtons(this.ctx.ui, this.sel);
       const inp = this.ctx.input;
-      if (this.state === 9 && inp.device === 'pad') for (const [key, , x] of TITLE_PAD) {
-        const b = padButtonFor(key);
-        if (b) this.ctx.ui.padHint(padGlyph(inp.padKind, b), inp.padKind, b, x + 22, 7 + 24);
+      if (this.state === 9) for (const [key, , x] of TITLE_PAD) {
+        const k = keyHint(inp, key);
+        if (k) this.ctx.ui.padHint(k.glyph, k.cls, x + 22, 7 + 24);
       }
     });
   }

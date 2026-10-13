@@ -17,6 +17,14 @@ const KEYMAP: Record<string, number> = {
   Escape: AVK.CLR, KeyM: AVK.MAP, KeyP: AVK.SAVE, KeyQ: AVK.TAB_L, KeyE: AVK.TAB_R,
 };
 
+/** what the key bound to each AVK is called on the keyboard: the first KEYMAP entry wins (arrows, Z, X, C, 1..4, Esc, M, P, Q, E) */
+export const KEY_LABELS: Record<number, string> = {};
+for (const [code, k] of Object.entries(KEYMAP)) {
+  if (k in KEY_LABELS) continue;
+  KEY_LABELS[k] = ({ ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc', Enter: 'Enter', Space: 'Space' } as Record<string, string>)[code]
+    ?? code.replace(/^(Key|Digit)/, '');
+}
+
 /** Virtual stick state: angle in degrees (0 = right, 90 = down), speed level 0 or 5..8. */
 export type { Stick };
 
@@ -36,8 +44,12 @@ export class Input implements InputState {
   private stickId: number | null = null;
   /** stick centre: fixed (0x53, H-0x4a) in joystick mode 1 (FUN_0004b128, ui-screens.md §0.2) */
   private center = { x: 83, y: 246 };
-  /** touch zones -> virtual key for the current screen (touchdata.dat), checked before the stick */
-  zones: { x: number; y: number; w: number; h: number; key: number }[] = [];
+  /** touch zones -> virtual key for the current screen (touchdata.dat), checked before the stick;
+   *  edge: 1 = the zone belongs to the right control cluster and moves out by `edge` (see below) */
+  zones: { x: number; y: number; w: number; h: number; key: number; edge?: 1 }[] = [];
+  /** touch-first screens wider than 3:2: the stick moves left and the right cluster right by this many
+   *  virtual pixels, into the side margins, so the thumbs stay at the screen edges (app.ts fit()) */
+  edge = 0;
   /** UI mode (menus, popups, dialogue): pointer downs become taps instead of zones / stick */
   uiMode = false;
   /** field play with nothing open (PlayScene sets it every tick, a scene change clears it): the pad's d-pad
@@ -59,6 +71,7 @@ export class Input implements InputState {
   padScrollY = 0;
 
   private canvas: HTMLCanvasElement;
+  private surface: HTMLElement;
   private viewW: number;
   private viewH: number;
   constructor(canvas: HTMLCanvasElement, viewW: number, viewH: number) {
@@ -75,11 +88,17 @@ export class Input implements InputState {
       if (k !== undefined) this.up(k, 'key');
     });
     addEventListener('blur', () => { for (const k of [...this.held.keys()]) this.up(k, 'key'); });
-    canvas.addEventListener('pointerdown', (e) => this.pointer(e, 'down'));
-    canvas.addEventListener('pointermove', (e) => this.pointer(e, 'move'));
-    canvas.addEventListener('pointerup', (e) => this.pointer(e, 'up'));
-    canvas.addEventListener('pointercancel', (e) => this.pointer(e, 'up'));
+    // the whole frame listens, so touches in the side margins (edge layout) reach the zones and the stick;
+    // taps on interactive DOM UI elements are theirs (DomUi), only the canvas and the empty frame count here
+    const surface = canvas.closest<HTMLElement>('#frame') ?? canvas;
+    const own = (e: PointerEvent) => e.target === canvas || e.target === surface || e.target === canvas.parentElement;
+    surface.addEventListener('pointerdown', (e) => { if (own(e)) this.pointer(e, 'down'); });
+    surface.addEventListener('pointermove', (e) => this.pointer(e, 'move'));
+    surface.addEventListener('pointerup', (e) => this.pointer(e, 'up'));
+    surface.addEventListener('pointercancel', (e) => this.pointer(e, 'up'));
+    surface.style.touchAction = 'none';
     canvas.style.touchAction = 'none';
+    this.surface = surface;
   }
 
   private down(k: number, src: string): void {
@@ -153,17 +172,17 @@ export class Input implements InputState {
     if (kind === 'down') this.device = e.pointerType === 'mouse' ? 'keyboard' : 'touch';
     if (kind === 'down' && this.uiMode) { this.taps.push(p); return; }
     if (kind === 'down') {
-      const z = this.zones.find((r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h);
+      const z = this.zones.find((r) => { const x = r.x + (r.edge ?? 0) * this.edge; return p.x >= x && p.x < x + r.w && p.y >= r.y && p.y < r.y + r.h; });
       if (z) {
         this.zoneKeys.set(e.pointerId, z.key);
         this.down(z.key, `p${e.pointerId}`);
-        this.canvas.setPointerCapture(e.pointerId);
+        this.surface.setPointerCapture(e.pointerId);
         return;
       }
-      if (p.x < 231 && this.stickId === null) {                 // stick area (FUN_00042ac8: x < 231)
+      if (p.x < 231 && this.stickId === null) {                 // stick area (FUN_00042ac8: x < 231; the margin counts too)
         this.stickId = e.pointerId;
         this.padStick = false;
-        this.canvas.setPointerCapture(e.pointerId);
+        this.surface.setPointerCapture(e.pointerId);
       } else return;
     }
     const zk = this.zoneKeys.get(e.pointerId);
@@ -177,7 +196,7 @@ export class Input implements InputState {
       Object.assign(this.stick, { active: false, level: 0, key: 0, dx: 0, dy: 0 });
       return;
     }
-    const dx = p.x - this.center.x, dy = p.y - this.center.y;
+    const dx = p.x - (this.center.x - this.edge), dy = p.y - this.center.y;
     const dist = Math.hypot(dx, dy);
     // dead zone 12px; distance bands 12/24/36/48 -> speed level 5..8 (FUN_00042ac8)
     const level = dist <= 12 ? 0 : Math.min(8, 4 + Math.ceil((dist - 12) / 12));

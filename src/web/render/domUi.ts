@@ -344,10 +344,10 @@ export class DomUi extends Ui {
     if (this.parents.length > 1) this.parents.pop();
   }
 
-  override padHint(glyph: string, kind: string, button: string, x: number, y: number): void {
+  override padHint(glyph: string, hintCls: string, x: number, y: number): void {
     const node = this.node('pad', DomUi.div('u-pad'));
     if (node.el.textContent !== glyph) node.el.textContent = glyph;
-    const cls = `u-pad ${kind} b-${button}${glyph.length > 2 ? ' wide' : ''}`;
+    const cls = `u-pad ${hintCls}`;
     if (node.el.className !== cls) node.el.className = cls;
     DomUi.set(node, `left:${px(x + this.ox)};top:${px(y + this.oy)};${this.opacity()}`);
   }

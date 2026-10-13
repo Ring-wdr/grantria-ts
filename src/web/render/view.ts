@@ -4,7 +4,8 @@
 // whose returned keys are fed to the game exactly like a key press or a tap on a hit area.
 import type { Cmf } from '../../core/data/assets';
 import type { WebAssets } from '../assets';
-import { padButtonFor, padGlyph, type PadKind } from '../input/gamepad';
+import type { PadKind } from '../input/gamepad';
+import { keyHint } from '../input/keyHints';
 
 export type KeyAct = () => number[] | void;
 
@@ -45,11 +46,11 @@ export function h(sel: string, props?: VProps | null, ...kids: VChild[]): VNode 
 }
 
 /** the pad button glyph of a key (u-pad badge) while a pad is the last used device, else nothing */
+/** the key that presses `key` on the device in use (pad glyph or keyboard key), as a badge; none on touch */
 export function padBadge(input: { device: string; padKind: PadKind }, key: number, cls = ''): VNode | null {
-  const b = input.device === 'pad' ? padButtonFor(key) : null;
-  if (!b) return null;
-  const g = padGlyph(input.padKind, b);
-  return h(`span.u-pad.${input.padKind}.b-${b}${g.length > 2 ? '.wide' : ''}`, { cls }, g);
+  const k = keyHint(input, key);
+  if (!k) return null;
+  return h(`span.u-pad.${k.cls.split(' ').join('.')}`, { cls }, k.glyph);
 }
 
 /** game text (colour codes, '|@' breaks) in a span; pen is the default RGB565 colour */

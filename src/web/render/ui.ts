@@ -82,7 +82,8 @@ export abstract class Ui {
   mount(_slot: string, _id: string, _root: VNode): void { /* GL: no-op */ }
 
   /** gamepad button hint badge (glyph text) with its top-left at (x, y); DOM only */
-  padHint(_glyph: string, _kind: string, _button: string, _x: number, _y: number): void { /* GL: no-op */ }
+  /** key hint badge (input/keyHints.ts) at (x, y) */
+  padHint(_glyph: string, _cls: string, _x: number, _y: number): void { /* GL: no-op */ }
 
   /** register a tappable area at local (x, y); act may mutate state and/or return keys to press */
   hit(x: number, y: number, w: number, h: number, act: () => number[] | void): void {

@@ -128,6 +128,11 @@ export class ItemDb {
 
   /** DAT_003b3bef == 2: high-level (second run) tables — levels 89..189 and the second half of the base table */
   tier2 = false;
+  /** slot lap (restoreTier2: lap >= 2) and the Dimension Gate floor level while in mode 2 (null outside) */
+  lap = 0;
+  dimLvl: number | null = null;
+  /** restoreTier2() of FUN_0003f6d8 / FUN_0003f30c: lap >= 2; in the Dimension Gate the floor level >= 90 */
+  restoreTier2(): void { this.tier2 = this.dimLvl !== null ? this.dimLvl >= 90 : this.lap >= 2; }
 
   /** FUN_000369b0 item level: equipment d+0x24655 (+11 in tier 2), consumables d+0x2466b (all 1), others 1. */
   itemLevel(type: number, sub: number): number {
@@ -140,7 +145,10 @@ export class ItemDb {
 
   /** FUN_000364dc base value. */
   baseStat(type: number, sub: number, grade: number): number {
-    if (type === 15) return sub + 1 + (this.tier2 ? [10, 10, 9, 9, 8, 7, 7, 6, 5, 4, 4][Math.min(sub, 10)] : 0);   // .rodata 0x103704
+    if (type === 15) {                                               // .rodata 0x103704; in the Dimension Gate the floor level > 88 decides
+      const on = this.dimLvl !== null ? this.dimLvl > 88 : this.tier2;
+      return sub + 1 + (on && sub < 11 ? [10, 10, 9, 9, 8, 7, 7, 6, 5, 4, 4][sub] : 0);
+    }
     const m = this.model(type, sub, grade);
     return this.a.d16(4 + 2 * (idiv(m, 21) * 21 + m + 0xdce8 + (this.tier2 ? 21 : 0)));   // d16[0x1b9d4 + 2*(42*type + 21*tier2 + k)]
   }
@@ -247,6 +255,20 @@ export class Inventory {
     }
     this.remapQuick();
   }
+  /** quest key items (type 0x1a): their own 17-slot store, items 500..516 at g+0x2618 (FUN_00036204), not in the bag */
+  keys: Item[] = [];
+  /** FUN_0003674c: owned count of key (0x1a, sub) */
+  keyCount(sub: number): number { return this.keys.filter((k) => k.sub === sub).length; }
+  /** FUN_0003dc4c on FUN_000367a4's slot, then the store is compacted: the first key with this sub */
+  removeKey(sub: number): void { const i = this.keys.findIndex((k) => k.sub === sub); if (i >= 0) this.keys.splice(i, 1); }
+  /** older saves held key items in the bag: move them to the key store */
+  migrateKeys(): void {
+    for (let i = 0; i < this.items.length; i++) {
+      const it = this.items[i];
+      if (it.type === 0x1a && this.keys.length < 17) { this.keys.push(it); this.items.splice(i--, 1); }
+    }
+    this.remapQuick();
+  }
   log: (kind: LogKind, text: string, n?: number) => void = () => {};
 
   private db: ItemDb;
@@ -263,6 +285,13 @@ export class Inventory {
     if (ub >= 0) {                                                   // GRAN_GET: set the bit (FUN_0007b268), no bag slot
       this.unlocks |= 1 << ub;
       this.log('got', (text[0x3b6] ?? '%s').replace('%s', text[0x7fc + this.db.model(type, sub, 0)] ?? ''));
+      return true;
+    }
+    if (type === 0x1a) {                                             // FUN_0003ecc4 case 0x1a: first empty key slot, no bag check
+      if (this.keys.length >= 17) return false;                      // the original runs past the store (517)
+      const it = made ?? this.db.create(type, sub, grade, rng);
+      this.keys.push(it);
+      this.logGot(it, 1);
       return true;
     }
     if (type === 0x1c) {

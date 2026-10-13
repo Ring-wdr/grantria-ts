@@ -69,6 +69,40 @@ export class Compositor {
     this.drawBackdrop();
   }
 
+  private fxBuf = new Uint8Array(0);
+  private fxTex: THREE.DataTexture | null = null;
+
+  /**
+   * Run a CPU filter on the internal target as an RGB565 screen buffer (rows top-down, index y*W + x like the
+   * original's linear buffer) and write the result back: the event screen effects of FUN_000f8b00.
+   */
+  filter565(fn: (buf: Uint16Array, w: number, h: number) => void): void {
+    const { width: w, height: h } = this.rt;
+    if (this.fxBuf.length !== w * h * 4) {
+      this.fxBuf = new Uint8Array(w * h * 4);
+      this.fxTex?.dispose();
+      this.fxTex = new THREE.DataTexture(this.fxBuf, w, h);
+      this.fxTex.magFilter = this.fxTex.minFilter = THREE.NearestFilter;
+    }
+    const px = this.fxBuf, buf = new Uint16Array(w * h);
+    this.renderer.readRenderTargetPixels(this.rt, 0, 0, w, h, px);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {        // GL rows are bottom-up
+      const o = ((h - 1 - y) * w + x) * 4;
+      buf[y * w + x] = (Math.floor(px[o] * 31 / 255 + 0.5) << 11) | (Math.floor(px[o + 1] * 63 / 255 + 0.5) << 5) | Math.floor(px[o + 2] * 31 / 255 + 0.5);
+    }
+    fn(buf, w, h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const v = buf[y * w + x], o = ((h - 1 - y) * w + x) * 4;
+      px[o] = Math.round((v >> 11) * 255 / 31); px[o + 1] = Math.round(((v >> 5) & 63) * 255 / 63); px[o + 2] = Math.round((v & 31) * 255 / 31); px[o + 3] = 255;
+    }
+    this.fxTex!.needsUpdate = true;
+    this.presentMat.uniforms.src.value = this.fxTex;
+    this.renderer.setRenderTarget(this.rt);
+    this.renderer.render(this.present, this.presentCam);
+    this.renderer.setRenderTarget(null);
+    this.presentMat.uniforms.src.value = this.rt.texture;
+  }
+
   /** Copy the frozen backdrop into the internal target (instead of drawing the field). */
   drawBackdrop(): void {
     this.presentMat.uniforms.src.value = this.backdrop.texture;

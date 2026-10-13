@@ -37,8 +37,6 @@ export interface MonsterWorld {
   py: number;
   playerBox: Rect;
   playerAlive: boolean;
-  /** bodies of living monsters (summon spot checks) */
-  monsterBoxes?: Rect[];
 }
 
 export class Monster {

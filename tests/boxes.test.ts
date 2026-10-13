@@ -25,6 +25,7 @@ test('equipment boxes match the original (rand order and items)', { skip }, asyn
   for (const c of cases) {
     const tag = `box ${c.box_sub} L${c.level} lap ${c.lap} seed ${c.seed}`;
     db.tier2 = c.lap >= 2;
+    db.lap = c.lap;
     const inv = new Inventory(db);
     const rng = new Rng(BigInt(c.seed), () => 0), log: number[][] = [];
     const raw = rng.rand.bind(rng);

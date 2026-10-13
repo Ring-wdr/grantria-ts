@@ -1,7 +1,7 @@
 // Item boxes and packages of type 0x1b (analysis/features/misc-systems.md §3). The equipment box is a
 // port of FUN_0003f6d8 (tools/grantria_misc.py checked it against the original over 398,400 rand paths);
 // the RNG call order is kept. Tier 2 switches the item tables only while the item is created
-// (leftovers-combat.md §3; checked against tests/boxes.test.ts). Operator boxes 0x33..0x38 are not obtainable offline and are left out.
+// (leftovers-combat.md §3; checked against tests/boxes.test.ts), then restoreTier2() (lap / Dimension Gate floor level). Operator boxes 0x33..0x38 are not obtainable offline and are left out.
 import type { Inventory, ItemDb } from './items';
 import type { Rng } from './rules';
 
@@ -43,10 +43,9 @@ export function boxEquipment(db: ItemDb, inv: Inventory, sub: number, level: num
       if (r <= 8999) { g = 3; if (s <= 3) s = 4; } else { g = 4; if (s <= 7) s = 8; }
     } else g = 4;
     g = Math.min(g, a.d8(0x24636 + s));
-    const saved = db.tier2;
     db.tier2 = tier2 === 2;                          // DAT_003b3bef only while the item is created
     inv.gain(t, s, g, 1, rng);
-    db.tier2 = saved;                                // restore: lap >= 2 (the dimension gate rule is not ported)
+    db.restoreTier2();                               // lap >= 2, or the Dimension Gate floor level >= 90
     if ((kb === 1 || kb === 2) && rng.rand(10) <= 1) inv.gain(0x1b, 0x21, 0, 1, rng);   // 20 %: socket scroll
     return 'ok';
   }
@@ -74,7 +73,9 @@ export function boxEquipment(db: ItemDb, inv: Inventory, sub: number, level: num
     case 0x27: case 0x28: case 0x29: case 0x2a: {    // full sets: weapon + 4 armour parts
       if (free < 5) return 'slots';
       const s = [2, 4, 7, 8][sub - 0x27], g = sub === 0x27 ? 2 : 3;
+      db.tier2 = false;                              // FUN_00040498: tier 0 tables while granting, then lap >= 2
       for (let part = 0; part < 5; part++) inv.gain(cls + 3 * part, s, g, 1, rng);
+      db.tier2 = db.lap >= 2;
       return 'ok';
     }
   }

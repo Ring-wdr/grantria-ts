@@ -347,7 +347,8 @@ def transform(rows, rot, hflip, scale):
 
 
 def _blend_ch(mode, s, d):
-    """Per-channel blend (0..255). Modes from FUN_000cfc88 switch; 3/7/9/11/12 approximated."""
+    """Per-channel 8-bit blend for the fixed-function modes (0 / 4 / 13 / 14) and transparent sprite sheets;
+    opaque canvases use blend565 for the shader modes."""
     if mode == 13:                       # add (saturating) [정적]
         return min(255, s + d)
     if mode == 4:                        # screen [정적]
@@ -371,6 +372,80 @@ def _blend_ch(mode, s, d):
     return s                             # 0 normal (and unknown modes)
 
 
+# ---- FUN_000cfc88 in RGB565 integers (emulator-checked for every mode / channel / alpha; web sprites.ts DST_FRAG) ----
+def _cl(v, M):
+    return max(0, min(M, v))
+
+
+def _bch565(mode, s, d, M):
+    H = (M + 1) // 2
+    if mode == 1: return max(s, d)
+    if mode == 2: return min(s, d)
+    if mode == 3: return abs(s - d)
+    if mode == 4: return M - (((M - s) * (M - d)) >> (5 if M == 31 else 6))
+    if mode == 5: return M if s == M else min(M, d * d // (M - s))
+    if mode == 6: return 2 * s * d // M if d < H else M - 2 * (M - s) * (M - d) // M
+    if mode == 7: return 0 if d == 0 else max(0, M - (M - s) * (M - s) // d)
+    if mode == 8: return 2 * s * d // M if s < H else M - 2 * (M - s) * (M - d) // M
+    if mode == 9:
+        if s == M: return M
+        if s < H: return 0 if s == 0 else max(0, M - (M - d) * (M + 1) // (2 * s))
+        return min(M, d * (M + 1) // (2 * (M - s) + 1))
+    if mode == 10: return _cl(d + 2 * s - M, M) if s < H else _cl(d + 2 * (s - H), M)
+    if mode == 11: return M if s == M else min(M, d * (M + 1) // (M - s))
+    if mode == 12: return M if d == M else min(M, s * s // (M - d))
+    if mode == 13: return min(M, s + d)
+    if mode == 14: return s * d // M
+    if mode == 15: return _cl(2 * s + d - M, M)
+    return s
+
+
+def blend565(mode, s, d, a):
+    """s, d: RGB565 pixels, a: effective alpha 0..32 -> RGB565 (A/C rounding, blue quirks of modes 1/2/9/10)."""
+    sc = [s >> 11, (s >> 5) & 63, s & 31]
+    dc = [d >> 11, (d >> 5) & 63, d & 31]
+    out, braw = [], None
+    for i, M in enumerate((31, 63, 31)):
+        sv, dv, sh = sc[i], dc[i], (11, 5, 0)[i]
+        if i == 2:
+            if mode == 1 and sv < dv: out.append(dv); continue
+            if mode == 2 and sv > dv: out.append(dv); continue
+            if mode == 9 and 16 <= sv < 31:
+                den, num = 63 - 2 * s, dv * 32
+                q = abs(num) // abs(den)
+                q = min(q if (num < 0) == (den < 0) else -q, 31)
+                out.append((((dv * (32 - a)) >> 5) + ((q * a) >> 5)) & 31); continue
+            if mode == 10 and sv >= 16:
+                braw = dv + 2 * (sv - 16); B = braw & 31
+            else:
+                B = _bch565(mode, sv, dv, M)
+            out.append(((dv * (32 - a)) >> 5) + ((B * a) >> 5)); continue
+        B = _bch565(mode, sv, dv, M)
+        if mode in (0, 10, 11, 12, 15):
+            out.append(((dv * (32 - a)) >> 5) + ((B * a) >> 5))
+        elif mode == 5:
+            Bx = M << sh if sv == M else min(M << sh, ((dv << sh) * dv) // (M - sv))
+            out.append(((((dv << sh) * (32 - a)) + Bx * a) >> 5) >> sh)
+        else:
+            out.append((dv * (32 - a) + B * a) >> 5)
+    if mode == 10 and braw is not None and braw >= 32:
+        B = _bch565(10, sc[1], dc[1], 63) | 1
+        out[1] = ((dc[1] * (32 - a)) >> 5) + ((B * a) >> 5)
+    return (out[0] << 11) | (out[1] << 5) | out[2]
+
+
+#: modes the web draws through the RGB565 shader (the others are fixed-function GL blends)
+DST_MODES = {1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 15}
+
+
+def _to565(r, g, b):
+    return (int(r * 31 / 255 + 0.5) << 11) | (int(g * 63 / 255 + 0.5) << 5) | int(b * 31 / 255 + 0.5)
+
+
+def _from565(v):
+    return (round((v >> 11) * 255 / 31), round(((v >> 5) & 63) * 255 / 63), round((v & 31) * 255 / 31))
+
+
 def blit(canvas, cw, ch, rows, ox, oy, blend, alpha8):
     """Draw RGBA rows onto canvas: result = lerp(dst, blend(src,dst), alpha8/8)."""
     a = alpha8 / 8.0
@@ -389,6 +464,11 @@ def blit(canvas, cw, ch, rows, ox, oy, blend, alpha8):
             if blend == 0:
                 br, bg, bb = p[0], p[1], p[2]
                 na = max(da, int(255 * a))
+            elif blend in DST_MODES and da:
+                canvas[o:o + 3] = bytes(_from565(blend565(blend, _to565(*p[:3]), _to565(dr, dg, db), alpha8 * 4)))
+                continue
+            elif blend > 15:
+                continue
             else:
                 br, bg, bb = _blend_ch(blend, p[0], dr), _blend_ch(blend, p[1], dg), _blend_ch(blend, p[2], db)
                 # on a transparent canvas (sprite sheets) give blended pixels alpha from brightness

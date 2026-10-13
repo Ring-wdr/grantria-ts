@@ -135,7 +135,9 @@ export function parseSlot(b: Uint8Array, gd: Partial<OrigAccount> | null, slot: 
       stones: bitsGet(b, 0x31d5, 12 * 8), gather: { lv: u32(0x2ec0), exp: u32(0x2ebc) }, dimClears: u16(0x3100),
       titles, title: b[0x2eb8], challenges, counters: { vermutKills: u16(0x30fe) },
     } as SaveData['story'],
-    inv: { items, equip: Array.from({ length: 6 }, (_, k) => parseItem(b, 0x23f0 + k * ITEM)), quick, gold, bags: Math.min(2, b[0x327c]) },
+    packs: [Math.min(10, b[0x32a7]), Math.min(10, b[0x32a8])],
+    inv: { items, equip: Array.from({ length: 6 }, (_, k) => parseItem(b, 0x23f0 + k * ITEM)), quick, gold, bags: Math.min(2, b[0x327c]), unlocks: b[0x32a5] & 0x0f,
+      keys: Array.from({ length: 17 }, (_, k) => parseItem(b, 0x2618 + k * ITEM)).filter((x): x is Item => !!x) },
     orig: { raw: b64(b), questItems: Array.from({ length: 17 }, (_, k) => parseItem(b, 0x2618 + k * ITEM)), memberNo: dv.getBigInt64(MEMBER_OFF, true).toString(),
       checksumOk: b[SUM_OFF] === sum8(b, SUM_OFF) },
   };
@@ -148,7 +150,7 @@ export function buildSlot(d: SaveData & { orig?: SlotOrig }, member: bigint): Ui
   const t = d.playTicks || 1;
   for (let i = 0; i < 100; i++) putItem(b, i * ITEM, inv.items[i], t);
   for (let k = 0; k < 6; k++) putItem(b, 0x23f0 + k * ITEM, inv.equip[k], t);
-  if (d.orig?.questItems) for (let k = 0; k < 17; k++) putItem(b, 0x2618 + k * ITEM, d.orig.questItems[k], t);
+  for (let k = 0; k < 17; k++) putItem(b, 0x2618 + k * ITEM, inv.keys ? inv.keys[k] ?? null : d.orig?.questItems?.[k] ?? null, t);   // key store
   for (let k = 0; k < 6; k++) {
     const q = inv.quick[k] ?? { kind: 0, id: 0, cd: 0, maxCd: 0, itemType: 0, itemSub: 0 }, o = 0x2c34 + 8 * k;
     dv.setInt16(o, q.cd, true); dv.setInt16(o + 2, q.maxCd, true); dv.setInt16(o + 4, q.id, true); b[o + 6] = q.kind; b[o + 7] = q.itemType ?? 0;
@@ -185,6 +187,8 @@ export function buildSlot(d: SaveData & { orig?: SlotOrig }, member: bigint): Ui
   b[0x3279] = inv.items.length; b[0x3290] = d.returnZone ?? 0;
   const bags = inv.bags ?? 0;
   b[0x327c] = bags; b[0x31cc] = (bags + 3) * 16;
+  b[0x32a5] = (b[0x32a5] & 0xf0) | ((inv.unlocks ?? 0) & 0x0f);                // permanent unlock bits
+  b[0x32a7] = d.packs?.[0] ?? 0; b[0x32a8] = d.packs?.[1] ?? 0;               // AP / SP packs
   dv.setBigInt64(MEMBER_OFF, member, true);
   b[SUM_OFF] = sum8(b, SUM_OFF);
   return b;

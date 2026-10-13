@@ -8,8 +8,9 @@ import { AVK } from './input';
 import { QUICK_KEYS, slotPickerKey } from './keys';
 import type { Item } from './items';
 import { Popup } from './popup';
-import { buyBag } from './community';
-import { ShopScreen } from './shop';
+import { buyBag, coupons } from './community';
+import { josa, ShopScreen } from './shop';
+import { cfmt } from './skillDetail';
 import { combineNeeds, countOf, consume } from './shopRules';
 import type { GameContext } from './scene';
 import type { Ui } from './ui';
@@ -21,7 +22,10 @@ const YELLOW565 = 0xffe0;
 
 /** Action ids of the item action popup (text 0x171 + id), kind 0 = inventory, 4 = equipment tab. */
 const ACTION = { DETAIL: 1, USE: 2, DECOMPOSE: 3, QUICK: 5, DROP: 4, CANCEL: 6, UNEQUIP: 7, EQUIP: 8, ENHANCE: 12, SOCKET: 28 } as const;
-const USABLE_1B = new Set([2, 4, 5, 6, 7, ...range(0xe, 0x1a), ...range(0x1d, 0x20), ...range(0x22, 0x2e), 0x30, ...range(0x33, 0x38)]);
+/** FUN_00036d24: 0x1b subs that can go on a quick slot (half HP/MP, 차원·공격·방어 elixirs, special elixirs) */
+const QUICK_1B = new Set([0x02, 0x15, 0x16, 0x17, 0x23, 0x24, 0x25, 0x26]);
+// 0x30 (황금알) and the operator boxes 0x33..0x38 are server gifts with no offline source: no "use" entry
+const USABLE_1B = new Set([2, 4, 5, 6, 7, ...range(0xe, 0x1a), ...range(0x1d, 0x20), ...range(0x22, 0x2e)]);
 
 function range(a: number, b: number): number[] { return Array.from({ length: b - a + 1 }, (_, i) => a + i); }
 
@@ -259,7 +263,7 @@ export class InventoryTab {
     if (it.type < 0x10 && (it.type === 15 || it.type % 3 === cls)) e.push(ACTION.EQUIP);
     if (it.type < 0x0f) e.push(ACTION.ENHANCE);
     if (it.type < 0x10) e.push(ACTION.DECOMPOSE);
-    if (it.type === 0x11 || it.type === 0x1b) e.push(ACTION.QUICK);          // FUN_00036d24 [추정: consumables]
+    if (it.type === 0x11 || (it.type === 0x1b && QUICK_1B.has(it.sub))) e.push(ACTION.QUICK);   // FUN_00036d24 (jump table 0x102F30)
     e.push(ACTION.DROP);
     if (it.type < 0x10) e.push(ACTION.SOCKET);
     e.push(ACTION.CANCEL);
@@ -274,14 +278,14 @@ export class InventoryTab {
     if (action === ACTION.DETAIL) this.detail = it;
     else if (action === ACTION.USE && it.type === 0x19) {                   // recipe: the blacksmith combine screen
       if (inv.unlocked(10)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'combine', idx });
-      else this.message = new Popup(this.ctx, 0x6d);
+      else this.askCoupon(3, idx);
     } else if (action === ACTION.USE) this.fs.useItem(idx);
     else if (action === ACTION.ENHANCE) {                                    // needs the enhance scroll (0x1b, 0x0c)
       if (has(0x1b, 0x0c)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'enhance', idx });
-      else this.message = new Popup(this.ctx, 0x6d);
+      else this.askCoupon(2, idx);
     } else if (action === ACTION.DECOMPOSE) {                                // needs the magic dismantler (0x1b, 9: unlock bit)
       if (inv.unlocked(9)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'decompose', idx });
-      else this.message = new Popup(this.ctx, 0x6d);
+      else this.askCoupon(4, idx);
     } else if (action === ACTION.SOCKET) {                                   // socket scroll (0x1b, 0x21)
       if (!has(0x1b, 0x21)) { this.message = new Popup(this.ctx, 0x77); return; }
       this.confirm = { popup: new Popup(this.ctx, 0x76), idx, yes: () => {
@@ -330,15 +334,54 @@ export class InventoryTab {
       }
     }
   }
-  /** '#': take the gems back out with a gem extractor (0x1b, 0x0b) [추정: all gems, one extractor] */
+  /**
+   * No tool (FUN_0005446c / FUN_00055004): outside save-allowed areas popup 0x6D, else popup 0x49 offering to buy it with
+   * coupons (text FUN_0004d7dc: 강화석 ×10 for 10 coupons, 대장장이의 모루 / 마법 해체기 (permanent) for 15). Yes
+   * (FUN_00053ca0 case 0x18): too few coupons -> 0x7D, no room for 10 stones -> 0x6A; then the coupons go and the tool is
+   * granted (server op 0x30, FUN_00076398, done locally) and the action continues as with the tool (op 0x32, FUN_000752bc).
+   */
+  private askCoupon(act: 2 | 3 | 4, idx: number): void {
+    if (!this.fs.canSave) { this.message = new Popup(this.ctx, 0x6d); return; }
+    const t = this.ctx.assets.text, inv = this.fs.inv;
+    const sub = act === 2 ? 0x0c : act === 3 ? 10 : 9, cost = act === 2 ? 10 : 15;
+    const name = t[0x7fc + this.fs.db.model(0x1b, sub, 0)] ?? '';
+    const what = cfmt(t[act === 2 ? 0x1b32 : 0x1b33] ?? '', name);
+    const head = cfmt(t[0x1d0] ?? '', name, what);
+    this.confirm = { popup: new Popup(this.ctx, 0x49, 0, (s) => josa(cfmt(s, head, t[0x17b] ?? '', '', cost))), idx, yes: () => {
+      if (coupons(this.fs) < cost) { this.message = new Popup(this.ctx, 0x7d); return; }
+      const st = inv.items.find((x) => x.type === 0x1b && x.sub === 0x0c);     // FUN_0003632c(0x1b, 0xc, 0, 10) for all three
+      if (st ? st.count + 10 > 9999 : inv.items.length >= inv.cap) {
+        this.message = new Popup(this.ctx, 0x6a, 0, () => t[inv.bags < 2 ? 0x4f7 : 0x507] ?? '');
+        return;
+      }
+      consume(inv, 0x1b, 0x1b, cost);
+      inv.gain(0x1b, sub, 0, act === 2 ? 10 : 1, this.fs.rng);               // sub 9 / 10 set the permanent unlock bit
+      this.fs.autosave();
+      this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: act === 2 ? 'enhance' : act === 3 ? 'combine' : 'decompose', idx });
+    } };
+  }
+
+  /** '#' (FUN_00044564 -> FUN_00040320): the bag check first (0x61), then no gems 0x63 / no extractor 0x62. One
+   *  extractor takes every gem of sockets 0..4 out (no choice, no breaking); for each gem the item's options with the
+   *  gem's stat id lose the gem's value (attaching never added them: original behaviour). Log 0x1ACC, sfx 0x2f, the
+   *  detail window closes. */
   private extractGems(it: Item): void {
-    const inv = this.fs.inv, gems = it.sockets.filter((v) => v !== 0xff);
-    if (!gems.length) { this.message = new Popup(this.ctx, 0x63); return; }
-    if (countOf(inv, 0x1b, 0x0b) === 0) { this.message = new Popup(this.ctx, 0x62); return; }
-    if (inv.items.length + gems.length > inv.cap) { this.message = new Popup(this.ctx, 0x61); return; }
-    for (const v of gems) inv.gain(0x10, v % 50, Math.trunc(v / 50), 1, this.fs.rng);
-    it.sockets = it.sockets.map(() => 0xff);
+    const inv = this.fs.inv, gems = it.sockets.filter((v) => v !== 0xff).length;   // FUN_000395a4
+    if (inv.items.length + gems > inv.cap) { this.message = new Popup(this.ctx, 0x61); return; }
+    if (countOf(inv, 0x1b, 0x0b) === 0 || gems === 0) { this.message = new Popup(this.ctx, gems === 0 ? 0x63 : 0x62); return; }
     consume(inv, 0x1b, 0x0b, 1);
+    for (let s = 0; s < 5; s++) {
+      const v = it.sockets[s];
+      if (v === undefined || v === 0xff) continue;
+      const sub = v % 50, grade = Math.trunc(v / 50);
+      inv.gain(0x10, sub, grade, 1, this.fs.rng);
+      it.sockets[s] = 0xff;
+      const g = inv.items.find((x) => x.type === 0x10 && x.sub === sub && x.grade === grade);
+      if (g) it.options = it.options.flatMap(([id, val]): [number, number][] => id !== g.aux ? [[id, val]] : val <= g.base ? [] : [[id, val - g.base]]);
+    }
+    this.fs.hud.message(this.ctx.assets.text[0x1acc] ?? '');           // 보석추출을 완료하였습니다.
+    this.ctx.audio.playSfx(0x2f);
+    this.detail = null;
     this.fs.recompute();
     this.fs.autosave();
   }

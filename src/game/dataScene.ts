@@ -24,7 +24,12 @@ function pickFiles(accept: string, multiple: boolean): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file'; input.accept = accept; input.multiple = multiple; input.style.display = 'none';
-    input.onchange = () => { resolve([...(input.files ?? [])]); input.remove(); };
+    let done = false;
+    const finish = (files: File[]) => { if (done) return; done = true; resolve(files); input.remove(); };
+    input.onchange = () => finish([...(input.files ?? [])]);
+    input.addEventListener('cancel', () => finish([]));         // closing the picker without a file
+    // older browsers have no 'cancel': the window gets the focus back without a change
+    addEventListener('focus', () => setTimeout(() => { if (!input.files?.length) finish([]); }, 1000), { once: true });
     document.body.appendChild(input); input.click();
   });
 }

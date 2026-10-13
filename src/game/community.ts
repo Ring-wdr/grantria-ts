@@ -2,6 +2,8 @@
 // grants (analysis/features/online.md): coupon shop 0x28 (free), premium shop 0x25 (the client's own
 // default list at .rodata 0x1039A4, paid in coupons), bag expansion (25 coupons), and a local warehouse
 // shared by the three slots (state 0x29 / 0x0F; the original kept it on the server).
+import { account, saveAccount } from './account';
+import { cfmt } from './skillDetail';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
 import { UNLOCK_1B, type Item } from './items';
@@ -27,7 +29,11 @@ const PREMIUM: [number, number, number][] = [
   [10, 25, 1], [18, 12, 1], [19, 9, 1], [20, 9, 1], [30, 3, 1], [14, 3, 1], [2, 3, 10], [28, 15, 5],
   [3, 9, 10], [12, 9, 10], [0, 19, 5], [11, 9, 10], [7, 19, 1], [4, 9, 1], [5, 9, 1], [6, 9, 1],
   [21, 5, 10], [22, 5, 10], [23, 5, 10], [34, 3, 1], [39, 19, 1], [40, 23, 1], [41, 29, 1], [42, 98, 1],
+  // server-list point products (FUN_000752bc), not in the client list; local coupon prices
+  [0x2f, 29, 1], [0x31, 19, 1], [0x32, 19, 1],
 ];
+/** point products: gd[0x371] / +0x32a7 / +0x32a8 counters, refused (0x65) above 9 (FUN_00054cb8) */
+const POINT_PACKS = new Set([0x2f, 0x31, 0x32]);
 /** ids whose stack is capped at 9999 (FUN_00054cb8 cap check) */
 const STACKED = new Set([0, 2, 3, 4, 5, 6, 7, 0xb, 0xc, 0x15, 0x16, 0x17, 0x1b, 0x1c]);
 export const BAG_PRICE = 25;
@@ -74,7 +80,7 @@ export function buyBag(ctx: GameContext, fs: FieldScene): Popup {
 export class CouponShop {
   private sel = 0;
   private t = 0;
-  private popup: PopupState | null = null;
+  popup: PopupState | null = null;
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
   /** 'close' on CLR */
@@ -113,6 +119,22 @@ export class CouponShop {
       h('div.v-box.v-note', null, gt(t[0x1bbd] ?? ''))));
   }
   drawPopups(): void { this.popup?.p.draw(); }
+}
+
+/**
+ * Popup kind 11 (FUN_0005f948 case 0xB -> FUN_0004bd98): an item card for a coupon purchase — icon, name, the item's
+ * description (0xC48 + sub), then "내쿠폰 N -> N - price" and the body 0x1C14 with 0x1C13 "쿠폰 %d장에 구매하시겠습니까?";
+ * with too few coupons only 0x1A3B "쿠폰이 부족합니다." and no body. 0x4C premium purchase, 0x4D coupon revive.
+ */
+export function couponCard(ctx: GameContext, fs: FieldScene, id: 0x4c | 0x4d, sub: number, price: number, name: string): Popup {
+  const t = ctx.assets.text, have = coupons(fs), short = have < price;
+  const p = new Popup(ctx, id, 0, (s) => cfmt(s, cfmt(t[0x1c13] ?? '', price, t[0x8e] ?? '')));
+  p.hideBody = short;
+  p.content = () => h('div.v-col.mc-card', null,
+    h('div.v-row', { style: 'gap:6px' }, itemIcon(fs, 0x1b, sub), gt(name, { cls: 'v-grow v-left' })),
+    gt(t[0xc48 + sub] ?? '', { cls: 'v-left mc-card-desc' }),
+    short ? gt(t[0x1a3b] ?? '', { pen: 0xf800 }) : gt(`${t[0x1a54] ?? ''} ${have} → ${have - price}`, { pen: 0xffe0 }));
+  return p;
 }
 
 /** Premium shop 0x25 (FUN_0005bf34 / FUN_00054cb8): 5x3 grid, info panel, '0' or 구매 buys for coupons. */
@@ -163,17 +185,29 @@ class PremiumShop {
     const fs = this.fs, [id, price, qty] = PREMIUM[this.cur];
     // FUN_00054cb8: bag at most 2, stacks at most 9999, unlock items (1 / 9 / 10 / 13) once (+0x32a5 bit) -> 0x65
     const unlock = (UNLOCK_1B as readonly number[]).includes(id);
-    const capped = id === 8 ? fs.inv.bags >= 2 : unlock ? fs.inv.unlocked(id) : STACKED.has(id) && countOf(fs.inv, 0x1b, id) + qty > COUPON_MAX;
+    const packCount = id === 0x2f ? account().traitBought : id === 0x31 ? fs.packs[0] : fs.packs[1];
+    const capped = POINT_PACKS.has(id) ? packCount > 9
+      : id === 8 ? fs.inv.bags >= 2 : unlock ? fs.inv.unlocked(id) : STACKED.has(id) && countOf(fs.inv, 0x1b, id) + qty > COUPON_MAX;
     if (capped) { this.popup = { p: new Popup(this.ctx, 0x65) }; return; }
     if (coupons(fs) < price) { this.popup = { p: new Popup(this.ctx, 0x7d), ok: () => { this.request = 'coupon'; } }; return; }
-    this.popup = { p: new Popup(this.ctx, 0x74), yes: () => {
+    this.popup = { p: couponCard(this.ctx, fs, 0x4c, id, price, qty > 1 ? `${this.name(id)} x${qty}` : this.name(id)), yes: () => {
+      if (POINT_PACKS.has(id)) {                                     // FUN_000752bc: points at once, nothing in the bag
+        consume(fs.inv, COUPON[0], COUPON[1], price);
+        if (id === 0x2f) { const a = account(); a.traitBought++; a.traitPoints++; saveAccount(); }
+        else if (id === 0x31) { fs.packs[0]++; fs.statPoints += 30; }
+        else { fs.packs[1]++; fs.skillPoints += 5; }
+        grantSave(fs);
+        this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4ea] ?? '') };
+        return;
+      }
       if (id === 8) { consume(fs.inv, COUPON[0], COUPON[1], price); fs.inv.setBags(fs.inv.bags + 1); grantSave(fs);
         this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4e9] ?? '') }; return; }
       if (!unlock && fs.inv.items.length >= fs.inv.cap && !(STACKED.has(id) && countOf(fs.inv, 0x1b, id))) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
       consume(fs.inv, COUPON[0], COUPON[1], price);
       fs.inv.gain(0x1b, id, 0, qty, fs.rng);
       grantSave(fs);
-      this.popup = { p: new Popup(this.ctx, 0x6a) };
+      // FUN_000752bc: permanent unlock items (1 / 9 / 10 / 13) point to the character page (0x506), the rest 0x4EA
+      this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[unlock ? 0x506 : 0x4ea] ?? '') };
     } };
   }
 
@@ -214,7 +248,9 @@ class PremiumShop {
 /** State 0x29 (FUN_0002b774 / keys FUN_000442f4): the inventory grid FUN_00058890 over the own bag (mode 0)
  *  or the warehouse (mode 1, 3 bags = 48, local instead of the server). Buttons (8, 0xBD) / (0x4F, 0xBD) /
  *  (0x96, 0xBD): mode 0 고급상점 / 골드전송 / 창고, mode 1 고급상점 / 창고정리 / 가방. '#' and '*' as in the
- *  original, '5' (or the move button; a tap only selects) moves the item across (창고로 0x198 / 내가방으로 0x185), '0' sorts the warehouse (창고정리, state 0x0F). */
+ *  original, '5' (or the move button; a tap only selects) moves the item across (창고로 0x198 / 내가방으로 0x185), '0' sorts the warehouse (창고정리, state 0x0F).
+ *  골드전송 ('0' in mode 0, FUN_00043500 / FUN_00026c58): thousands of gold go into the warehouse as a type 0x1C record
+ *  (net 0x12), taken back as count × 1000 gold; the warehouse is shared by the three slots, so this moves gold between them. */
 class Storage {
   mode: 0 | 1;
   private bag = 0;
@@ -225,7 +261,39 @@ class Storage {
   private t = 0;
   popup: PopupState | null = null;
   request: 'premium' | null = null;
+  /** 골드전송 input (DAT_00403420, thousands) while the pad is open (DAT_003b3c6e) */
+  private goldPad: string | null = null;
   constructor(private ctx: GameContext, private fs: FieldScene, mode: 0 | 1) { this.mode = mode; }
+
+  /** FUN_00043500: digits (up to 11, value at most 10000), '#' deletes, '*' sends, CLR closes. The original keypad's
+   *  digit keys are also the arrows here, so digits come as GOLD_DIGIT + d from the pad buttons and the keyboard digit
+   *  keys; the d-pad steps the amount (up / down ±1, right / left ±10 thousand) and OK sends. */
+  private goldKey(k: number): void {
+    const s = this.goldPad!;
+    const set = (v: number) => { this.goldPad = v > 0 ? String(Math.min(10000, v)) : ''; };
+    if (k >= GOLD_DIGIT && k <= GOLD_DIGIT + 9) {
+      if (s.length < 11) { this.goldPad = s + String(k - GOLD_DIGIT); this.ctx.audio.playSfx(0x2f); }
+      if (Number(this.goldPad) > 10000) this.goldPad = this.goldPad!.slice(0, -1);
+    } else if (k === AVK.UP || k === AVK.DOWN || k === AVK.LEFT || k === AVK.RIGHT) {
+      set(Number(s || '0') + (k === AVK.UP ? 1 : k === AVK.DOWN ? -1 : k === AVK.RIGHT ? 10 : -10));
+    } else if (k === AVK.POUND) this.goldPad = s.slice(0, -1);
+    else if (k === AVK.CLR) this.goldPad = null;
+    else if (k === AVK.STAR || k === AVK.OK) this.sendGold();
+  }
+
+  /** '*': 0 -> popup 0x0D, more than held -> 0x4B, else a 0x1C record of n into the warehouse (text 0x4EC) */
+  private sendGold(): void {
+    const fs = this.fs, n = Number(this.goldPad || '0'), t = this.ctx.assets.text;
+    if (n * 1000 === 0) { this.popup = { p: new Popup(this.ctx, 0x0d) }; return; }
+    if (n * 1000 > fs.inv.gold) { this.popup = { p: new Popup(this.ctx, 0x4b) }; return; }
+    const wh = loadWarehouse();
+    if (wh.length >= WAREHOUSE_SIZE) { this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => t[0x4f8] ?? '') }; return; }
+    wh.push(goldRecord(fs, n));
+    saveWarehouse(wh);
+    fs.inv.gold -= n * 1000;
+    grantSave(fs);
+    this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => t[0x4ec] ?? '') };
+  }
 
   private list(): (Item | undefined)[] { return this.mode === 0 ? this.fs.inv.items : loadWarehouse(); }
   private bags(): number { return this.mode === 0 ? this.fs.inv.bags + 3 : 3; }
@@ -234,9 +302,10 @@ class Storage {
     this.t++;
     if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); } return null; }
     for (const k of presses) {
+      if (this.goldPad !== null) { this.goldKey(k); continue; }
       if (k === AVK.POUND) { if (this.mode === 1) { this.mode = 0; this.bag = 0; } else this.request = 'premium'; }
       else if (k === AVK.STAR) { if (this.mode === 0) { this.mode = 1; this.bag = 0; } else this.request = 'premium'; }
-      else if (k === AVK.K0) { if (this.mode === 1) this.sortWarehouse(); }
+      else if (k === AVK.K0) { if (this.mode === 1) this.sortWarehouse(); else { this.goldPad = ''; this.ctx.audio.playSfx(0x2f); listenDigits((d) => this.goldPad !== null && this.goldKey(GOLD_DIGIT + d)); } }
       else if (this.focus === 2) {
         if (k === AVK.LEFT) this.btn = (this.btn + 2) % 3;
         else if (k === AVK.RIGHT) this.btn = (this.btn + 1) % 3;
@@ -262,7 +331,7 @@ class Storage {
 
   /** keys of the three buttons: 고급상점 / 골드전송 (off) or 창고정리 / 창고 or 가방 */
   private buttonKeys(): (number | null)[] {
-    return this.mode === 0 ? [AVK.POUND, null, AVK.STAR] : [AVK.STAR, AVK.K0, AVK.POUND];
+    return this.mode === 0 ? [AVK.POUND, AVK.K0, AVK.STAR] : [AVK.STAR, AVK.K0, AVK.POUND];
   }
 
   /** 창고정리 (FUN_0003b3a8(2)): by type, sub, grade */
@@ -277,6 +346,7 @@ class Storage {
     if (this.mode === 0) {
       const it = fs.inv.items[idx];
       if (!it) return;
+      if (it.type === 0x1b || it.type === 0x18) { this.popup = { p: new Popup(this.ctx, 0x7c) }; return; }   // not storable
       const wh = loadWarehouse();
       if (wh.length >= WAREHOUSE_SIZE) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
       fs.inv.remove(idx);
@@ -285,6 +355,14 @@ class Storage {
     } else {
       const wh = loadWarehouse(), it = wh[idx];
       if (!it) return;
+      if (it.type === 0x1c) {                                        // FUN_000750bc: a gold record gives count × 1000
+        fs.inv.gain(0x1c, it.count * 1000, 0, 1, fs.rng);
+        wh.splice(idx, 1);
+        saveWarehouse(wh);
+        grantSave(fs);
+        this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4ec] ?? '') };
+        return;
+      }
       if (!fs.inv.gain(it.type, it.sub, it.grade, it.count, fs.rng, it)) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
       wh.splice(idx, 1);
       saveWarehouse(wh);
@@ -329,10 +407,49 @@ class Storage {
           move)),
       h('div.v-row.mc-buttons', null,
         btn(0x19e3, 0),                                                                    // 고급상점
-        btn(this.mode === 0 ? 0x19e2 : 0x19da, 1),                                         // 골드전송 (server gift: off) / 창고정리
-        btn(this.mode === 0 ? 0x19e4 : 0x19e5, 2))));                                      // 창고 / 가방
+        btn(this.mode === 0 ? 0x19e2 : 0x19da, 1),                                         // 골드전송 / 창고정리
+        btn(this.mode === 0 ? 0x19e4 : 0x19e5, 2)),                                        // 창고 / 가방
+      this.goldPad !== null && this.goldView()));
+  }
+
+  /** FUN_00026c58: title 0x19F3, 소지금, "1000 X n = n·1000", the input with a blinking '-', digit pad, 전송 / 수정 */
+  private goldView(): VNode {
+    const t = this.ctx.assets.text, s = this.goldPad ?? '', n = Number(s || '0');
+    const key = (d: number) => button(gt(String(d)), { glow: false, cls: 'mc-gold-key', on: () => [GOLD_DIGIT + d] });
+    return h('div.v-modal', { on: () => [] },
+      h('div.u-window.v-col.v-pop-grow.mc-gold', null,
+        gt(t[0x19f3] ?? '', { pen: 0xffe0 }),
+        h('div.v-row.mc-gold-line', null, gt(t[0x19f4] ?? ''), gt(String(this.fs.inv.gold), { cls: 'v-grow v-right' })),
+        h('div.v-row.mc-gold-line', null, gt(`1000 X ${n}`), gt(`= ${n * 1000}`, { cls: 'v-grow v-right' })),
+        h('div.v-row.mc-gold-input', null, gt(s), (this.t >> 2) & 1 ? gt(t[0x19f5] ?? '-') : null),
+        h('div.mc-gold-pad', null, [0, 2, 4, 6, 8, 1, 3, 5, 7, 9].map(key)),
+        h('div.v-row.mc-buttons', null,
+          button(gt(t[0x19ec] ?? ''), { sel: true, glow: false, on: () => [AVK.STAR] }),           // 전 송
+          button(gt(t[0x19ed] ?? ''), { glow: false, on: () => [AVK.POUND] }),                     // 수 정
+          button(gt('X'), { glow: false, on: () => [AVK.CLR] }))));
   }
   drawPopups(): void { this.popup?.p.draw(); }
+}
+
+/** gold pad digit keys (not AVK: the AVK digit codes double as arrows and quick-slot keys) */
+const GOLD_DIGIT = 0x300;
+let digitListener: ((e: KeyboardEvent) => void) | null = null;
+/** keyboard digits (top row / numpad) while the gold pad is open; the handler returns false once it is closed */
+function listenDigits(fn: (d: number) => boolean | void): void {
+  if (digitListener) removeEventListener('keydown', digitListener, true);
+  digitListener = (e: KeyboardEvent) => {
+    const m = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
+    if (!m) return;
+    if (fn(Number(m[1])) === false) { removeEventListener('keydown', digitListener!, true); digitListener = null; return; }
+    e.preventDefault(); e.stopPropagation();
+  };
+  addEventListener('keydown', digitListener, true);
+}
+
+/** warehouse gold record (type 0x1C, count = thousands of gold) shown with the gold icon */
+function goldRecord(fs: FieldScene, n: number): Item {
+  const it = fs.db.create(0x1b, 0x1b, 0, new Rng(1n, () => 0));
+  return { ...it, type: 0x1c, sub: 0, count: n, icon: 324, name: `${n * 1000} Gold`, price: 0 };
 }
 
 /** Community menu 0x24 (FUN_0005ac04 / FUN_0005666c). */
@@ -343,15 +460,20 @@ export class CommunityTab {
   private screen: CouponShop | PremiumShop | Storage | DimensionScreen | null = null;
   /** the screen a coupon shop opened by popup 0x7D returns to */
   private back: PremiumShop | DimensionScreen | null = null;
+  /** menu tab a coupon shop opened from another tab returns to (inventory 0x7E / 0x49 shortfall); read by the menu */
+  private backTab: number | null = null;
+  wantTab: number | null = null;
 
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
   get busy(): boolean { return !!this.popup || !!this.screen; }
 
   /** open a screen directly (HUD SHOP / coupon button) */
-  open(screen: 'premium' | 'coupon' | 'dimension'): void {
+  open(screen: 'premium' | 'coupon' | 'dimension', backTab: number | null = null): void {
     this.back = null;
-    if (!this.fs.canSave || (screen === 'dimension' && this.fs.gardenMode !== 0)) { this.popup = { p: new Popup(this.ctx, 0x6d) }; return; }
+    this.backTab = backTab;
+    // the coupon shop opens anywhere (HUD coupon button FUN_00047488, popup 0x7D close FUN_0005de24)
+    if (screen !== 'coupon' && (!this.fs.canSave || (screen === 'dimension' && this.fs.gardenMode !== 0))) { this.popup = { p: new Popup(this.ctx, 0x6d) }; return; }
     this.sel = 4;
     this.screen = screen === 'premium' ? new PremiumShop(this.ctx, this.fs) : screen === 'coupon' ? new CouponShop(this.ctx, this.fs) : new DimensionScreen(this.ctx, this.fs);
   }
@@ -363,7 +485,10 @@ export class CommunityTab {
     if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); else if (r === 'ok') p.ok?.(); } return true; }
     const s = this.screen;
     if (s) {
-      if (s.update(presses) === 'close') { this.screen = this.back; this.back = null; }
+      if (s.update(presses) === 'close') {
+        this.screen = this.back; this.back = null;
+        if (!this.screen && this.backTab !== null) { this.wantTab = this.backTab; this.backTab = null; }
+      }
       else if ((s instanceof PremiumShop && s.request === 'coupon') || (s instanceof DimensionScreen && s.toCoupons)) {
         // popup 0x7D "쿠폰 구매 페이지로 이동합니다": the coupon shop, then back here
         if (s instanceof PremiumShop) s.request = null; else s.toCoupons = false;

@@ -37,7 +37,7 @@ export class Popup {
     return this.format ? this.format(t) : t;
   }
 
-  get yesNo(): boolean { return [2, 3, 4, 12, 13].includes(this.type); }
+  get yesNo(): boolean { return [2, 3, 4, 11, 12, 13].includes(this.type); }
   handle(presses: number[]): 'yes' | 'no' | 'ok' | null {
     for (const k of presses) {
       if (this.yesNo && (k === AVK.LEFT || k === AVK.RIGHT)) this.sel ^= 1;

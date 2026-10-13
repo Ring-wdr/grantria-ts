@@ -199,8 +199,7 @@ export class FieldHud {
       u.el(`t-circle t-slot${v ? '' : ' empty'}`, x - 19, y - 19, 38, 38);
       if (v) {
         if ('skill' in v) {
-          // skill icon: i3 (skill%10*24, 72) where the loader (FUN_000f9aac) pastes a 24-row band of
-          // sIcon at y=72; which sIcon row is copied is not confirmed [추정: class row]
+          // skill icon: i3 (skill%10*24, 72) where the loader FUN_000f9aac pastes sIcon rows cls*24..+23 at y=72
           u.image('sIcon', (v.skill % 10) * 0x18, s.cls * 0x18, 0x18, 0x18, x - 12, y - 12);
         } else {
           u.image(v.icon.image, v.icon.sx, v.icon.sy, 0x10, 0x10, x - 8, y - 9);   // FUN_0003bc80

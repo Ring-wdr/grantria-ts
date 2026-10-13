@@ -1,6 +1,6 @@
 // Skill tab 0x20 (FUN_0005b160 -> grid FUN_0004c0bc, keys FUN_00056e4c), analysis/features/ui-tabs.md
 // §0.6 and game-rules.md §4. Active / passive investment with the original checks; the third
-// sub-tab (account traits) is drawn but its points (gamedata 0x35c) are not ported.
+// sub-tab invests account trait points (gamedata 0x35c, account.ts, account.md §2.2).
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
 import { QUICK_KEYS, slotPickerKey } from './keys';

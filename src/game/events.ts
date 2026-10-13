@@ -1,10 +1,11 @@
 // Event script VM (FUN_0006ffdc commands, FUN_00034e24 frame loop, FUN_0002cdc8 end, FUN_00065534 skip),
 // analysis/features/events.md §0.2–0.6. Records {time, cmd, arg} run when time == clock; the clock
 // advances one tick per frame only while nothing waits.
-// Not ported / approximated: SPAWN_TYPE placement for low actor ids the table does not place (they
-// spawn at the leader) [추정], PARTY_SWAP (unused by the scripts), pose effects / sounds, FILTER1, DANGER
-// objects; darkness levels and lightning are drawn as plain overlays [근사].
+// SPAWN_TYPE of the low ids puts an item on the ground (SPAWN_ITEM); PARTY_SWAP is not ported (unused by the
+// scripts) and FILTER1 does nothing in the original either.
+// DARKEN / the darkness steps / LIGHTNING are the RGB565 blur and smear filters of FUN_000f8b00 (screenfx.ts).
 import type { Dir } from './player';
+import { blur8, smear } from './screenfx';
 import type { FieldScene } from './fieldScene';
 import { Dialogue, drawCaption } from './dialogue';
 import { AVK } from './input';
@@ -21,7 +22,7 @@ const FLASH = [32, 32, 32, 24, 24, 16, 8, 6, 24, 16, 8, 4, 2, 0, 0];
 const REPEATABLE = [0x6e, 0x6f, 0x70, 0x71, 0x79, 0x7c, 0x7f, 0x80, 0x81, 0x82, 0x83, 0x8a, 0x8d, 0x8e, 0x90, 0x92, 0x93, 0x94, 0x96];
 /** end handler flag changes (FUN_0002cdc8) */
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
-const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[] }> = {
+const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[]; doors?: number[]; item?: [number, number] }> = {
   0: { set: [...range(10, 29), ...range(0x7f, 0x86), ...range(0x92, 0xa3)] },
   10: { set: [...range(1, 9), ...range(0x14, 0x1d), ...range(0x6d, 0x79), ...range(0x92, 0xa3)] },
   0x14: { set: [...range(1, 0x14), ...range(0x6d, 0x79), ...range(0x7f, 0x86)] },
@@ -31,10 +32,10 @@ const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[] 
   0xb: { set: [0x7f, 0x80] }, 0xd: { set: [0x81] }, 0xe: { set: [0x82] },
   0x11: { set: [0x83, 0x8e], clr: [0x84] },
   0x15: { set: [0x92, 0x93] }, 0x17: { set: [0x94] },
-  0x1e: { set: [0x40, 0x49, 0x8d, 0x8e, 0x90, 0x95] },
+  0x1e: { set: [0x40, 0x49, 0x8d, 0x8e, 0x90, 0x95], doors: [2, 0, 5] },          // doors: +0x32a1 barrier bits
   0x22: { set: [0x8a, 0x36, 0x29, 0x25, 0x52] },
   0x24: { set: [0x7c], clr: [0x25] }, 0x25: { clr: [0x7c] },
-  0x28: { set: [0x7c, 0x55], clr: [0x29] },
+  0x28: { set: [0x7c, 0x55], clr: [0x29], item: [0x1a, 0x0b] },                     // 투명한 허물 for quest 0x45
   0x2c: { set: [0x60, 0x8c] },
   0x35: { clr: [0x36] }, 0x3e: { clr: [0x8d] }, 0x47: { clr: [0x8e] }, 0x54: { clr: [0x55] }, 0x59: { clr: [0x8a] },
   0x3f: { set: [0x8d], clr: [0x40] }, 0x48: { set: [0x8e], clr: [0x49] },
@@ -44,7 +45,8 @@ const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[] 
   0x5f: { set: [0x89], clr: [0x60] }, 100: { clr: [0x65, 0x8c] },
 };
 
-/** SPAWN_TYPE placement (FUN_00063f7c per-event table, run with tools/grantria_spawn.py): 'event:type' -> [x, y, dir] */
+/** SPAWN_TYPE placement (FUN_00063f7c per-event table, run with tools/grantria_spawn.py): 'event:type' -> [x, y, dir];
+ *  'event:type@clock' where the placement code compares the event clock */
 const SPAWN_PLACE: Record<string, [number, number, number]> = {
   '0:44': [80, 224, 1], '4:57': [432, 640, 1], '5:48': [112, 208, 1], '7:44': [336, 208, 1],
   '7:48': [416, 208, 0], '7:51': [320, 224, 1], '7:57': [416, 240, 0], '8:5': [250, 240, 3],
@@ -55,6 +57,23 @@ const SPAWN_PLACE: Record<string, [number, number, number]> = {
   '94:37': [768, 176, 0], '102:37': [448, 400, 0], '104:161': [320, 256, 1], '106:44': [304, 448, 0],
   '106:51': [304, 480, 0], '106:80': [112, 160, 0], '106:85': [144, 160, 0], '106:97': [80, 160, 1],
   '106:123': [272, 480, 0], '106:218': [288, 160, 0], '107:992': [512, 448, 0], '152:123': [192, 592, 1],
+  '19:258@158': [240, 352, 0], '106:44@1024': [368, 192, 0], '106:51@1026': [336, 192, 1], '106:123@1028': [240, 160, 1],
+};
+
+/** SPAWN_TYPE of the low ids (2..14): an item lying on the ground (actor id 200, +0x8a = 5), category / sub / spot
+ *  hard-coded per event and clock (FUN_00063f7c run at each record's clock): 'event:clock' -> [cat, sub, x, y] */
+const SPAWN_ITEM: Record<string, [number, number, number, number]> = {
+  '7:12': [0x1a, 2, 368, 256], '7:92': [0x1a, 2, 368, 256], '10:210': [0x1a, 5, 171, 176], '15:57': [0x1a, 5, 309, 459],
+  '16:38': [0x1a, 5, 256, 208], '16:288': [0x1a, 6, 256, 208], '20:16': [0x1d, 7, 78, 170], '29:133': [0x1a, 9, 240, 122],
+  '29:419': [0x1a, 9, 240, 122], '30:380': [0x1a, 2, 598, 336], '30:382': [0x1a, 9, 619, 336], '40:24': [0x1a, 11, 320, 224],
+  '41:34': [0x1a, 11, 101, 368], '46:254': [0x1d, 2, 624, 880], '48:54': [0x1d, 4, 832, 800], '48:136': [0x1d, 4, 832, 800],
+  '49:164': [0x1d, 4, 176, 240], '53:42': [0x12, 7, 214, 384], '53:64': [0x1a, 14, 214, 384], '61:153': [0x1d, 5, 224, 288],
+  '62:20': [0x1d, 5, 106, 171], '64:32': [0x1d, 5, 1064, 528], '70:298': [0x1d, 6, 275, 112], '73:34': [0x1d, 6, 339, 144],
+  '81:10': [0x1d, 7, 78, 170], '81:120': [0x1d, 7, 309, 195], '81:122': [0x1d, 5, 292, 208], '81:124': [0x1d, 6, 315, 208],
+  '85:34': [0x1d, 7, 1157, 704], '88:245': [0x1d, 5, 400, 496], '88:247': [0x1d, 6, 432, 496], '88:249': [0x1d, 7, 368, 496],
+  '88:272': [0x1d, 9, 400, 496], '88:328': [0x1d, 9, 397, 507], '88:497': [0x1a, 5, 266, 496], '88:644': [0x1d, 9, 282, 501],
+  '92:197': [0x1d, 8, 395, 221], '93:40': [0x1d, 8, 240, 320], '100:32': [0x1d, 3, 256, 293], '101:36': [0x1d, 3, 432, 336],
+  '106:60': [0x1a, 5, 355, 197], '106:114': [0x1a, 5, 355, 197], '106:272': [0x1d, 9, 269, 160], '106:920': [0x1a, 5, 160, 168],
 };
 
 type Wait = 0 | 1 | 2 | 4 | 0x0c | 0x0d | 0x0e | 0x13 | 0x14 | 0x15 | 0x16 | 0x19 | 'map';
@@ -81,9 +100,12 @@ export class EventRunner {
   private flash = 0;
   shakeY = 0;
   private shakeAmp = 0;
+  /** DARKEN frames (DAT_003b3c3b): the field is not redrawn and the held frame is blurred again each frame */
   private darken = 0;
+  /** darkness step (DAT_003b3c3c, no cap): 1 blur, 2 smear (1), 3 smear (0) */
   private darkLevel = 0;
-  private lightning = 0;
+  /** DAT_003b3c3a = 2: LIGHTNING filters while the white fade runs */
+  private lightMode = 0;
   dialogue: Dialogue | null = null;
   private caption: { text: string | string[]; n: number } | null = null;
   /** caption index DAT_003b1dbc (reset at the start of 0x6A, hardmode.md §2.2) */
@@ -116,6 +138,7 @@ export class EventRunner {
     [this.pc, this.end] = this.db.range(e);
     this.id = e;
     this.clock = 0;
+    this.fs.player.blockCode = 0;                              // FUN_0001d6c4 clears the block codes
     if (e === 0x6a) this.capIdx = -1;
     this.textId = this.db.headers[e].textBase - 1;
     this.wait = 0x19;
@@ -128,7 +151,7 @@ export class EventRunner {
     const ids = new Set<number>();
     for (let s = this.pc; s < this.end; s++) {
       const r = this.db.rec(e, s);
-      if (r.cmd === 0x0f) ids.add(r.arg);
+      if (r.cmd === 0x0f) { if (!SPAWN_ITEM[`${e}:${r.time}`]) ids.add(r.arg); }
       else if (r.cmd >= 0x16df && r.cmd < 0x16df + 0xf5) ids.add(r.cmd - 0x16df);
       else if (r.cmd >= 5000 && r.cmd < 5300) ids.add(r.cmd - 5000);
       else if (r.cmd >= 0x1900 && r.cmd < 0x1900 + 300) ids.add(r.cmd - 0x1900);
@@ -156,13 +179,12 @@ export class EventRunner {
     if (!this.active) return;
     if (this.fade > 0) this.fade--; else if (this.fade < 0) this.fade++;
     if (this.flash > 0) this.flash--;
-    if (this.darken > 0) this.darken--;
-    if (this.lightning > 0) this.lightning--;
     this.shakeY = this.shakeAmp ? ((this.frame & 1) ? this.shakeAmp : -this.shakeAmp) : 0;
     if (this.skipFade > 0) { if (--this.skipFade === 0) this.fastForward(); return; }
     if (this.wait === 'map') return;
     if (this.wait === 0x19) { this.wait = 0; return; }
     if (this.wait === 0) this.run();
+    if (this.fill) this.darken = 0;                            // FUN_0003357c: a FILL frame ends DARKEN
     if (!this.active) return;
     for (const a of this.fs.actors) a.update();
     this.fs.lead?.update();
@@ -194,7 +216,11 @@ export class EventRunner {
         }
         break;
       }
-      case 0x13: if (!this.waitActor || !this.waitActor.moving) this.wait = 0; break;
+      case 0x13: {                                              // any actor finishing its path releases it (FUN_00070918);
+        const all = [this.fs.lead!, ...this.fs.actors];          // no path at all: released at once (the original hangs)
+        if (all.some((a) => a.arrived) || !this.waitActor?.moving) { this.wait = 0; for (const a of all) a.speed = 5; }
+        break;
+      }
       case 0x14: if (![this.fs.lead!, ...this.fs.actors].some((a) => a.moving)) this.wait = 0; break;
       case 0x15: if (performance.now() >= this.waitUntil) this.wait = 0; break;
       case 0x16:
@@ -249,8 +275,8 @@ export class EventRunner {
     }
     if (cmd >= 5000 && cmd < 5300) {                           // WALK_TO (blocking)
       const a = cmd - 5000 === PLAYER_ARG ? fs.lead! : this.actor(cmd - 5000);
-      a.walkTo(fs.field, arg >> 8, arg & 0xff);
-      if (fast) a.finishPath(); else { this.wait = 0x13; this.waitActor = a; }
+      if (fast) a.placeAt((arg >> 8) * 16 + 12, (arg & 0xff) * 16 + 20);   // FUN_00065534
+      else { a.walkTo(fs.field, arg >> 8, arg & 0xff); this.wait = 0x13; this.waitActor = a; }
       return;
     }
     if (cmd >= 0x14b4 && cmd < 0x15b3) { fs.partHide = ((cmd - 0x14b4) << 8) | (arg & 0xff); return; }   // PART_HIDE
@@ -276,8 +302,8 @@ export class EventRunner {
     }
     if (cmd >= 0x1900 && cmd < 0x1900 + 300) {                 // MOVE_TO (no wait)
       const a = cmd - 0x1900 === PLAYER_ARG ? fs.lead! : this.actor(cmd - 0x1900);
-      a.walkTo(fs.field, arg >> 8, arg & 0xff);
-      if (fast) a.finishPath();
+      if (fast) a.placeAt((arg >> 8) * 16, (arg & 0xff) * 16);
+      else a.walkTo(fs.field, arg >> 8, arg & 0xff);
       return;
     }
     switch (cmd) {
@@ -301,16 +327,22 @@ export class EventRunner {
       case 0x0c: case 0x0d: for (const a of this.party(arg)) a.face(cmd === 0x0c ? 0 : 1); break;
       case 0x2d: case 0x2e: for (const a of this.party(arg)) a.face(cmd === 0x2d ? 2 : 3); break;
       case 0x0e:
-        if (arg === -100) break;
+        if (arg === -100) { fs.eventItems = []; break; }       // ground items of the event (+0x8a == 5) removed
         if (arg === 0x3e0) { for (const a of fs.actors) if (a.id === 0x3e0) a.visible = false; break; }
         this.actor(arg).visible = false;
         break;
-      case 0x0f: {                                             // SPAWN_TYPE
-        const a = fs.spawnActor(arg, true);
+      case 0x0f: {                                             // SPAWN_TYPE (FUN_00063f7c)
+        const it = SPAWN_ITEM[`${this.id}:${this.clock}`];
+        if (it) { fs.eventItems.push({ cat: it[0], sub: it[1], x: it[2], y: it[3] }); break; }   // a new one every time
+        const p = SPAWN_PLACE[`${this.id}:${arg}@${this.clock}`] ?? SPAWN_PLACE[`${this.id}:${arg}`];
+        if (arg >= 0x101) {                                    // not created: only one already on the map moves
+          const a = fs.actors.find((x) => x.id === arg);
+          if (a && p) { a.x = p[0]; a.y = p[1]; a.face((p[2] & 3) as Dir); }
+          break;
+        }
+        const a = fs.actors.find((x) => x.id === arg && x.visible) ?? fs.spawnActor(arg, true);
         if (!a) break;
-        const p = SPAWN_PLACE[`${this.id}:${arg}`];
         if (p) { a.x = p[0]; a.y = p[1]; a.face((p[2] & 3) as Dir); }
-        else { a.x = fs.lead!.x; a.y = fs.lead!.y; }
         break;
       }
       case 0x10: this.wait = 'map'; void fs.eventMap(arg).then(() => { this.wait = 0; }); break;
@@ -345,7 +377,7 @@ export class EventRunner {
       case 0x1e: fs.partyJoin(); break;
       case 0x25: fs.partyHide(); this.camTarget = fs.lead; if (!fast) this.wait = 0x0c; break;
       case 0x26:                                               // FX_RESET
-        this.grey = false; this.fill = 0; this.darkLevel = 0; this.camTarget = this.camTarget ?? fs.lead; this.camCell = null;
+        this.grey = false; this.fill = 0; this.camTarget = this.camTarget ?? fs.lead; this.camCell = null;   // the darkness step stays
         for (const a of [fs.lead!, ...fs.actors]) { a.pose = 0; a.anim = -1; a.speed = 5; }
         break;
       case 0x27: if (!fast) { this.waitUntil = performance.now() + arg; this.wait = 0x15; } break;
@@ -356,10 +388,10 @@ export class EventRunner {
       case 0x2f: case 0x30: this.actor(arg).face(cmd === 0x2f ? 3 : 2); break;
       case 0x31: case 0x32: this.actor(arg).face(cmd === 0x31 ? 0 : 1); break;
       case 0x33: this.shakeAmp = this.shakeAmp ? 0 : arg; break;
-      case 0x34: if (!fast) this.darken = arg; break;
-      case 0x35: this.darkLevel = Math.min(3, this.darkLevel + 1); break;
+      case 0x34: if (!fast) this.darken = arg & 0xff; break;
+      case 0x35: if (!fast) this.darkLevel = (this.darkLevel + 1) & 0xff; break;
       case 0x36: this.darkLevel = 0; break;
-      case 0x38: this.fill = 0; if (!fast) { this.fade = 16; this.fadeWhite = true; this.lightning = 16; } break;
+      case 0x38: this.fill = 0; if (!fast) { this.fade = 16; this.fadeWhite = true; this.lightMode = 2; } break;
       case 0x39: if (!fast) this.wait = 0x14; else for (const a of [fs.lead!, ...fs.actors]) a.finishPath(); break;
       case 0x3a: fs.ctx.audio.stopBgm(); fs.ctx.audio.playBgm(0x0c); fs.setDanger(true); break;
       case 0x3b: fs.setDanger(false); break;
@@ -428,20 +460,35 @@ export class EventRunner {
     for (const f of hook?.set ?? []) story.set(f);
     for (const f of hook?.clr ?? []) story.set(f, false);
     for (const b of hook?.dim ?? []) if (!story.collectDim.delete(b)) story.collectDim.add(b);
+    for (const b of hook?.doors ?? []) story.doors.add(b);
+    if (hook?.item) { this.fs.inv.gain(hook.item[0], hook.item[1], 0, 1, this.fs.rng); this.fs.quests.onItems(); }   // FUN_0003ecc4
     if (REPEATABLE.includes(e)) story.set(e, false);
     this.fs.endEvent(e);
   }
 
+  /** DARKEN holds the last frame instead of redrawing the field (FUN_0003357c) */
+  get holdFrame(): boolean { return this.active && !this.fill && this.darken > 0; }
+  get screenFxOn(): boolean { return this.active && !this.fill && (this.darken > 0 || (this.darkLevel >= 1 && this.darkLevel <= 3) || (this.fade !== 0 && this.lightMode === 2)); }
+
+  /** FUN_00030734 on the field screen (before balloons, dialogue and HUD): DARKEN blur, darkness step, LIGHTNING */
+  screenFx(b: Uint16Array, w: number, h: number): void {
+    if (this.fill) return;
+    if (this.darken) { blur8(b, w, h); this.darken--; }
+    if (this.darkLevel === 3) smear(b, w, h, 0); else if (this.darkLevel === 2) smear(b, w, h, 1); else if (this.darkLevel === 1) blur8(b, w, h);
+    if (this.fade !== 0 && this.lightMode === 2) {
+      const v = (this.fade << 24) >> 24;
+      if (v >= 9) smear(b, w, h, 0); else if (v >= 5) smear(b, w, h, 1); else if (v >= 2) blur8(b, w, h); else this.lightMode = 0;
+    }
+  }
+
   drawOverlay(u: Ui): void {
     if (this.fill) u.fill(0, 0, W, H, this.fill === 1 ? 0x000001 : 0xffffff);
-    if (this.darkLevel || this.darken) { u.alpha = this.darken ? 16 : [0, 10, 18, 26][this.darkLevel]; u.fill(0, 0, W, H, 0); u.alpha = 32; }
     if (this.fade) {
       const a = this.fade < 0 ? ((this.fade + 15) * 2) : ((this.fade - 1) * 2);
       if (a > 0) { u.alpha = Math.min(32, a); u.fill(0, 0, W, H, this.fadeWhite ? 0xffffff : 0); u.alpha = 32; }
     }
     if (this.skipFade) { u.alpha = Math.min(32, (16 - this.skipFade) * 2); u.fill(0, 0, W, H, 0); u.alpha = 32; }
     if (this.flash) { u.alpha = FLASH[15 - this.flash] ?? 0; u.fill(0, 0, W, H, 0xffffff); u.alpha = 32; }
-    if (this.lightning >= 9 && (this.lightning & 1)) { u.alpha = 12; u.fill(0, 0, W, H, 0xffffff); u.alpha = 32; }
     if (this.showItem) {
       const s = this.showItem, r = this.fs.db.iconRect(s.icon);
       const x = s.x < 0 ? (W >> 1) - 12 : s.x - this.fs.cam.x - 12, y = s.y < 0 ? (H >> 1) - 12 : s.y - this.fs.cam.y - 24;

@@ -48,7 +48,7 @@ export function fortuneAskView(text: string[], art: FortuneArt | null): VNode {
  * popup 0x55 contents (FUN_00051cc4 state 3 / 4, fortune.md §6): the upper panel (portrait, title,
  * grade) and the lower panel (message, reward item). On 꽝 the teller has run away: the box stays empty.
  */
-export function fortuneResultView(text: string[], res: FortuneResult | null, item: { name: string; icon: { image: string; sx: number; sy: number } } | null, art: FortuneArt | null): VNode {
+export function fortuneResultView(text: string[], res: FortuneResult | null, item: { name: string; icon: { image: string; sx: number; sy: number } } | null, art: FortuneArt | null, held = false): VNode {
   const lost = !res || !item;
   return h('div.v-col.fortune', null,
     h('div.v-box.v-row.fortune-top', null, portrait(lost ? null : art),
@@ -60,5 +60,6 @@ export function fortuneResultView(text: string[], res: FortuneResult | null, ite
         gt(text[res.grade === 1 ? 0x99 + res.slot : 0xa3 + res.slot - 10] ?? '', { pen: 0xffe0 }),
         h('div.v-row.v-center', { style: 'gap:4px' },
           sprite(item.icon.image, item.icon.sx, item.icon.sy, 16, 16), gt(`${item.name} X ${res.count}`)),
+        held && gt('가방이 가득 찼습니다. 빈 칸을 만들면 받습니다.', { pen: 0xf800 }),
       ]));
 }

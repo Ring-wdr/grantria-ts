@@ -16,6 +16,8 @@ export interface SaveData {
   gold: number;
   stats: number[];
   statPoints: number;
+  /** bought point packs: stats +0x32a7 (AP +30 each), skills +0x32a8 (SP +5 each), at most 10 */
+  packs?: [number, number];
   map: number;
   /** map zone, shown as the area name (text 0x1D6 + zone) in the slot list */
   zone?: number;
@@ -37,7 +39,7 @@ export interface SaveData {
   returnZone?: number;
   /** event flags and quests (absent in a new game) */
   story?: StorySave;
-  inv?: { items: Item[]; equip: (Item | null)[]; quick: QuickSlot[]; gold: number; bags?: number; unlocks?: number };
+  inv?: { items: Item[]; equip: (Item | null)[]; quick: QuickSlot[]; gold: number; bags?: number; unlocks?: number; keys?: Item[] };
 }
 
 export function loadSlot(i: number): SaveData | null {

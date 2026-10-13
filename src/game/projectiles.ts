@@ -1,6 +1,8 @@
 // Skill projectiles (objects 0x29..0x64), ported from analysis/features/skills.md §4
 // (FUN_00069528 spawn, per-kind behaviour functions, FUN_000231e4 box overrides §2.2).
-// Simplified: kind 18 (hell laser launcher) timing is approximated, kind 0 is not used.
+// Every behaviour ends with the common tail of the original: life < 1 removes the object, else frame++ / life--,
+// so an object lives one update past life 0. Kind 18 (hell laser launcher) runs its own state machine
+// (FUN_0006eb3c status 40, emulator-checked: pillars at updates 26, 53 and 79). Kind 0 is not used.
 import type { Cmf } from '../assets';
 import type { Drawable } from './field';
 import type { Monster } from './monster';
@@ -74,9 +76,16 @@ export class Projectile {
   private target: Monster | null = null;
   private stopped = false;
   private extra = 0;
-  private counter = 0;
+  /** +0x82 sub-state, +0x8d counter (kind 4 / 18), target locked (kind 4 +0x8d) */
+  private sub = 0;
+  private cnt = 0;
+  private locked = false;
 
-  constructor(readonly kind: number, rec: ProjRecord, owner: Owner, readonly cmf: Cmf, readonly idx = 0, ex = 0, ey = 0) {
+  readonly kind: number;
+  readonly cmf: Cmf;
+  readonly idx: number;
+  constructor(kind: number, rec: ProjRecord, owner: Owner, cmf: Cmf, idx = 0, ex = 0, ey = 0) {
+    this.kind = kind; this.cmf = cmf; this.idx = idx;
     this.dir = owner.dir; this.lastH = owner.lastH; this.lastV = owner.lastV;
     this.frame = rec.frame; this.action = rec.action; this.status = rec.status; this.type = rec.type;
     this.skillAid = rec.status === 3 ? 100 : rec.action - (rec.type === 1 ? 2 : 4);
@@ -110,7 +119,7 @@ export class Projectile {
       case 15: set(35, 666, at([[ox - 90, oy - 10], [ox + 90, oy - 10], [ox, oy - 70], [ox, oy + 60]])); break;
       case 16: set(200, 683, at([[ox - 43, oy], [ox + 43, oy], [ox, oy - 10], [ox - 2, oy + 19]])); break;
       case 17: set(56, 697 + 25 * F, at([[ox - 43, oy], [ox + 43, oy], [ox, oy - 40], [ox, oy + 30]])); break;
-      case 18: set(30, 772, at([[ox - 50, oy], [ox + 50, oy], [ox, oy - 40], [ox, oy + 30]])); this.hits = false; break;
+      case 18: set(18, 772, at([[ox - 50, oy], [ox + 50, oy], [ox, oy - 40], [ox, oy + 30]])); this.hits = false; break;
       case 19: set(6, d >= 2 ? 654 : 651, [ex, ey]); this.hits = false; break;
       case 20: {
         const p0: [number, number][] = [[ex - 30, ey - 60], [ex + 30, ey - 60], [ex, ey - 30], [ex, ey - 70]];
@@ -138,7 +147,8 @@ export class Projectile {
   }
 
   private chase(m: Monster, speed: number): void {
-    const dx = m.x - this.x, dy = m.y - this.y, d = Math.hypot(dx, dy) || 1;
+    const ty = m.y + (m.type === 38 || m.type === 39 ? -30 : m.type === 35 ? 76 : 0);   // FUN_000609c0 target offsets
+    const dx = m.x - this.x, dy = ty - this.y, d = Math.hypot(dx, dy) || 1;
     this.x += Math.trunc((dx / d) * speed);
     this.y += Math.trunc((dy / d) * speed);
   }
@@ -148,17 +158,14 @@ export class Projectile {
     this.x += fx * n; this.y += fy * n;
   }
 
-  private lastBox: [number, number, number, number] | null = null;
-
-  attackBox(): Rect | null {
+  /** FUN_000231e4 rewrites the box from the frame every update; a box-less frame never hits (FUN_00060c40).
+   *  frame: the frame whose box is used (kinds 3 / 4 test after moving with the previous update's box). */
+  attackBox(frame = this.frame): Rect | null {
     if (!this.hits || this.gone) return null;
-    const r = sheetAttackBox(this.cmf, this.type, this.frame, this.x, this.y, this.dir, this.lastH);
-    if (r) { this.lastBox = [r[0] - this.x, r[1] - this.y, r[2] - this.x, r[3] - this.y]; return r; }
-    // kind 4 chases on frame 587, which has no box; the spec says it keeps hitting every tick, so the
-    // last box is kept (FUN_000231e4 presumably leaves the box untouched on box-less frames) [추정]
-    if (this.kind === 4 && this.lastBox) { const b = this.lastBox; return [this.x + b[0], this.y + b[1], this.x + b[2], this.y + b[3]]; }
-    return null;
+    return sheetAttackBox(this.cmf, this.type, frame, this.x, this.y, this.dir, this.lastH);
   }
+  /** kinds 3 / 4 move first and test afterwards (FUN_00072790 LAB_00072956) */
+  get hitsAfterMove(): boolean { return this.kind === 3 || this.kind === 4; }
 
   /** "+0x76 == 10" rule (§2.3): first contact turns into the 6-tick explosion without damage. */
   contactExplodes(): boolean {
@@ -171,7 +178,7 @@ export class Projectile {
   onHit(): void {
     switch (this.kind) {
       case 3: this.gone = true; break;
-      case 4: this.frame = 584; this.life = 3; this.hits = false; break;
+      case 4: this.sub = 2; this.frame = 584; this.life = 3; this.hits = false; break;
       case 7: this.life = 2; this.frame = 627; this.hits = false; break;
       case 8: if (this.frame < 633) { this.life = 3; this.frame = 633; } break;
       case 10: if (!this.stopped) { this.stopped = true; this.extra = 16; } break;
@@ -187,24 +194,31 @@ export class Projectile {
     switch (this.kind) {
       case 1: this.angle += 20; this.orbit(); this.frame = this.life === 2 ? 631 : this.frame >= 631 ? 623 : this.frame + 1; break;
       case 2: this.frame++; break;
-      case 3: {
+      case 3: {                                                    // the frame runs while searching; locked: 843 + tail = 844
         if (!this.target) {
           this.step(6);
           const m = this.nearest(monsters, 90);
-          if (m) { this.target = m; this.life = 30; this.frame = 843; }
+          if (m) { this.target = m; this.life = 30; }
         } else if (this.target.alive) this.chase(this.target, 35 - this.life);
         else this.step(6);
+        if (this.target) this.frame = 843;
+        this.frame++;
         break;
       }
-      case 4: {
-        if (this.frame === 584 || !this.hits) { this.frame++; break; }
-        if (this.life > 25) this.step(-2);
-        else if (this.life === 25) { this.step(this.dir === 3 ? 37 : 47); this.frame = 587; }
-        else {
-          const m = this.target?.alive ? this.target : (this.target = this.nearest(monsters, 190));
-          if (m) this.chase(m, Math.min(48, 36 - Math.trunc(this.life * 3.3 - 25)));
-          else { this.step(2); this.life = Math.min(this.life, 5); }
-        }
+      case 4: {                                                    // FUN_00072790 status 16
+        if (this.sub === 0) {                                      // backs off 2 px; at life 25 jumps ahead (after the -2)
+          this.step(-2);
+          if (this.life === 25) { this.sub = 1; this.frame = 587; this.step(this.dir === 3 ? 37 : 47); }
+        } else if (this.sub === 1) {                               // the target is locked once and never searched again
+          this.frame = 587;
+          if (!this.locked) {
+            this.target = this.nearest(monsters, 190);
+            this.locked = !!this.target;
+            if (!this.target) { this.life = 5; this.sub = 3; }
+          }
+          if (this.target) this.chase(this.target, Math.min(48, 36 - Math.trunc(this.life * 3.3 - 25)));
+        } else if (this.sub === 3) { this.frame = 587; this.step(2); this.hits = false; }   // no target: drifts, no hits
+        this.frame++;                                              // tail: 588 while chasing, 585 / 586 exploding
         break;
       }
       case 5: this.frame++; break;
@@ -259,16 +273,34 @@ export class Projectile {
         break;
       }
       case 17: this.frame = this.frame >= 721 + 25 * F ? 705 + 25 * F : this.frame + 1; break;
-      case 18:
-        // approximation of the launcher state machine: pillars at ticks 6, 13 and 20
-        if (this.frame < 784) this.frame++;
-        if (this.age === 6 || this.age === 13 || this.age === 20) { out = { spawn20: [this.x, this.y] }; this.counter++; }
-        break;
+      case 18: return this.launcher();
       case 19: if (this.age % 2 === 0) this.frame++; break;
       case 20: this.frame++; break;
     }
-    if (--this.life < 1) this.gone = true;
+    if (this.life < 1) this.gone = true; else this.life--;          // the common tail (frame++ is done per kind above)
     return out;
+  }
+
+  /** FUN_0006eb3c status 40: 773..784, hold 785, 786, pillars on 787 then three counted waits rewinding to 779 */
+  private launcher(): { spawn20?: [number, number] } {
+    const tail = () => { if (this.life < 1) this.gone = true; else { this.frame++; this.life--; } };
+    switch (this.sub) {
+      case 0:
+        if (this.frame === 784) { this.sub = 3; this.frame = 785; this.life = 11; return {}; }
+        if (this.frame === 785) this.sub = 2;
+        tail(); return {};
+      case 3:                                                       // hold 785 until life 1
+        if (this.life === 1) { this.sub = 0; this.frame = 785; this.life = 5; return {}; }
+        this.life--; return {};
+      case 2:                                                       // both pillars (idx 0 and 1)
+        this.sub = 1; tail(); return { spawn20: [this.x, this.y] };
+      default:                                                      // 1: counted wait, every 7th rewinds
+        if (this.cnt < 21) {
+          if (this.cnt % 7 === 0 && this.cnt !== 0) { this.life = 11; this.frame = 779; this.sub = 0; }
+          this.cnt++; return {};
+        }
+        tail(); return {};
+    }
   }
 
   /** The gravity hole (kind 15) still pulling. */

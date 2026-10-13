@@ -1,7 +1,7 @@
 // Quest state machine (events.md §0.9): refresh, accept (FUN_0001fc94), progress (FUN_0001f648 /
-// FUN_0001f928 / kills in FUN_0006ca90), complete (FUN_0001f21c). Key items (type 0x1a) go through the
-// normal inventory here; the original keeps them in a separate key store. Second-run (hard mode)
-// rewards are not ported.
+// FUN_0001f928 / kills in FUN_0006ca90), complete (FUN_0001f21c). Key items (type 0x1a) live in their own
+// 17-slot store (Inventory.keys, FUN_00036204). Second-run (hard mode)
+// rewards follow hardmode.md §4.3 (gold level × 100, EXP table .rodata 0x100818 × level).
 import type { Inventory } from './items';
 import type { Rng } from './rules';
 import { NO_ID, QUEST_COUNT, type Story, type StoryDb } from './story';
@@ -20,6 +20,14 @@ export interface QuestHost {
   message(text: string): void;
   grantExp(exp: number): void;
   sfx(n: number): void;
+  /** running event id (DAT_0040857a) or -1 */
+  eventId?: () => number;
+}
+
+/** FUN_00016f8c: a report NPC value >= 60000 means actor value - 60000; quests 0x5f / 0x3c also report to 0xc2 / 0xce */
+function reportsTo(q: number, report: number, npcId: number): boolean {
+  const v = report & 0xffff, r = v >= 60000 ? v - 60000 : v;
+  return r === npcId || (v === 0xea93 && q === 0x5f && npcId === 0xc2) || (v === 0xeaf9 && q === 0x3c && npcId === 0xce);
 }
 
 export class QuestLog {
@@ -39,7 +47,9 @@ export class QuestLog {
 
   private itemCount(type: number, sub: number): number {
     if (type === 0x1c) return this.host.inv.gold;
-    return this.host.inv.items.filter((it) => it && it.type === type && it.sub === sub).reduce((n, it) => n + (it!.count || 1), 0);
+    if (type === 0x1a) return this.host.inv.keyCount(sub);           // FUN_0003674c
+    // FUN_000366ec: bag only, type / sub / grade 0 (equipped items do not count)
+    return this.host.inv.items.filter((it) => it && it.type === type && it.sub === sub && it.grade === 0).reduce((n, it) => n + (it!.count || 1), 0);
   }
 
   /** returns false (with a popup) when the quest cannot be taken */
@@ -100,20 +110,20 @@ export class QuestLog {
 
   complete(q: number): void {
     const { story, db, host } = this;
+    const ev = host.eventId?.() ?? -1;                               // keys taken by these events before the state check
+    const evKey = ev === 0x1b ? 8 : ev === 0x36 ? 0xe : ev === 0x10 ? 5 : -1;
+    if (evKey >= 0) host.inv.removeKey(evKey);
     if (story.qs[q] !== 3) return;
     const Q = db.quests[q];
+    if (Q.kind === 2) this.takeAcceptKey(q);                         // FUN_0001c46c
     if (Q.kind === 0) {
       const c = db.collectCond(Q);
       if (c.type === 0x1c) host.inv.gold = Math.max(0, host.inv.gold - c.count);
-      else {
-        let left = c.count;
-        host.inv.items.forEach((it, i) => {
-          if (!it || left <= 0 || it.type !== c.type || it.sub !== c.sub) return;
-          const take = Math.min(left, it.count || 1);
-          left -= take;
-          it.count -= take;
-          if (it.count <= 0) host.inv.remove(i);
-        });
+      else if (c.type === 0x1a) host.inv.removeKey(c.sub);           // one record, whatever the count
+      else {                                                         // FUN_000367e8(type, sub, 0): the first grade-0 record
+        const i = host.inv.items.findIndex((it) => it && it.type === c.type && it.sub === c.sub && it.grade === 0);
+        const it = host.inv.items[i];
+        if (it) { if (it.type > 0x0f && (it.count || 1) > c.count) it.count -= c.count; else host.inv.remove(i); }
       }
     }
     host.questPopup(0x20, q);
@@ -131,6 +141,12 @@ export class QuestLog {
     this.refresh();
   }
 
+  /** FUN_0001c46c (errand completion, abandon): the key whose sub equals the accept item goes */
+  takeAcceptKey(q: number): void {
+    const it = this.db.quests[q].acceptItem;
+    if (it !== NO_ID && it >= 0 && it < 100) this.host.inv.removeKey(it);
+  }
+
   /** NPC head marker (+0x8d): 1 can accept, 2 in progress, 3 can report, 5 locked, 0 none; with the quest */
   marker(npcId: number): { mark: number; q: number } {
     const { story, db } = this;
@@ -140,7 +156,7 @@ export class QuestLog {
     }
     for (let q = 0; q < QUEST_COUNT; q++) {
       const Q = db.quests[q], s = story.qs[q];
-      if (Q.report === npcId && Q.kind !== 4 && Q.kind !== 5 && (s === 2 || s === 3)) return { mark: s, q };
+      if (reportsTo(q, Q.report, npcId) && Q.kind !== 4 && Q.kind !== 5 && (s === 2 || s === 3)) return { mark: s, q };
     }
     for (let q = 0; q < QUEST_COUNT; q++) {
       const Q = db.quests[q], s = story.qs[q];

@@ -5,6 +5,7 @@ import { DEFAULT_EQUIP, type Equip } from '../sprites';
 import type { Drawable, Field } from './field';
 import { boxOverride } from './projectiles';
 import { AVK, type Input } from './input';
+import { walkPathTick } from './pathfind';
 
 /** Direction like entity +0x7a: 0 left, 1 right, 2 up, 3 down. */
 export type Dir = 0 | 1 | 2 | 3;
@@ -76,17 +77,39 @@ export class Player {
   knock: { kind: 6 | 7; c: number; bonus: number; stun: boolean } | null = null;
   /** stun ticks (player state 5, +0x5a) */
   stun = 0;
-  /** slow timer +0x54 (Black Leo's roar): walking speed halved [추정] */
+  /** slow timer +0x54 (Black Leo's roar) and player state 2: max speed 4 for every class (FUN_00060520);
+   *  a knockback / stagger / stun overwrites state 2, so the slow ends early */
   slowT = 0;
-  /** grabbed by Mother's arm (player state 1): no input until released (safety limit 60 ticks) */
+  slowed = false;
+  slow(t: number): void { this.slowT = t; this.slowed = true; }
+  /** grabbed by Mother's arm (player state 1): no input and no time limit until the arm releases (frame 0x23) */
   grabbed = false;
-  private grabT = 0;
-  /** Queen Frostworm suction (player state 8): pulled toward the point 9 px/tick, 4 when walking away [추정] */
+  /** Queen Frostworm suction (player state 8): the body box's top-left is pulled toward this point (230, 300) */
   pullTo: [number, number] | null = null;
+  /** the actor in monster slot 3 (the Queen's main body): walking away from it pulls at 4 instead of 9 */
+  pullRef: { x: number; y: number } | null = null;
 
-  grab(): void { this.grabbed = true; this.grabT = 0; this.action = 0; this.attack = null; this.vx = this.vy = 0; }
+  /** corner correction state (locomotion.md): blocked code DAT_003dc1b0[0] (1 x, 2 y, 5..8 diagonal corners),
+   *  its cell DAT_00415b3c[0] (cx << 8 | cy) and flags DAT_00415bbc[0] (dir << 4 | side) */
+  blockCode = 0;
+  /** position before the corner correction this tick (FUN_000712a4 runs before FUN_00068444) */
+  portalX: number | null = null;
+  portalY: number | null = null;
+  private cornerCell = 0;
+  private cornerFlags = 0;
 
-  constructor(public cmf: Cmf) {}
+  /** player state 9: walking a found path (garden entrance "아니오"); all field keys are ignored meanwhile */
+  private autoPath: [number, number][] | null = null;
+  private onAutoDone: (() => void) | null = null;
+  get autoWalking(): boolean { return !!this.autoPath; }
+  startAutoWalk(path: [number, number][], done: () => void): void {
+    this.autoPath = path; this.onAutoDone = done; this.vx = this.vy = 0; this.action = 0; this.attack = null;
+  }
+
+  grab(): void { this.grabbed = true; this.action = 0; this.attack = null; this.vx = this.vy = 0; }
+
+  cmf: Cmf;
+  constructor(cmf: Cmf) { this.cmf = cmf; }
 
   /** FUN_00060d10: face the attacker and get pushed away; stunAfter = +0x76 == 5 (stun 20 ticks after) */
   startKnock(kind: 6 | 7, ax: number, ay: number, opts: { dir?: Dir; bonus?: number; stun?: boolean } = {}): void {
@@ -95,6 +118,7 @@ export class Player {
     this.dir = d;
     if (d < 2) this.lastH = d as 0 | 1; else this.lastV = d as 2 | 3;
     this.knock = { kind, c: kind === 6 ? 5 : 9, bonus: opts.bonus ?? 0, stun: !!opts.stun };
+    this.slowed = false;                                               // +0x79 = 6 / 7 overwrites state 2
     this.action = 0;
     this.attack = null;
   }
@@ -110,7 +134,7 @@ export class Player {
     this.moveAxis('x', v[0], field, { solid: blockers.solid, monsters: [] });
     this.moveAxis('y', v[1], field, { solid: blockers.solid, monsters: [] });
     if (k.c === 0) {
-      if (k.stun) this.stun = 20;
+      if (k.stun) { this.stun = 20; this.slowed = false; }
       this.knock = null;
       this.action = 0;
       return;
@@ -131,6 +155,7 @@ export class Player {
     this.walking = false;
     this.action = 0;
     this.attack = null;
+    this.blockCode = 0;                                                // FUN_0001d6c4 memset on map load
     this.frame = LOCO.facing[this.dir] * LOCO.idleLen;
   }
 
@@ -140,6 +165,16 @@ export class Player {
     this.actTick = 0;
     this.combo = false;
   }
+
+  /** interaction action (pickup / gathering, FUN_00045570): c0 / c2 0xf, c1 0xd; no facing term */
+  get interactAction(): number { return this.cls === 1 ? 0xd : 0xf; }
+  /** pickup frame of the interaction action: the item is gained when it is shown (c0 k3, c1 / c2 k5) */
+  static readonly PICK_FRAME = [694, 812, 866];
+  /** set by the scene each frame while gathering: the swing offset s; the action tick stays 0 (FUN_000618f4) */
+  gatherSwing: number | null = null;
+  /** called on the pickup frame of the interaction action */
+  onPickup: () => void = () => {};
+  startInteract(): void { this.action = this.interactAction; this.actTick = 0; this.combo = false; }
 
   /** '5' pressed (FUN_00045570): start the first basic attack unless already acting. */
   startAttack(): void {
@@ -153,6 +188,15 @@ export class Player {
   private attackTick(okHeld: boolean): [number, number] {
     const rec = this.actions[this.action - 1];
     const k = this.actTick % rec.n;
+    if (this.action === this.interactAction) {                       // FUN_00063ab4 / 63948 / 637dc
+      this.attack = null;
+      this.sound = 0;
+      if (this.gatherSwing !== null) { this.frame = rec.frame[k] + this.gatherSwing; return [0, 0]; }   // +0x18 held at 0
+      this.frame = rec.frame[k];
+      if (this.frame === Player.PICK_FRAME[this.cls]) this.onPickup();
+      if (rec.event[k] === 4) this.action = 0; else this.actTick++;
+      return [0, 0];
+    }
     this.frame = rec.frame[k] + (this.mult[this.action - 1] ?? 0) * LOCO.facing[this.dir];
     const s = rec.step[k];
     let vx = 0, vy = 0;
@@ -201,9 +245,100 @@ export class Player {
     const [l, t, r, btm] = this.box();
     const c0 = Math.max(0, l >> 4), c1 = Math.max(0, (r - 1) >> 4);
     const r0 = Math.max(0, t >> 4), r1 = Math.max(0, (btm - 1) >> 4);
-    for (let row = r0; row <= r1; row++) for (let c = c0; c <= c1; c++) if (!field.walkCell(c, row)) return true;
+    // FUN_00067d4c: the first blocked cell is classified for the corner correction (FUN_00067884)
+    for (let row = r0; row <= r1; row++) for (let c = c0; c <= c1; c++) if (!field.walkCell(c, row)) { this.classify(field, c, row); return true; }
     const me = this.box();
     return b.solid.some((s) => overlaps(me, s));
+  }
+
+  private wk(f: Field, c: number, r: number): number { return f.walkAt(c + r * f.map.header.width); }
+  /** the diagonal checks of dir 2 / 3 read bit ~b & 7, i.e. the mirrored cell index ^ 7 (original bug, emulator-checked) */
+  private wkLsb(f: Field, c: number, r: number): number { return f.walkAt((c + r * f.map.header.width) ^ 7); }
+  /** FUN_00067640: cell range of the body box */
+  private cells(): { c0: number; r0: number } {
+    const L = this.x - 8, T = this.y - 8;
+    return { c0: L > 0 ? (L & 0xfff) >> 4 : 0, r0: T > 0 ? (T & 0xfff) >> 4 : 0 };
+  }
+
+  /** FUN_00067884: classify the blocked cell (cx, cy) as a diagonal corner 5↖ 6↗ 7↙ 8↘ (or 0) */
+  private classify(f: Field, cx: number, cy: number): void {
+    if (this.action !== 0) return;
+    const { c0, r0 } = this.cells(), Lk = [0, 0, 0, 0];
+    for (let k = 1; k <= 2; k++) {
+      if (this.dir < 2) {
+        const col = this.lastH === 1 ? c0 + 1 : c0 - 1;
+        Lk[2] = this.wk(f, col, r0 - k); Lk[3] = this.wk(f, col, r0 + k);
+        if (Lk[2] !== Lk[3]) break;
+      } else {
+        const row = this.lastV === 2 ? r0 : r0 + 1;
+        Lk[0] = this.wk(f, c0 - k, row); Lk[1] = this.wk(f, c0 + k, row);
+        if (Lk[0] !== Lk[1]) break;
+      }
+    }
+    let code = 0;
+    switch (this.dir) {
+      case 2: code = !Lk[0] ? (Lk[1] && this.wk(f, cx + 1, cy) && !this.wkLsb(f, cx + 1, cy - 1) ? 6 : 0) : (this.wk(f, cx - 1, cy) && !this.wkLsb(f, cx - 1, cy - 1) ? 5 : 0); break;
+      case 3: code = !Lk[0] ? (Lk[1] && this.wk(f, cx + 1, cy) && !this.wkLsb(f, cx + 1, cy + 1) ? 8 : 0) : (this.wk(f, cx - 1, cy) && !this.wkLsb(f, cx - 1, cy + 1) ? 7 : 0); break;
+      case 0: code = !Lk[2] ? (Lk[3] && this.wk(f, cx, cy + 1) ? 7 : 0) : (this.wk(f, cx, cy - 1) ? 5 : 0); break;
+      case 1: code = !Lk[2] ? (Lk[3] && this.wk(f, cx, cy + 1) ? 8 : 0) : (this.wk(f, cx, cy - 1) ? 6 : 0); break;
+    }
+    this.blockCode = code;
+    this.cornerCell = ((cx << 8) | (cy & 0xff)) & 0xffff;
+    this.cornerFlags = ((this.dir & 15) << 4) | (this.dir < 2 ? (Lk[2] ? 2 : 3) : (Lk[0] ? 0 : 1));
+  }
+
+  /**
+   * FUN_00068444 (after both axis moves while walking, speed != 0, no action): when the cell 16 px ahead of the
+   * body box is blocked (or this tick was blocked) the speed drops to 0; then the player is nudged around the
+   * corner: along the other axis toward the one open side (4 px vertically, 6 px horizontally, cells ±1..3), or
+   * diagonally by the edge distance for the corner codes 5..8. A nudge into walls or monsters is undone.
+   */
+  private corner(f: Field, b: Blockers): void {
+    const W = f.map.header.width, H = f.map.header.height;
+    let p = this.blockCode;
+    const L = this.x - 8, R = this.x + 8, T = this.y - 8, B = this.y;
+    const ahead: [number, number, number][] = [[(L - 16) >> 4, T >> 4, 1], [(R + 16) >> 4, T >> 4, 1], [this.x >> 4, (T - 16) >> 4, 2], [this.x >> 4, (B + 16) >> 4, 2]];
+    const [ac, ar, base] = ahead[this.dir];
+    if (!this.wk(f, ac, ar)) { this.classify(f, ac, ar); p = this.blockCode || base; }
+    else if (!p) return;
+    this.vx = this.vy = 0;
+    this.blockCode = 0;
+    const { c0, r0 } = this.cells();
+    let vx = 0, vy = 0, dist = 0, route: 'D' | 'V' | 'H' = 'D';
+    if (p >= 3) {
+      const lo = this.cornerFlags & 15, cx = this.cornerCell >> 8, cy = this.cornerCell & 0xff;
+      if (this.cornerFlags >> 4 < 2) {
+        if (lo === 2 || lo === 3) { dist = lo === 2 ? Math.abs(cy * 16 - this.y) : Math.abs(cy * 16 + 16 - T); if (dist >= 5) route = 'V'; }
+      } else if (lo === 0 || lo === 1) { dist = lo === 0 ? Math.abs(cx * 16 - R) : Math.abs(cx * 16 + 16 - L); if (dist >= 7) route = 'H'; }
+    }
+    if (route === 'D') {
+      if (p >= 5 && p <= 8) { vx = p & 1 ? -dist : dist; vy = p < 7 ? -dist : dist; }
+      else if (p === 1) route = 'V';
+      else if (p === 2) route = 'H';
+    }
+    if (route === 'V') {
+      let up = 0;
+      for (let k = 1; ; k++) {
+        if (c0 - 1 < 1 || c0 + 1 >= W || r0 - k < 1 || r0 + k >= H) return;
+        const col = this.lastH === 1 ? c0 + 1 : c0 - 1;
+        up = this.wk(f, col, r0 - k);
+        if (up !== this.wk(f, col, r0 + k)) break;
+        if (k === 3) return;
+      }
+      vy = up ? -4 : 4;
+    } else if (route === 'H') {
+      let left = 0;
+      for (let k = 1; ; k++) {
+        if (c0 - k < 1 || c0 + k >= W || r0 - 1 < 1 || r0 + 1 >= H) return;
+        const row = this.lastV === 2 ? r0 - 1 : r0 + 1;
+        left = this.wk(f, c0 - k, row);
+        if (left !== this.wk(f, c0 + k, row)) break;
+        if (k === 3) return;
+      }
+      vx = left ? -6 : 6;
+    }
+    this.x += vx; this.y += vy;
+    if (b.monsters.some((m) => overlaps(this.box(), m)) || this.blocked(f, b)) { this.x -= vx; this.y -= vy; }
   }
 
   /** Move one axis by v, clamp to the map, undo when blocked. Returns the applied velocity. */
@@ -215,6 +350,8 @@ export class Player {
     this[axis] = p;
     if (this.blocked(field, b)) {
       this[axis] = old;
+      if (axis === 'x') { if (!this.blockCode) this.blockCode = 1; }    // FUN_000680b4
+      else if (this.blockCode < 2) this.blockCode = 2;                  // FUN_00067f70
       return 0;
     }
     return p - old;
@@ -222,14 +359,20 @@ export class Player {
 
   update(input: Input, field: Field, blockers: Blockers): void {
     this.sound = 0;
-    if (this.slowT > 0) this.slowT--;
+    this.portalX = this.portalY = null;
+    if (this.slowT > 0) this.slowT--;                                 // FUN_0007352c, before the player update
+    if (this.slowed && this.slowT === 0) this.slowed = false;          // FUN_00071ec0 case 2: back to state 0
     if (this.knock) { this.knockTick(field, blockers); this.walking = false; this.t++; return; }
-    if (this.grabbed) {
-      this.frame = LOCO.facing[this.dir] * LOCO.idleLen;
-      if (++this.grabT > 60) this.grabbed = false;
-      this.walking = false;
+    if (this.grabbed) { this.walking = false; return; }                // state 1 has no case in FUN_00071ec0
+    if (this.autoPath) {                                               // case 9: speed 8, no walls / portals / corners
+      if (walkPathTick(this, [-8, -8], this.autoPath, 8)) { this.autoPath = null; this.vx = this.vy = 0; const d = this.onAutoDone; this.onAutoDone = null; d?.(); }
+      const len = LOCO.walkLen[this.cls] ?? 6;
+      this.frame = LOCO.walkBase + LOCO.facing[this.dir] * len + ((this.t >> 1) % len);
+      this.walking = true;
+      this.t++;
       return;
     }
+    if (this.pullTo) { this.suction(input, field, blockers); return; }
     if (this.stun > 0) { this.stun--; this.frame = LOCO.facing[this.dir] * LOCO.idleLen; this.walking = false; this.vx = this.vy = 0; return; }
     if (this.action !== 0) {                         // direction locked, arrows ignored
       let [vx, vy] = this.attackTick(input.isHeld(AVK.OK));
@@ -255,8 +398,7 @@ export class Player {
     this.actTick = 0;                                  // +0x18 is 0 while moving (skill start check)
     const key = input.direction();
     const held = key !== 0;
-    let vmax = this.cls === 2 ? LOCO.vmaxClass2[this.t & 7] : LOCO.vmax;
-    if (this.slowT > 0) vmax >>= 1;
+    const vmax = this.slowed ? 4 : this.cls === 2 ? LOCO.vmaxClass2[this.t & 7] : LOCO.vmax;
     let onAxis: 'x' | 'y' | null = null;
     if (held) {
       this.dir = DIR_KEYS[key];
@@ -282,6 +424,19 @@ export class Player {
         vy = Math.sin(rad) >= 0 ? LOCO.diag[1] : -LOCO.diag[1];
       }
     }
+    this.walkMove(vx, vy, field, blockers);
+    this.walking = held;
+    // pick this tick's frame, then advance t (FUN_0002c2a8 / FUN_0007343c)
+    const facing = LOCO.facing[this.dir];
+    const len = LOCO.walkLen[this.cls] ?? 6;
+    this.frame = held
+      ? LOCO.walkBase + facing * len + ((this.t >> 1) % len)
+      : facing * LOCO.idleLen + (this.t % LOCO.idleLen);
+    this.t++;
+  }
+
+  /** FUN_00071424: x then y, a monster overlap undoes the tick, then the corner correction (speed != 0, no action) */
+  walkMove(vx: number, vy: number, field: Field, blockers: Blockers): void {
     const x0 = this.x, y0 = this.y;
     this.vx = this.moveAxis('x', vx, field, blockers);
     this.vy = this.moveAxis('y', vy, field, blockers);
@@ -289,23 +444,57 @@ export class Player {
       this.x = x0;
       this.y = y0;
       this.vx = this.vy = 0;
+    } else if ((this.vx || this.vy) && this.action === 0) {
+      this.portalX = this.x; this.portalY = this.y;                    // the portal check uses the pre-correction spot
+      this.corner(field, blockers);
     }
-    if (this.pullTo) {
-      const [tx, ty] = this.pullTo, dx = tx - this.x, dy = ty - this.y;
-      const away = held && ((this.dir === 0 && dx > 0) || (this.dir === 1 && dx < 0) || (this.dir === 2 && dy > 0) || (this.dir === 3 && dy < 0));
-      const sp = away ? 4 : 9, d = Math.hypot(dx, dy);
-      if (d > 1) {
-        this.moveAxis('x', Math.round((dx / d) * Math.min(sp, d)), field, blockers);
-        this.moveAxis('y', Math.round((dy / d) * Math.min(sp, d)), field, blockers);
-      }
-    }
-    this.walking = held;
-    // pick this tick's frame, then advance t (FUN_0002c2a8 / FUN_0007343c)
-    const facing = LOCO.facing[this.dir];
+  }
+
+  /** face a key direction (FUN_00060520 without acceleration) */
+  private faceKey(key: number): void {
+    this.dir = DIR_KEYS[key];
+    if (this.dir < 2) this.lastH = this.dir as 0 | 1; else this.lastV = this.dir as 2 | 3;
+  }
+
+  /** move s px along the facing (walls and solids per axis, monster overlap undoes); the stored speed becomes s */
+  private moveFacing(s: number, field: Field, blockers: Blockers): void {
+    const sign = this.dir === 0 || this.dir === 2 ? -s : s;
+    const x0 = this.x, y0 = this.y;
+    if (this.dir < 2) { this.vx = this.moveAxis('x', sign, field, blockers) || 0; this.vy = 0; }
+    else { this.vy = this.moveAxis('y', sign, field, blockers) || 0; this.vx = 0; }
+    if (blockers.monsters.some((m) => overlaps(this.box(), m))) { this.x = x0; this.y = y0; this.vx = this.vy = 0; }
+  }
+
+  /**
+   * Player state 8 (FUN_00071ec0 120335–120371): ① keys turn only, the stored speed decays by 4 along the facing;
+   * ② speed 9, or 4 when the held key points away from the Queen's main body; ③ FUN_00065f9c pulls the body box's
+   * top-left toward the point (no walls) and turns the player; ④ the facing component c of that pull moves another
+   * max(c - 4, 0) (only +x / +y pulls); ⑤ the walk animation.
+   */
+  private suction(input: Input, field: Field, blockers: Blockers): void {
+    const key = input.direction();
+    if (key) this.faceKey(key);
+    const mag = Math.max(0, Math.max(Math.abs(this.vx), Math.abs(this.vy)) - LOCO.accel);
+    this.moveFacing(mag, field, blockers);
+    const q = this.pullRef, k = key ? DIR_KEYS[key] : -1;
+    const away = !!q && (k === 0 ? this.x <= q.x : k === 1 ? this.x >= q.x : k === 2 ? this.y <= q.y : k === 3 ? this.y >= q.y : false);
+    const sp = away ? 4 : 9;
+    const [tx, ty] = this.pullTo!;
+    const dx = tx - (this.x - 8), dy = ty - (this.y - 8);
+    const round = (v: number) => Math.trunc((v * 10 + 5) / 10);
+    let vx: number, vy: number;
+    if (!dx && !dy) { vx = 0; vy = -sp; }
+    else if (Math.abs(dy) < Math.abs(dx)) { vx = Math.sign(dx) * sp; vy = Math.sign(dy) * round((sp * Math.abs(dy)) / Math.abs(dx)); }
+    else { vx = Math.sign(dx) * round((sp * Math.abs(dx)) / Math.abs(dy)); vy = Math.sign(dy) * sp; }
+    if (Math.abs(vx) > Math.abs(vy)) { this.dir = vx < 0 ? 0 : 1; this.lastH = this.dir as 0 | 1; }
+    else { this.dir = vy < 0 ? 2 : 3; this.lastV = this.dir as 2 | 3; }
+    this.x += vx; this.y += vy;
+    if (key) this.faceKey(key);
+    const c = this.dir < 2 ? vx : vy;
+    this.moveFacing(Math.max(c - 4, 0), field, blockers);
     const len = LOCO.walkLen[this.cls] ?? 6;
-    this.frame = this.pullTo ? 0x12 : held
-      ? LOCO.walkBase + facing * len + ((this.t >> 1) % len)
-      : facing * LOCO.idleLen + (this.t % LOCO.idleLen);
+    this.frame = LOCO.walkBase + LOCO.facing[this.dir] * len + ((this.t >> 1) % len);
+    this.walking = false;
     this.t++;
   }
 

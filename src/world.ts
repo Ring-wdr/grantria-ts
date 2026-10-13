@@ -42,6 +42,31 @@ export function buildWalk(map: GameMap, objCmf: (id: number) => [Cmf, number]): 
   return walk;
 }
 
+const ORTH: [number, number][] = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+const HORZ: [number, number][] = [[1, 0], [-1, 0]];
+
+/** Walk layers 0..3 of the map loader (FUN_0001dd48, gimmicks.md §2.1): FUN_000195b0 mode 0 erodes the file bits
+ *  three times (a cell stays when it and its 4 neighbours are passable), FUN_0001da78 then clears object stamps
+ *  from layers 0..2 only, and mode 1 ORs in cells whose left and right neighbours are passable. Neighbours use the
+ *  flat index y*W + x, so x ± 1 wraps onto the next / previous row (original); outside the bitmap is 0. */
+export function buildWalkLayers(map: GameMap, stamped: Uint8Array): Uint8Array[] {
+  const W = map.header.width, H = map.header.height, N = W * H;
+  const file = new Uint8Array(N);
+  map.walk.forEach((row, r) => row.forEach((v, c) => { if (r < H && c < W) file[r * W + c] = v ? 1 : 0; }));
+  const at = (a: Uint8Array, i: number) => (i >= 0 && i < N ? a[i] : 0);
+  const erode = (src: Uint8Array, dst: Uint8Array, ks: [number, number][]) => {
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (src[i] && ks.every(([dx, dy]) => at(src, (y + dy) * W + x + dx))) dst[i] = 1;
+    }
+  };
+  const L = [stamped, new Uint8Array(N), new Uint8Array(N), new Uint8Array(N)];
+  erode(file, L[1], ORTH); erode(L[1], L[2], ORTH); erode(L[2], L[3], ORTH);
+  for (let i = 0; i < N; i++) { L[1][i] &= stamped[i]; L[2][i] &= stamped[i]; }
+  erode(stamped, L[1], HORZ); erode(L[1], L[2], HORZ); erode(L[2], L[3], HORZ);
+  return L;
+}
+
 /** objMid depth key (FUN_00063640): y + box.y (unsigned byte) + box.h / 2. */
 export function objDepth(o: MapObject, cmf: Cmf, frame: number): number {
   const [, by, , bh] = bodyBox(cmf, frame);

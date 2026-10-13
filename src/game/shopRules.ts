@@ -274,11 +274,30 @@ const DARK_PRICE = [
 ];
 /** stock group of a dark merchant map: 0x79 -> 0, 0x9B -> 1, 0xA8 -> 2, 0xDF -> 3 */
 export function darkGroup(map: number): number { return [0x79, 0x9b, 0xa8, 0xdf].indexOf(map); }
-/** FUN_0003d020(3): 16 slots, 4 per group; the partial duplicate check of the original is not ported [근사] */
-export function genDarkStock(db: ItemDb, rng: Rng): (Item | null)[] {
-  const out: (Item | null)[] = [];
+/**
+ * FUN_0003d020(3): 16 slots, 4 per group (type, sub and price by the slot's group). The duplicate check compares the
+ * candidate index with A[gs..gs+3], a window chosen by the map current at generation time (0x79 / 0x9B / 0xA8 /
+ * 0xDF, others the first); A starts at 0, which is also candidate 0, so the check has holes (original). Rerolls
+ * rand(15) come before the slot's item. Checked against the original over 2000 seeds × maps.
+ */
+export function genDarkStock(db: ItemDb, rng: Rng, mapId: number): (Item | null)[] {
+  const gs = Math.max(0, darkGroup(mapId)) * 4, ge = gs + 3;
+  const A = new Array<number>(16).fill(0), out: (Item | null)[] = [];
   for (let i = 0; i < 16; i++) {
-    const g = i >> 2, idx = rng.rand(15), c = DARK_CAND[idx], step = [1, 3, 4, 9][g];
+    let idx = rng.rand(15);
+    if (i === 0) A[0] = idx;
+    else for (;;) {
+      if (A[gs] === idx) { idx = rng.rand(15); continue; }
+      if (A[gs] === 0) { A[i] = idx; break; }
+      let again = false;
+      for (let j = gs + 1; j <= ge; j++) {
+        if (A[j] === idx) { again = true; break; }
+        if (j !== 3 && A[j] === 0) { A[i] = idx; break; }
+      }
+      if (again) { idx = rng.rand(15); continue; }
+      break;                                           // past the window: taken without storing
+    }
+    const g = i >> 2, c = DARK_CAND[idx], step = [1, 3, 4, 9][g];
     let it: Item, col: number;
     if (c <= 0x0c) { it = db.create(c + rng.rand(3), step, 1, rng); col = c / 3; }
     else if (c === 0x0f) { it = db.create(0x0f, step, 1, rng); col = 5; }

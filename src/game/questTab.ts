@@ -58,11 +58,7 @@ export class QuestTab {
     story.qs[q] = 1;
     story.active = story.active.filter((a) => a.q !== q);
     const it = sdb.quests[q].acceptItem;
-    if (it >= 0 && it < 1000) {
-      const [type, sub] = it < 100 ? [0x1a, it] : [0x1d, it - 100];
-      const i = inv.items.findIndex((x) => x && x.type === type && x.sub === sub);
-      if (i >= 0) inv.remove(i);
-    }
+    if (it >= 0 && it < 100) inv.removeKey(it);                     // only the key store is searched (0x1d stays)
   }
 
   private rewardLines(q: number): string[] {

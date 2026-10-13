@@ -4,6 +4,7 @@
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
 import { OPTION_COUNTS, OPTION_KEYS, saveOptions } from './options';
+import { vibrate } from './vibrate';
 import type { GameContext } from './scene';
 import type { Ui } from './ui';
 import { button, cmfFrame, cSprite, gt, h, menuList, sprite, type ScrollRef, type VChild, type VNode } from './view';
@@ -88,6 +89,7 @@ export class OptionTab {
       const key = OPTION_KEYS[this.cur], n = OPTION_COUNTS[this.cur];
       o[key] = (o[key] + (k === AVK.LEFT ? n - 1 : 1)) % n;
       this.ctx.applyOptions();
+      vibrate(o.vibration);                                            // FUN_00045ea4: after every value change
     } else if (k === AVK.CLR) {
       saveOptions(o);
       this.setting = false;

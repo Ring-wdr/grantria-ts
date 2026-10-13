@@ -1,7 +1,9 @@
 // Monster drops and ground items (game-rules.md §3.6 FUN_00037e04 / FUN_0003b9c8,
 // items.md §0.8 FUN_00063360 update, FUN_0002f184 draw, pickup with '5').
 // Gems / recipes / coupons and boss drops follow gimmicks.md §3 (emulator-checked formulas).
-// Not ported: the second drop roll (account bonus track), the pickup animation, the shadow and sparkle.
+// The second drop roll (account trait 9) is made by the caller (fieldScene.grantKill). There is no fly-to-player
+// pickup animation in the original: '5' plays the player's interaction action and the item is gained on its frame.
+import type { Cmf } from '../assets';
 import type { Drawable } from './field';
 import type { Item, ItemDb } from './items';
 import { idiv, rdiv, type Rng } from './rules';
@@ -148,11 +150,13 @@ export function rollBossDrops(rng: Rng, db: ItemDb, boss: { type: number; level:
   return out;
 }
 
-/** Per-frame update: bounce by phase, despawn after 550 frames. Returns false when gone. */
+/** FUN_00063360: bounce by the phase before it is incremented, gone on the 551st update. Returns false when gone. */
 export function updateGround(g: GroundItem): boolean {
+  const p = g.phase;
+  if (p > DESPAWN - 1) return false;
+  g.y += BOUNCE[p] ?? 0;
   g.phase++;
-  g.y += BOUNCE[g.phase] ?? 0;
-  return g.phase <= DESPAWN;
+  return true;
 }
 
 /** Pickup box around the item [-30,-30,60,60]. */
@@ -160,13 +164,18 @@ export function groundBox(g: GroundItem): [number, number, number, number] {
   return [g.x - 30, g.y - 30, g.x + 30, g.y + 30];
 }
 
-export function groundDrawable(g: GroundItem, db: ItemDb): Drawable {
-  const icon = g.item ? g.item.icon : 324;                             // gold icon 324
-  const r = db.iconRect(icon);
-  const flash = g.phase % 20 >= 5 && g.phase % 20 <= 7;
-  return {
-    cmfName: '', frame: 0, x: g.x - 6, y: g.y - 6, depth: g.y,
-    img: { name: r.image, sx: r.sx, sy: r.sy, w: 16, h: 16 },
-    fx: flash ? { tint: [255, 255, 255], amount: 20 } : undefined,
-  };
+/** FUN_0002f184 kind 0: multiply shadow (shadow.pxl 120,0 36×20 at x-16, y-2), the icon at (x-6, y-6) flashing white
+ *  (tint strength 32) on phase % 20 ∈ 5..7, and with the effects option the sparkle cmf_status 0x5d + (phase >> 1) % 7
+ *  at (x, y). While the player is dead the phase counts as 0 (no flash, fixed sparkle). */
+export function groundDrawables(g: GroundItem, db: ItemDb, status: Cmf, effects: boolean, playerDead: boolean): Drawable[] {
+  const p = playerDead ? 0 : g.phase;
+  const r = db.iconRect(g.item ? g.item.icon : 324);                  // gold icon 324
+  const flash = p % 20 >= 5 && p % 20 <= 7;
+  const out: Drawable[] = [
+    { cmfName: '', frame: 0, x: g.x - 16, y: g.y - 2, depth: g.y, img: { name: 'shadow', sx: 120, sy: 0, w: 36, h: 20, blend: 14 } },
+    { cmfName: '', frame: 0, x: g.x - 6, y: g.y - 6, depth: g.y, img: { name: r.image, sx: r.sx, sy: r.sy, w: 16, h: 16 },
+      fx: flash ? { tint: [255, 255, 255], amount: 32 } : undefined },
+  ];
+  if (effects) out.push({ cmfName: 'cmf_status', cmf: status, frame: 0x5d + ((p >> 1) % 7), x: g.x, y: g.y, depth: g.y });
+  return out;
 }

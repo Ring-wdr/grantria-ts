@@ -95,7 +95,7 @@ export class GameMenu {
     }
     const body = this.body;
     if (body) {
-      if (body.busy) { body.update(presses); this.couponDetour(); return null; }
+      if (body.busy) { body.update(presses); this.couponDetour(); this.backFromCoupons(); return null; }
       // tab bodies consume their keys; the rest falls through to the common tab keys
       const rest: number[] = [];
       for (const k of presses) if (!body.update([k])) rest.push(k);
@@ -129,11 +129,19 @@ export class GameMenu {
   }
 
   /** inventory bag expansion short of coupons (popup 0x7D confirmed) -> the coupon shop of the community tab */
+  /** a coupon shop opened from the inventory returns there when closed */
+  private backFromCoupons(): void {
+    const t = this.community.wantTab;
+    if (t === null) return;
+    this.community.wantTab = null;
+    this.goTab(t);
+  }
+
   private couponDetour(): void {
     if (!this.inventory.toCoupons) return;
     this.inventory.toCoupons = false;
     this.type = 7;
-    this.community.open('coupon');
+    this.community.open('coupon', 1);                                  // back to the inventory afterwards
   }
 
   /** L1 / R1 or a tab click: go to tab `type` from anywhere; a tab left in a sub screen or popup starts fresh */
@@ -381,7 +389,7 @@ export class GameMenu {
    */
   private collectView(page: number): VNode {
     const fs = this.field, a = this.ctx.assets, t = a.text, db = fs.db, st = fs.story;
-    const keys = fs.inv.items.filter((it) => it.type === 0x1a).slice(0, 10);
+    const keys = fs.inv.keys.slice(0, 10);
     const entry = (i: number): { icon: VChild; model: number; desc: number; dim: boolean } | null => {
       if (page === 3) {
         if (!st.collect.has(i)) return null;

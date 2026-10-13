@@ -34,6 +34,9 @@ const DROP = [60, 0, 8, 60, 2, 10, 25, 25, 0, 0, 0, 10];
 const MAX_PER_FLOOR = 32;
 
 export interface DimRecord { type: number; x: number; y: number; }
+/** DAT_003dc1dc floor level of a run: the header byte, ×10 for dungeons 1..8 (FUN_0001dd48) */
+export function dimLevel(run: DimRun): number { const h0 = (run.header[0] << 24) >> 24; return run.d === 0 ? h0 : h0 * 10; }
+
 export interface DimRun {
   d: number;
   first: number;

@@ -1,7 +1,8 @@
 // Bosses (behaviour 11, FUN_0006c960 and the per-type functions), analysis/features/monster-ai.md §2–§3.
 // The common skeleton (§2.2), box overrides (§2.6), hit-stop and all 14 bosses. Queen Frostworm (35)
-// and Mother (39) are three objects; how their HP is shared is not decoded, so hits on the parts
-// go to the main body here [추정]. Monster shots ignore walls; scale-2 shots are drawn at scale 1.
+// and Mother (39) are three copies of one object (memcpy, each its own HP); only the object whose frames have
+// a body box can be hit (35 part A, 39 main body), and only role 0 gives the reward. Monster shots ignore walls;
+// the scale-2 shots (32 falling fire, 42 shards) are drawn and boxed at twice the size (FUN_00030cec).
 import type { Cmf } from '../assets';
 import { FACING, Monster, frameBox, overlaps, type Dir, type MonsterWorld } from './monster';
 import type { Drawable } from './field';
@@ -81,6 +82,8 @@ export interface ShotOpts {
   flame?: boolean;
   /** draw mirrored (left-facing art shot to the right) */
   mirror?: boolean;
+  /** +0x8c scale: 2 for 32's falling fire and 42's shards */
+  scale?: number;
 }
 
 /** Monster projectile (behaviours 4 / 5 / 7, monster-ai.md §2.5). Ignores walls. */
@@ -100,7 +103,8 @@ export class MonsterShot {
     if (this.exploded) this.frame++;
     else if (o.track !== undefined && !this.stopped) {
       const sp = o.track === 'rand' ? rand(8) * 2 : o.track;
-      const [vx, vy] = towardPt(this.x, this.y, px, py, sp);
+      const off = this.owner.type === 29 || this.owner.type === 32 ? 35 : 0;   // FUN_000609c0: 29 / 32 aim at (px-35, py-35)
+      const [vx, vy] = towardPt(this.x, this.y, px - off, py - off, sp);
       this.x += vx; this.y += vy;
     } else if (!this.stopped && (!o.moveTicks || this.age < o.moveTicks)) { this.x += this.vx; this.y += this.vy; }
     else if (o.stopFrame !== undefined) { this.stopped = true; this.frame = o.stopFrame; }
@@ -114,9 +118,12 @@ export class MonsterShot {
   explode(): void { this.exploded = true; this.life = 7; }
   box(): Rect | null {
     if (this.o.noBox || (this.stopped && this.o.stopFrame !== undefined && this.o.selfAttack)) return null;
-    return overrideBox(this.owner.boxes, this.owner.cmf, this.frame, this.owner.action, 'attack', this.x, this.y, this.o.dir ?? 3, this.o.lastH ?? 0);
+    const r = overrideBox(this.owner.boxes, this.owner.cmf, this.frame, this.owner.action, 'attack', this.x, this.y, this.o.dir ?? 3, this.o.lastH ?? 0);
+    const s = this.o.scale ?? 1;                                     // FUN_000231e4: dx, dy, w, h all × scale
+    if (!r || s === 1) return r;
+    return [this.x + (r[0] - this.x) * s, this.y + (r[1] - this.y) * s, this.x + (r[2] - this.x) * s, this.y + (r[3] - this.y) * s];
   }
-  drawable(): Drawable { return { cmfName: this.owner.cmfName, cmf: this.owner.cmf, frame: this.frame, x: this.x, y: this.y, mirror: this.o.mirror }; }
+  drawable(): Drawable { return { cmfName: this.owner.cmfName, cmf: this.owner.cmf, frame: this.frame, x: this.x, y: this.y, mirror: this.o.mirror, scale: this.o.scale }; }
 }
 
 function towardPt(x: number, y: number, px: number, py: number, speed: number): [number, number] {
@@ -188,23 +195,32 @@ export class Boss extends Monster {
     return overrideBox(this.boxes, this.cmf, this.frame, this.action, which, this.x, this.y, this.dir, this.lastH);
   }
   override body(): Rect | null { return this.ovBox('body'); }
-  /** attack box of the current frame in states 1 and 0xd (a charge stopped by the player still lands) [추정] */
+  /** FUN_0006fd44 never looks at the boss state: any frame with an attack box hits */
   override attackBox(): Rect | null {
     if (!this.alive || !this.active) return null;
-    if (this.role >= 0) return this.ovBox('attack');                // parts attack by record, not state
-    return this.state === 1 || this.state === 0xd ? this.ovBox('attack') : null;
+    return this.ovBox('attack');
   }
 
-  /** bosses only flash and lose HP (no stagger); hit-stop in states 0 / 2 */
+  /** bosses only flash and lose HP (no stagger); hit-stop in states 0 / 2. The hit object keeps its own HP. */
   override onHit(): void {
-    const m = this.main ?? this;
     this.tint = 16;
-    m.tint = 16;
-    if (m.hp <= 0) { m.die(); for (const p of m.parts) p.die(); return; }
+    if (this.hp <= 0) { this.groupDie(); return; }
     if ((this.state === 0 || this.state === 2) && HOLD.includes(this.type)) this.hold = 1;
   }
-  /** parts give no reward of their own */
-  get noReward(): boolean { return this.role >= 0 && this.main !== null; }
+  /** FUN_0006e120 case 0x23 / 0x27: 35's part B vanishes at once, A (frame 6) and the main body (0) fade;
+   *  39's main body, arm and head fade (frames 0 / 8 / 16) */
+  private groupDie(): void {
+    if (this.role < 0) { this.die(); return; }
+    const main = this.main ?? this;
+    for (const p of [main, ...main.parts]) {
+      if (!p.alive) continue;
+      if (p.type === 35 && p.role === 2) { p.active = false; p.alive = false; p.hp = 0; p.deathT = 999; continue; }
+      p.die();
+      p.frame = p.type === 35 ? (p.role === 0 ? 6 : 0) : [0, 8, 16][p.role];
+    }
+  }
+  /** EXP and drops only from the role-0 object (FUN_0006ca90: 35 part A, 39 main body) */
+  get noReward(): boolean { return this.role > 0; }
 
   private faceP(w: MonsterWorld, mode: number): void { this.face(w.px, w.py, mode); }
   private flipH(): void { this.lastH = (this.lastH ^ 1) as 0 | 1; this.dir = this.lastH; }
@@ -357,7 +373,7 @@ export class Boss extends Monster {
         new MonsterShot(this, x + dx, y + 20, { frame: fr, life: 25, vx, vy }));
     }
     if (t === 29 && this.action === 4 && f === 21 && once) fx.shots = [new MonsterShot(this, x - 40, y - 20, { frame: 0x1c, life: 40, track: 5, loop: [0x1c, 0x1f], onHit: 'remove' })];
-    if (t === 32 && this.action === 3 && f === 22 && once) fx.shots = [-60, 15].map((dx) => new MonsterShot(this, x + dx, y + 30, { frame: 0x24, life: 35, vy: 15 }));
+    if (t === 32 && this.action === 3 && f === 22 && once) fx.shots = [-60, 15].map((dx) => new MonsterShot(this, x + dx, y + 30, { frame: 0x24, life: 35, vy: 15, scale: 2 }));
     if (t === 32 && this.action === 4 && f === 23 && once) fx.shots = [-60, 15].map((dx) => new MonsterShot(this, x + dx, y + 30, { frame: 0x24, life: 40, track: 6, loop: [0x24, 0x27], onHit: 'flame' }));
     if (t === 38) {
       if (this.action === 3) {                               // beam: follow the player x at 4 px
@@ -372,7 +388,7 @@ export class Boss extends Monster {
       }
     }
     if (t === 42 && this.action === 3 && f === 0x11 && once) {
-      fx.shots = SHARDS.map(([dx, dy, fr, vx, vy]) => new MonsterShot(this, x + dx, y + dy, { frame: fr, life: 30, vx, vy, dir: 3, lastH: 1 }));
+      fx.shots = SHARDS.map(([dx, dy, fr, vx, vy]) => new MonsterShot(this, x + dx, y + dy, { frame: fr, life: 30, vx, vy, dir: 3, lastH: 1, scale: 2 }));
     }
   }
 
@@ -396,9 +412,10 @@ export class Boss extends Monster {
   private findSummon(w: MonsterWorld): number {
     for (let d = 0; d < 4; d++) {
       const [x, y] = this.summonSpot(d as Dir);
-      const box: Rect = [x - 12, y - 16, x + 12, y];
+      // the probe is a type-3 object: cmf_c3 frame 0 body (-10,-16,19,18), dx -9 when dir & 1; only the player and
+      // the walk layer are checked (FUN_000607b8, FUN_00067d4c), not other actors
+      const box: Rect = this.dir & 1 ? [x - 9, y - 16, x + 10, y + 2] : [x - 10, y - 16, x + 9, y + 2];
       if (overlaps(box, w.playerBox)) continue;
-      if (w.monsterBoxes?.some((b) => overlaps(box, b))) continue;    // the probe actor collides with actors [추정]
       if (this.blocked(w.field, box)) continue;
       return d + 1;
     }
@@ -618,7 +635,7 @@ export class Boss extends Monster {
         }
       } else if (this.role === 0) {                          // part A: suck (4) and bite (3)
         if (this.rec === 4 && this.frame === 0x22) this.pullPlayer = [230, 300];
-        if (this.rec === 4 && w.px >= 215 && w.px <= 245 && w.py >= 305 && w.py <= 335) { this.pullPlayer = null; this.rec = 3; this.action = 3; this.t = -1; }
+        if (this.rec === 4 && w.px >= 215 && w.px <= 245 && w.py >= 305 && w.py <= 335) { this.pullPlayer = null; this.rec = 3; this.action = 3; this.t = 0; }   // the bite starts at k1
         if (end()) {
           this.pullPlayer = null;
           if (!this.parts[1]?.active) {

@@ -234,11 +234,13 @@ export abstract class Ui {
     this.cSprite(a.dd(0x400dcb, i), x + a.dd(0x400dcb, i + 1), y + a.dd(0x400dcb, i + 2));
   }
 
-  /** FUN_00049f18 t.pxl 5x7 capitals: glyph g -> t(g*5+50, 34), advance 6 [추정: g = letter - 'A']. */
+  /** FUN_00049f18 t.pxl 5x7 glyphs: g = (s8) d.dat 0x22502[byte] (letters either case 0..25, ':' '/' '+' '-' '*' '#'
+   *  '%' '(' ')' '.' '~' 26..36, digits 37..46, space 47), drawn from t(g*5+50, 34); every byte advances 6. Glyphs
+   *  past the image width (from '3' on, and space) draw nothing. */
   tfont(s: string, x: number, y: number): void {
-    for (const ch of s.toUpperCase()) {
-      const g = ch.charCodeAt(0) - 65;
-      if (g >= 0 && g < 26) this.image('t', g * 5 + 50, 34, 5, 7, x, y);
+    for (const ch of s) {
+      const g = (this.assets.d8(0x22502 + (ch.charCodeAt(0) & 0x7f)) << 24) >> 24;
+      if (g >= 0 && g * 5 + 55 <= 246) this.image('t', g * 5 + 50, 34, 5, 7, x, y);
       x += 6;
     }
   }

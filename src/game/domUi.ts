@@ -15,9 +15,10 @@ import { VIEW_H, VIEW_W } from './field';
 
 const IMAGE_BASE = `${import.meta.env.BASE_URL}assets/images/`;
 
-/** original blend modes (sprites.ts blendSetup) -> CSS mix-blend-mode; 10 / 15 (linear light) approximated */
+/** original blend modes (sprites.ts blendSetup) -> CSS mix-blend-mode; 10 / 15 (linear light) approximated by hard-light;
+ *  5 / 7 / 9 / 12 (reflect, heat, vivid light, glow) have no CSS mode and no UI image uses them */
 const BLEND: Record<number, string> = {
-  1: 'lighten', 2: 'darken', 3: 'difference', 4: 'screen', 5: 'color-dodge', 6: 'overlay',
+  1: 'lighten', 2: 'darken', 3: 'difference', 4: 'screen', 6: 'overlay', 11: 'color-dodge',
   8: 'hard-light', 10: 'hard-light', 13: 'plus-lighter', 14: 'multiply', 15: 'hard-light',
 };
 

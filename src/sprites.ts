@@ -32,7 +32,7 @@ export function clipImage(
   return clip <= assets.tables.objSplit[zone] ? `${base}_0` : `${base}_1`;
 }
 
-const VERT = /* glsl */ `
+export const VERT = /* glsl */ `
 varying vec2 vUv;
 void main() {
   vUv = uv;
@@ -51,45 +51,122 @@ varying vec2 vUv;
 void main() {
   vec4 t = texture2D(map, vUv);
   if (t.a < 0.5) discard;            // colorkey 0xF81F
-  vec3 c = mix(clamp(t.rgb - shift, 0.0, 1.0), tint, tintAmt);   // day/night palette shift (FUN_0001cf0c)  // hit / death colour effect (FUN_00032800)
-  c = mix(c, vec3(dot(c, vec3(0.299, 0.587, 0.114))), grey);   // SetGray (game over)
+  vec3 c = clamp(t.rgb - shift, 0.0, 1.0);                      // day/night palette shift (FUN_0001cf0c)
+  float L = (c.r * 31.0 * 612.0 + c.g * 63.0 * 601.0 + c.b * 31.0 * 234.0) / 1024.0;
+  c = mix(c, vec3(L / 2.0 / 31.0, L / 63.0, L / 2.0 / 31.0), grey);   // SetGray first (L6 = 612 R5 + 601 G6 + 234 B5 >> 10)
+  c = mix(c, tint, tintAmt);                                     // then the hit / death tint (FUN_00032800)
   if (mode == 1) gl_FragColor = vec4(c * alpha, 1.0);                       // add / screen
   else if (mode == 2) gl_FragColor = vec4(1.0 - alpha + alpha * c, 1.0);    // multiply
   else gl_FragColor = vec4(c, alpha);                                       // normal
 }`;
 
-// Modes that need the destination color in the shader. The compositor copies the frame
-// rendered so far into dstTex right before drawing such a quad (see compositor.ts).
-const DST_FRAG = /* glsl */ `
+// Modes that need the destination color in the shader. The compositor copies the frame rendered so far into
+// dstTex right before drawing such a quad (see compositor.ts). This is the original blitter FUN_000cfc88 in RGB565
+// integers (emulator-checked for every mode, channel and alpha): source palette shift -> grey -> tint (per-channel
+// mixes truncated per term), the channel blend B(s, d) of the mode, then the alpha mix — per term for modes 0/10/11/
+// 12/15 and for blue, after the sum for red / green of the others — with the blue-channel quirks of modes 1, 2, 9, 10.
+export const DST_FRAG = /* glsl */ `
 uniform sampler2D map;
 uniform sampler2D dstTex;
 uniform vec2 size;
 uniform float grey;
-uniform float alpha;
+uniform vec3 shift;
+uniform vec3 tint;
+uniform float tintAmt;
+uniform float a32;
 uniform int mode;
 varying vec2 vUv;
-float ch(float s, float d) {
-  if (mode == 13) return min(1.0, s + d);                                  // add
-  if (mode == 1) return max(s, d);                                         // lighten
-  if (mode == 2) return min(s, d);                                         // darken
-  if (mode == 3) return abs(s - d);                                        // difference [추정]
-  if (mode == 5) return s >= 1.0 ? 1.0 : min(1.0, d / (1.0 - s));          // color dodge
-  if (mode == 6) return d < 0.5 ? 2.0 * s * d : 1.0 - 2.0 * (1.0 - s) * (1.0 - d); // overlay [추정]
-  if (mode == 8) return s < 0.5 ? 2.0 * s * d : 1.0 - 2.0 * (1.0 - s) * (1.0 - d); // hard light [추정]
-  if (mode == 10 || mode == 15) return clamp(2.0 * s + d - 1.0, 0.0, 1.0); // linear light
+float fdiv(float x, float y) { float q = floor(x / y); if ((q + 1.0) * y <= x) q += 1.0; else if (q * y > x) q -= 1.0; return q; }   // exact for x < 2^24
+float tdiv(float x, float y) { float q = fdiv(abs(x), abs(y)); return ((x < 0.0) != (y < 0.0)) ? -q : q; }
+float sh5(float x) { return floor(x / 32.0); }
+float mixA(float d, float b, float a) { return sh5(d * (32.0 - a)) + sh5(b * a); }
+float mixC(float d, float b, float a) { return sh5(d * (32.0 - a) + b * a); }
+float bch(int m, float s, float d, float M) {
+  float H = (M + 1.0) * 0.5;
+  if (m == 1) return max(s, d);
+  if (m == 2) return min(s, d);
+  if (m == 3) return abs(s - d);
+  if (m == 4) return M - fdiv((M - s) * (M - d), M + 1.0);
+  if (m == 5) return s == M ? M : min(M, fdiv(d * d, M - s));
+  if (m == 6) return d < H ? fdiv(2.0 * s * d, M) : M - fdiv(2.0 * (M - s) * (M - d), M);
+  if (m == 7) return d == 0.0 ? 0.0 : max(0.0, M - fdiv((M - s) * (M - s), d));
+  if (m == 8) return s < H ? fdiv(2.0 * s * d, M) : M - fdiv(2.0 * (M - s) * (M - d), M);
+  if (m == 9) {
+    if (s == M) return M;
+    if (s < H) return s == 0.0 ? 0.0 : max(0.0, M - fdiv((M - d) * (M + 1.0), 2.0 * s));
+    return min(M, fdiv(d * (M + 1.0), 2.0 * (M - s) + 1.0));
+  }
+  if (m == 10) return s < H ? clamp(d + 2.0 * s - M, 0.0, M) : min(M, d + 2.0 * (s - H));
+  if (m == 11) return s == M ? M : min(M, fdiv(d * (M + 1.0), M - s));
+  if (m == 12) return d == M ? M : min(M, fdiv(s * s, M - d));
+  if (m == 13) return min(M, s + d);
+  if (m == 14) return fdiv(s * d, M);
+  if (m == 15) return clamp(2.0 * s + d - M, 0.0, M);
   return s;
+}
+float rg(int m, float sc, float dc, float M, float k, float a, bool sep) {
+  if (m == 5) {
+    float Bx = sc == M ? M * k : min(M * k, fdiv(dc * k * dc, M - sc));
+    return floor(fdiv(dc * k * (32.0 - a) + Bx * a, 32.0) / k);
+  }
+  float B = bch(m, sc, dc, M);
+  return sep ? mixA(dc, B, a) : mixC(dc, B, a);
 }
 void main() {
   vec4 t = texture2D(map, vUv);
-  if (t.a < 0.5) discard;
-  vec3 d = texture2D(dstTex, gl_FragCoord.xy / size).rgb;
-  vec3 b = vec3(ch(t.r, d.r), ch(t.g, d.g), ch(t.b, d.b));
-  vec3 o = mix(d, b, alpha);
-  gl_FragColor = vec4(mix(o, vec3(dot(o, vec3(0.299, 0.587, 0.114))), grey), 1.0);
+  if (t.a < 0.5) discard;                                    // colorkey 0xF81F
+  vec3 M3 = vec3(31.0, 63.0, 31.0);
+  vec3 s = floor(clamp(t.rgb - shift, 0.0, 1.0) * M3 + 0.5);   // day / night palette shift
+  if (grey > 0.0) {                                          // SetGray: L6 = (612 R5 + 601 G6 + 234 B5) >> 10
+    float L = floor((s.r * 612.0 + s.g * 601.0 + s.b * 234.0) / 1024.0);
+    vec3 gt = vec3(floor(L / 2.0), L, floor(L / 2.0));
+    s = floor(s * (32.0 - grey) / 32.0) + floor(gt * grey / 32.0);
+  }
+  if (tintAmt > 0.0) s = floor(s * (32.0 - tintAmt) / 32.0) + floor(floor(tint * M3 + 0.5) * tintAmt / 32.0);
+  vec3 d = floor(texture2D(dstTex, gl_FragCoord.xy / size).rgb * M3 + 0.5);
+  float a = a32;
+  int m = mode;
+  bool sep = m == 0 || m == 10 || m == 11 || m == 12 || m == 15;
+  vec3 o;
+  o.r = rg(m, s.r, d.r, 31.0, 2048.0, a, sep);
+  o.g = rg(m, s.g, d.g, 63.0, 32.0, a, sep);
+  if (m == 1 && s.b < d.b) o.b = d.b;
+  else if (m == 2 && s.b > d.b) o.b = d.b;
+  else if (m == 9 && s.b >= 16.0 && s.b < 31.0) {             // blue reads the whole 16-bit source pixel (original)
+    float s16 = s.r * 2048.0 + s.g * 32.0 + s.b;
+    float q = min(31.0, tdiv(d.b * 32.0, 63.0 - 2.0 * s16));
+    o.b = mod(sh5(d.b * (32.0 - a)) + sh5(q * a), 32.0);
+  } else if (m == 10 && s.b >= 16.0) {                        // blue upper half unclamped; its bit 5 goes into green
+    float braw = d.b + 2.0 * (s.b - 16.0);
+    o.b = mixA(d.b, mod(braw, 32.0), a);
+    if (braw >= 32.0) { float Bg = bch(10, s.g, d.g, 63.0); if (mod(Bg, 2.0) == 0.0) Bg += 1.0; o.g = mixA(d.g, Bg, a); }
+  } else o.b = mixA(d.b, bch(m, s.b, d.b, 31.0), a);
+  gl_FragColor = vec4(o / M3, 1.0);
+}`;
+
+/** FUN_0007ac0c: nearest-neighbour zoom of everything drawn so far by k/256 around the target's centre (W/2, H/2):
+ *  dst(x, y) = src(cx - tdiv((cx - x)·256, k), cy - tdiv((cy - y)·256, k)), rows counted from the top */
+const ZOOM_FRAG = /* glsl */ `
+uniform sampler2D dstTex;
+uniform vec2 size;
+uniform float k;
+float fdiv(float x, float y) { float q = floor(x / y); if ((q + 1.0) * y <= x) q += 1.0; else if (q * y > x) q -= 1.0; return q; }
+float tdiv(float x, float y) { float q = fdiv(abs(x), abs(y)); return ((x < 0.0) != (y < 0.0)) ? -q : q; }
+void main() {
+  vec2 p = floor(gl_FragCoord.xy);
+  float top = size.y - 1.0 - p.y;
+  vec2 c = floor(size * 0.5);
+  float qx = c.x - tdiv((c.x - p.x) * 256.0, k);
+  float qy = c.y - tdiv((c.y - top) * 256.0, k);
+  gl_FragColor = vec4(texture2D(dstTex, vec2(qx + 0.5, size.y - 1.0 - qy + 0.5) / size).rgb, 1.0);
 }`;
 
 /** Global grey amount 0..1 for everything drawn while set (FUN_0007a254 SetGray). */
 export const greyUniform = { grey: { value: 0 }, shift: { value: new THREE.Vector3(0, 0, 0) } };
+/** the same grey in the original's 0..32 steps for the RGB565 shader (kept in sync by setGrey) */
+const greyAmt = { value: 0 };
+/** SetGray amount 0..1 for both shader paths */
+export function setGrey(v: number): void { greyUniform.grey.value = v; greyAmt.value = Math.round(v * 32); }
 /** set the day/night shift from a d+0x26e0c row (dr, dg, db in RGB565 units) */
 export function setDayShift(dr: number, dg: number, db: number): void { greyUniform.shift.value.set(dr / 31, dg / 63, db / 31); }
 
@@ -108,9 +185,8 @@ interface BlendSetup {
 const NORMAL: BlendSetup = { shaderMode: 0, src: THREE.SrcAlphaFactor, dst: THREE.OneMinusSrcAlphaFactor };
 
 /**
- * Original blend mode -> GL blending. Result must equal lerp(dst, blend(src, dst), alpha8/8)
- * (tools/grantria_gfx.py _blend_ch). Fixed-function where exact: normal, screen, multiply,
- * opaque add; everything else reads the destination (null here).
+ * Original blend mode -> GL blending. Fixed-function for the common modes whose GL result is within 1 LSB of the
+ * original (normal, screen, multiply, opaque add); everything else runs the RGB565 blitter in DST_FRAG (null here).
  */
 function blendSetup(mode: number, alpha8: number): BlendSetup | null {
   switch (mode) {
@@ -118,8 +194,8 @@ function blendSetup(mode: number, alpha8: number): BlendSetup | null {
     case 13: return alpha8 === 8 ? { shaderMode: 1, src: THREE.OneFactor, dst: THREE.OneFactor } : null;
     case 4: return { shaderMode: 1, src: THREE.OneMinusDstColorFactor, dst: THREE.OneFactor };
     case 14: return { shaderMode: 2, src: THREE.ZeroFactor, dst: THREE.SrcColorFactor };
-    case 1: case 2: case 3: case 5: case 6: case 8: case 10: case 15: return null;
-    default: return NORMAL;   // 7, 9, 11, 12: unidentified, drawn as normal like the Python tool
+    case 1: case 2: case 3: case 5: case 6: case 7: case 8: case 9: case 10: case 11: case 12: case 15: return null;
+    default: return null;     // modes > 15 skip the pixel; the shader draws nothing for them
   }
 }
 
@@ -136,7 +212,8 @@ export class SpriteLayer {
   /** Colour effect applied to quads drawn while set: tint colour, strength and alpha in 0..32. */
   fx: SpriteFx | null = null;
 
-  constructor(private assets: Assets) {}
+  private assets: Assets;
+  constructor(assets: Assets) { this.assets = assets; }
 
   async preload(names: Iterable<string | null>): Promise<void> {
     await Promise.all([...new Set(names)].filter((n): n is string => !!n && !this.textures.has(n))
@@ -178,7 +255,10 @@ export class SpriteLayer {
           })
         : new THREE.ShaderMaterial({
             ...common,
-            uniforms: { map: { value: tex }, alpha: { value: alpha }, mode: { value: blend }, ...dstUniforms, ...greyUniform },
+            uniforms: {
+              map: { value: tex }, mode: { value: blend }, a32: { value: Math.floor((alpha8 * a32) / 8) }, ...dstUniforms,
+              grey: greyAmt, shift: greyUniform.shift, tint: fxUniforms.tint, tintAmt: { value: amt },
+            },
             fragmentShader: DST_FRAG,
             blending: THREE.NoBlending,
           });
@@ -186,6 +266,21 @@ export class SpriteLayer {
       this.materials.set(key, m);
     }
     return m;
+  }
+
+  /** A zoom pass (FUN_0007ac0c) over the rect covering the whole target, at this point of the draw order. */
+  zoom(x: number, y: number, w: number, h: number, k: number): void {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([x, y, 0, x + w, y, 0, x + w, y + h, 0, x, y + h, 0], 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+    geo.setIndex([0, 1, 2, 0, 2, 3]);
+    const m = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: ZOOM_FRAG, uniforms: { ...dstUniforms, k: { value: k } },
+      blending: THREE.NoBlending, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+    m.userData.readsDst = true;
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.renderOrder = this.order++;
+    mesh.frustumCulled = false;
+    this.group.add(mesh);
   }
 
   /** Make an arbitrary texture drawable by quad(tex.uuid, ...). */
@@ -232,21 +327,21 @@ export class SpriteLayer {
   }
 
   /** One cmf part; mirror flips the whole frame around its origin (x -> -x - w, hflip toggled). */
-  part(cmf: Cmf, image: string | null, p: CmfPart, ox: number, oy: number, mirror = false): void {
+  part(cmf: Cmf, image: string | null, p: CmfPart, ox: number, oy: number, mirror = false, s = 1): void {
     const c = cmf.clips[p.clip];
     if (!c) return;
-    let dx = p.dx;
-    if (mirror) dx = -dx - ((p.rot & 1) ? c[3] : c[2]) * p.scale;
-    this.quad(image, c[0], c[1], c[2], c[3], ox + dx, oy + p.dy, p.rot, p.hflip ^ (mirror ? 1 : 0), p.scale, p.blend, p.alpha8);
+    let dx = p.dx * s;
+    if (mirror) dx = -dx - ((p.rot & 1) ? c[3] : c[2]) * p.scale * s;
+    this.quad(image, c[0], c[1], c[2], c[3], ox + dx, oy + p.dy * s, p.rot, p.hflip ^ (mirror ? 1 : 0), p.scale * s, p.blend, p.alpha8);
   }
 
   /** Draw frame fi of a cmf with its origin at (ox, oy). */
-  frame(cmfName: string, cmf: Cmf, fi: number, ox: number, oy: number, zone: number, equip: Equip, mirror = false, hideClips?: number[]): void {
+  frame(cmfName: string, cmf: Cmf, fi: number, ox: number, oy: number, zone: number, equip: Equip, mirror = false, hideClips?: number[], s = 1): void {
     const fr = cmf.frames[fi];
     if (!fr) return;
     for (const p of fr.parts) {
       if (hideClips?.includes(p.clip)) continue;
-      this.part(cmf, clipImage(this.assets, cmfName, cmf, p.clip, zone, equip), p, ox, oy, mirror);
+      this.part(cmf, clipImage(this.assets, cmfName, cmf, p.clip, zone, equip), p, ox, oy, mirror, s);
     }
   }
 

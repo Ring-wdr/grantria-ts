@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import type { Assets, Cmf, GameMap, MapObject } from '../assets';
 import { Compositor, createTarget } from '../compositor';
 import { SpriteLayer, DEFAULT_EQUIP, type Equip, type SpriteFx } from '../sprites';
-import { actorDepth, buildWalk, depthSort, objDepth, type DepthItem } from '../world';
+import { actorDepth, buildWalk, buildWalkLayers, depthSort, objDepth, type DepthItem } from '../world';
 
 export const VIEW_W = 480;
 export const VIEW_H = 320;
@@ -27,8 +27,10 @@ export interface Drawable {
   fx?: SpriteFx;
   /** parts skipped by clip number (PART_HIDE, FUN_00021fc8) */
   hideClips?: number[];
+  /** whole-frame scale around the origin (+0x8c, FUN_00030cec) */
+  scale?: number;
   /** draw a plain image rect at (x, y) instead of a cmf frame (ground items) */
-  img?: { name: string; sx: number; sy: number; w: number; h: number };
+  img?: { name: string; sx: number; sy: number; w: number; h: number; blend?: number };
 }
 
 export class Field {
@@ -42,6 +44,8 @@ export class Field {
   private ccmf!: Cmf;
   private midStatic: MapObject[] = [];
   private walk = new Uint8Array(0);
+  /** walk layers 0..3 (layer 0 = walk) */
+  private layers: Uint8Array[] = [];
   private mapTarget = createTarget(1, 1);
   private under: SpriteLayer;
   private view: SpriteLayer;
@@ -94,6 +98,7 @@ export class Field {
     }
 
     this.walk = buildWalk(m, (id) => { const [, c, f] = this.objCmf(id); return [c, f]; });
+    this.layers = buildWalkLayers(m, this.walk);
 
     const names: (string | null)[] = [`t${hd.tileset}`];
     for (const o of [...m.objBg, ...m.objLow, ...this.midStatic, ...m.objTop]) {
@@ -117,6 +122,9 @@ export class Field {
     this.compositor.draw(U.group, this.mapCam, this.width, this.height, this.mapTarget);
   }
 
+  /** Load plain images drawn through Drawable.img (shadow, icons). */
+  async preloadImages(names: string[]): Promise<void> { await this.view.preload(names); }
+
   /** Make sure every frame of an animated sprite has its textures loaded. */
   async preloadSprite(cmfName: string, cmf: Cmf, equip: Equip = DEFAULT_EQUIP): Promise<void> {
     await this.view.preload(this.view.allImages(cmfName, cmf, this.zone, equip));
@@ -129,7 +137,7 @@ export class Field {
 
   /** Render the view with its top-left corner at world (camX, camY) into the compositor target
    * (call compositor.show() after any UI passes). */
-  render(camX: number, camY: number, entities: Drawable[]): void {
+  render(camX: number, camY: number, entities: Drawable[], beforeTop?: (V: SpriteLayer) => void): void {
     const V = this.view;
     V.clear();
     V.target(this.mapTarget.texture, this.width, this.height);
@@ -139,8 +147,8 @@ export class Field {
         key: e.depth ?? (e.cmf ? actorDepth(e.y, e.cmf, e.frame) : e.y), kind: 0,
         draw: () => {
           V.fx = e.fx ?? null;
-          if (e.img) V.quad(e.img.name, e.img.sx, e.img.sy, e.img.w, e.img.h, e.x, e.y);
-          else if (e.cmf) V.frame(e.cmfName, e.cmf, e.frame, e.x, e.y, this.zone, e.equip ?? DEFAULT_EQUIP, e.mirror, e.hideClips);
+          if (e.img) V.quad(e.img.name, e.img.sx, e.img.sy, e.img.w, e.img.h, e.x, e.y, 0, 0, 1, e.img.blend ?? 0);
+          else if (e.cmf) V.frame(e.cmfName, e.cmf, e.frame, e.x, e.y, this.zone, e.equip ?? DEFAULT_EQUIP, e.mirror, e.hideClips, e.scale);
           V.fx = null;
         },
       })),
@@ -150,6 +158,7 @@ export class Field {
       }),
     ];
     for (const it of depthSort(items)) it.draw();
+    beforeTop?.(V);                                   // FUN_00024b80 warp / banner, FUN_000250e8 aura: under objTop
     for (const o of this.map.objTop) this.drawObj(V, o);
     this.viewCam.left = camX;
     this.viewCam.right = camX + VIEW_W;
@@ -163,5 +172,14 @@ export class Field {
   walkCell(c: number, r: number): boolean {
     const W = this.map.header.width;
     return r >= 0 && c >= 0 && r < this.map.header.height && c < W && this.walk[r * W + c] === 1;
+  }
+
+  /** walk layer 0 by linear index r*W + c (rows run into each other like the original bitmap); outside is 0 */
+  walkAt(i: number): number { return i >= 0 && i < this.walk.length && this.walk[i] === 1 ? 1 : 0; }
+
+  /** walk layer k (buildWalkLayers): 1 = set; outside the map is not set */
+  walkLayer(k: number, c: number, r: number): boolean {
+    const W = this.map.header.width;
+    return r >= 0 && c >= 0 && r < this.map.header.height && c < W && this.layers[k]?.[r * W + c] === 1;
   }
 }

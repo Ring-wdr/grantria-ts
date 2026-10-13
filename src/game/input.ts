@@ -66,7 +66,11 @@ export class Input {
   /** right stick vertical axis past its dead zone (-1 up .. 1 down), 0 when centred: scrolls the open text */
   padScrollY = 0;
 
-  constructor(private canvas: HTMLCanvasElement, private viewW: number, private viewH: number) {
+  private canvas: HTMLCanvasElement;
+  private viewW: number;
+  private viewH: number;
+  constructor(canvas: HTMLCanvasElement, viewW: number, viewH: number) {
+    this.canvas = canvas; this.viewW = viewW; this.viewH = viewH;
     addEventListener('keydown', (e) => {
       const k = KEYMAP[e.code];
       if (k === undefined) return;

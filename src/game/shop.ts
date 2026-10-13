@@ -3,7 +3,8 @@
 // confirm / progress / result popups, blacksmith combine·decompose and potion detail 0x2B,
 // enhance 0x2C and the decompose result window. Drawn on the 1.3x layer in C220 coordinates as
 // declarative views (view.ts, css/shop.css); item icons stay the original sprites.
-// Not ported: the dark merchant (kind 3, needs the darkness phase), touch zones, the -10 % flag.
+// The dark merchant (kind 3) sells its night stock at price × 10. The quantity popup's touch areas
+// (FUN_0004690c) are its five buttons; the -10 % buy text flag DAT_003d1b09 is buff slot 25 (청명의 비약).
 import './css/shop.css';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
@@ -191,7 +192,9 @@ export class ShopScreen {
         else if (k === AVK.POUND && (this.action === 1 || this.action === 2)) this.inv.sortBag();   // 가방정리 FUN_0003b3a8(0)
         else if (k === AVK.CLR) { this.screen = 'menu'; this.c2b.potion = -1; }
       } else {
-        if (k === AVK.LEFT && this.sel > 0) this.sel--;
+        // sell / enhance lists start on the grid and CLR leaves them: LEFT from the first column reaches the bag column
+        if (k === AVK.LEFT && (this.action === 1 || this.action === 2) && (this.sel & 3) === 0) this.focus = 0;
+        else if (k === AVK.LEFT && this.sel > 0) this.sel--;
         else if (k === AVK.RIGHT && this.sel < 15) this.sel++;
         else if (k === AVK.UP && this.sel >= 4) this.sel -= 4;
         else if (k === AVK.DOWN) this.sel = Math.min(this.sel + 4, 15);
@@ -281,11 +284,19 @@ export class ShopScreen {
     return 8;
   }
 
+  /** FUN_0004d18c: unit price in the buy text (kind 3 × 10); DAT_003d1b09 is the active flag of buff slot 25
+   *  (청명의 비약), which takes 10 % off the shown price only — the charge stays the same (original) */
+  private shownUnit(it: Item): number {
+    let unit = priceOf(this.a, it) * (this.kind === 3 ? 10 : 1);
+    if (this.fs.buffs.isOn(25)) unit += Math.trunc(unit / -10);
+    return unit;
+  }
+
   private confirmBuy(it: Item): void {
     const stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
     const verb = `${this.verb()}${this.text(0x19f).replace(/^%s %s/, '')}`;
     const body = stack
-      ? this.text(0x1b1).replace('%s', it.name).replace('%d', String(this.qty)).replace('%d', String(priceOf(this.a, it) * this.qty)) + verb
+      ? this.text(0x1b1).replace('%s', it.name).replace('%d', String(this.qty)).replace('%d', String(this.shownUnit(it) * this.qty)) + verb
       : this.text(0x1b0).replace('%s', it.name).replace(/\|b$/, '|b ') + verb;
     this.ask(0x0e, body, () => {
       const c = this.precheck(0, it);
@@ -704,7 +715,7 @@ export class ShopScreen {
         this.arrow(false, () => [AVK.LEFT]),
         h('div.v-col.v-center.shop-qty-mid', null,
           step(0x55, AVK.UP),
-          h('div.v-row.shop-qty-value', null, h('span.shop-label', null, this.text(0x52)), h('span.shop-num', null, String(this.qty))),
+          h('div.v-row.shop-qty-value', null, h('span.shop-label', null, this.text(0x52)), h('span.shop-num', null, String(this.qty).padStart(4, '0'))),
           step(0x56, AVK.DOWN)),
         this.arrow(true, () => [AVK.RIGHT]),
         this.btn(this.text(0x1a00), { sel: true, on: () => [AVK.OK], cls: 'shop-qty-ok' })));

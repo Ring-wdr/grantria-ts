@@ -1,11 +1,12 @@
 // Menu screens drawn with the original art (analysis/features/ui-screens.md §0.3–0.7, ported
 // from tools/grantria_ui.py): logo (0x05) -> rating (0x06) -> title (0x08/0x09) -> slot select
 // (0x0A) -> character select (0x0B, popup 0) -> field (0x10), game over (0x1B).
-// Ranking is local (ranking.ts); the Kakao button is removed. Not ported: title settings / help / info buttons,
-// hardcore mode, revival scroll, the game menu (0x1C) and tab screens.
+// Ranking is local (ranking.ts); the Kakao button is removed. The title settings / help buttons open the option
+// screens, the info button opens the data screen (0x3B); hardcore mode, revival and the game menu live elsewhere.
 import { FieldScene } from './fieldScene';
 import { GameMenu } from './menu';
-import { CouponShop, coupons } from './community';
+import { CouponShop, couponCard, coupons } from './community';
+import { josa } from './shop';
 import { consume, countOf } from './shopRules';
 import { ShopScreen } from './shop';
 import { Popup } from './popup';
@@ -18,7 +19,7 @@ import { Story } from './story';
 import type { GameContext, Scene } from './scene';
 import { tri, type Ui } from './ui';
 import { button, gt, slot, win } from './view';
-import { greyUniform } from '../sprites';
+import { greyUniform, setGrey } from '../sprites';
 import { RankingScene } from './ranking';
 import { DataScene } from './dataScene';
 import { OptionTab } from './optionTab';
@@ -164,6 +165,7 @@ export class TitleScene implements Scene {
     for (const k of presses) if (k === AVK.LEFT || k === AVK.RIGHT) this.sel ^= 1;
     // the three top-right icons are touch zones only; a pad reaches them with □ / △ / L2 (TITLE_PAD)
     presses = presses.map((k) => TITLE_PAD.find(([key]) => key === k)?.[1] ?? k);
+    if (presses.length) frozenTick = this.t;                         // the frame at the confirming tick
     if (presses.includes(TITLE_DATA)) { this.ctx.go(new DataScene(this.ctx)); return; }
     if (presses.includes(TITLE_OPTION)) { this.ctx.go(new TitleOptionScene(this.ctx, 'settings')); return; }   // state 0x0C
     if (presses.includes(TITLE_HELP)) { this.ctx.go(new TitleOptionScene(this.ctx, 'help')); return; }         // state 0x0D
@@ -184,10 +186,11 @@ export class TitleScene implements Scene {
   }
 }
 
-/** Frozen title frame behind the slot / character screens (saved buffer DAT_003c39e8 [추정]). */
+/** DAT_003c39e8: TitleMenuKey (FUN_00046488) redraws the title backdrop at the confirming tick (FUN_0002df9c: island,
+ *  clouds, logo frame — no buttons, no copyright) and keeps that frame behind the following screens. */
+let frozenTick = 200;
 export function frozenTitle(ctx: GameContext): void {
-  titleBackground(ctx, 200, 9);
-  titleButtons(ctx.ui);
+  titleBackground(ctx, frozenTick, 9);
 }
 
 /** "%02d:%02d:%02d" play time (text 0x1B28); the web port counts 20 ticks per second. */
@@ -220,9 +223,15 @@ export class SlotScene implements Scene {
   }
   update(presses: number[]): void {
     this.t++;
+    this.ctx.input.uiMode = !!this.popup;                            // taps reach the popup buttons
     if (this.popup) {
       const r = this.popup.handle(presses);
-      if (r) { this.popup = null; if (r === 'yes') this.convert(this.cur); }
+      if (r) {
+        const id = this.popup.id;
+        this.popup = null;
+        if (r === 'yes' && id === 0x5d) this.convert(this.cur);
+        if (r === 'yes' && id === 1) { deleteSlot(this.cur); this.refresh(); }
+      }
       return;
     }
     for (const k of presses) {
@@ -231,7 +240,7 @@ export class SlotScene implements Scene {
       else if (k === AVK.UP) this.cur = (this.cur + 2) % 3;
       else if (k === AVK.DOWN) this.cur = (this.cur + 1) % 3;
       else if (k === AVK.OK) this.choose();
-      else if (k === AVK.POUND && this.slots[this.cur]) { deleteSlot(this.cur); this.refresh(); }
+      else if (k === AVK.POUND && this.slots[this.cur]) { this.popup = new Popup(this.ctx, 1); return; }   // popup 1: delete this slot?
       else if (k === AVK.CLR) this.ctx.go(new TitleScene(this.ctx));
     }
   }
@@ -242,8 +251,8 @@ export class SlotScene implements Scene {
     const fresh = Story.fresh(s.cls).toJSON();
     const book = s.story?.book;
     s.story = { ...fresh, book, gather: s.story?.gather, titles: s.story?.titles, title: s.story?.title };   // titles kept (hardmode.md §3.3)        // event bits, quests, visited maps, keys, chests reset; book / gather level kept
-    s.buffs = undefined; s.day = 0; s.returnZone = 0;
-    if (s.inv) s.inv.items = s.inv.items.filter((it) => it.type !== 0x1a);   // key items wiped
+    s.buffs = undefined; s.day = 0;                                    // the return zone +0x3104 is kept
+    if (s.inv) { s.inv.items = s.inv.items.filter((it) => it.type !== 0x1a); s.inv.keys = []; }   // key store wiped (FUN_00036180)
     saveSlot(i, s);
     setLap(i, 2);
     this.refresh();
@@ -292,8 +301,8 @@ export class SlotScene implements Scene {
         sel: !!this.slots[this.cur], glow: false, cls: this.slots[this.cur] ? '' : 'off', style: full,
       }));
       u.pop();
-      u.closeButton();
-    });
+      if (!this.popup) u.closeButton();
+    }, this.popup ? () => this.popup!.draw() : undefined);
   }
 }
 
@@ -313,6 +322,7 @@ export class CharSelectScene implements Scene {
   }
   update(presses: number[]): void {
     this.t++;
+    this.ctx.input.uiMode = !!this.popup;
     if (this.popup) {
       const r = this.popup.handle(presses);
       if (r === 'yes') {
@@ -412,7 +422,7 @@ export class PlayScene implements Scene {
   /** "save?" popup 8 from the option tab */
   private askSave: Popup | null = null;
   /** game-over popups (0x4E / 0x7D) and the coupon shop opened from there (DAT_003b3cc1) */
-  private overPopup: { p: Popup; then?: () => void } | null = null;
+  private overPopup: { p: Popup; then?: (r: 'yes' | 'no' | 'ok') => void } | null = null;
   private overShop: CouponShop | null = null;
 
   private constructor(private ctx: GameContext, private slot: number, readonly field: FieldScene) {
@@ -449,7 +459,7 @@ export class PlayScene implements Scene {
       this.overTicks++;
       if (this.overTicks < 16) return;
       if (this.overShop) { if (this.overShop.update(presses) === 'close') this.overShop = null; return; }
-      if (this.overPopup) { if (this.overPopup.p.handle(presses)) { const t = this.overPopup.then; this.overPopup = null; t?.(); } return; }
+      if (this.overPopup) { const r = this.overPopup.p.handle(presses); if (r) { const t = this.overPopup.then; this.overPopup = null; t?.(r); } return; }
       for (const k of presses) {
         if (k === AVK.UP) this.overSel = (this.overSel + 2) % 3;
         else if (k === AVK.DOWN) this.overSel = (this.overSel + 1) % 3;
@@ -518,8 +528,13 @@ export class PlayScene implements Scene {
     const f = this.field, inv = f.inv, t = this.ctx.assets.text;
     if (countOf(inv, 0x1b, 3) > 0) { consume(inv, 0x1b, 3, 1); f.countUse(3); f.revive(); this.overTicks = 0; return; }
     if (coupons(f) >= 4) {
-      this.overPopup = { p: new Popup(this.ctx, 0x4e, 0, (s) => s.replace('%s', t[0xa0c + 3] ?? '')), then: () => {
-        consume(inv, 0x1b, 0x1b, 2); f.revive(); this.overTicks = 0;
+      // 0x4E "부활 스크롤을 가지고 있지 않습니다." -> 0x4D: buy one with 2 coupons? (FUN_0005de24 case '0', FUN_00053ca0 0x1a)
+      this.overPopup = { p: new Popup(this.ctx, 0x4e, 0, (s) => josa(s.replace('%s', t[0xa0c + 3] ?? ''))), then: () => {
+        this.overPopup = { p: couponCard(this.ctx, f, 0x4d, 3, 2, f.db.create(0x1b, 3, 0, f.rng).name), then: (r) => {
+          if (r !== 'yes') return;
+          if (coupons(f) < 2) { this.overPopup = { p: new Popup(this.ctx, 0x6a, 0, () => t[0x508] ?? '') }; return; }
+          consume(inv, 0x1b, 0x1b, 2); f.revive(); this.overTicks = 0;   // net 0x19 code 1 (FUN_000752bc), done locally
+        } };
       } };
       return;
     }
@@ -537,14 +552,14 @@ export class PlayScene implements Scene {
     }
     // game over: the field (map + status bar, no touch buttons) turns grey over 16 frames
     // (SetGray(min(aac, 32)), FUN_000336a8), then the menu is drawn in colour on top
-    greyUniform.grey.value = dead ? Math.min(1, this.overTicks / 16) : 0;
+    setGrey(dead ? Math.min(1, this.overTicks / 16) : 0);
     this.ctx.hud.grey = greyUniform.grey.value;
     this.field.showButtons = !this.menu && !this.shop && !this.pause && !this.notice && !this.askSave;
     if (!this.menu) { this.field.draw(); this.backdropFor = null; }
     else if (this.backdropFor !== this.menu) { this.field.draw(); this.ctx.compositor.freezeBackdrop(); this.backdropFor = this.menu; }
     else this.ctx.compositor.drawBackdrop();                         // the blurred field is frozen while the menu is open
     if (this.menu) this.ctx.hud.hold();                              // the HUD stays under the menu, darkened and blurred by CSS
-    greyUniform.grey.value = 0;
+    setGrey(0);
     if (this.shop) {
       this.ctx.ui.begin();
       this.shop.drawBackground(this.ctx.ui);
@@ -579,6 +594,7 @@ export class PlayScene implements Scene {
         u.view('overShop', 0, 0x1e, 0xdc, 0xb4, win('.v-col.v-fill', { style: 'padding:4px' }, slot('tab')));
         this.overShop.draw(u);
         u.pop();
+        if (!this.overShop.popup) u.closeButton();                  // touch: back to the game over menu (CLR)
         this.overShop.drawPopups();
       }
       this.overPopup?.p.draw();

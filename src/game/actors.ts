@@ -1,8 +1,9 @@
 // Field actors other than the player and monsters: NPCs, event-spawned actors and party members
 // (events.md §0.3 PLACE / SPAWN_TYPE / WALK_TO / MOVE_TO / BALLOON, §2.4 appearance conditions).
-// Walking along a path uses a breadth-first search on the walk grid; the original path finder
-// FUN_00066c70 is not decoded [추정].
+// Walking uses the original path finder FUN_00066c70 (pathfind.ts, event state: no goal fix) and the path walk
+// FUN_00070918: steer the body box's top-left to each cell, the next point within 16 px of the cell centre.
 import type { Cmf } from '../assets';
+import { findPath, walkPathTick } from './pathfind';
 import { bodyBox } from '../world';
 import type { Drawable, Field } from './field';
 import { LOCO, type Dir, type Rect } from './player';
@@ -27,7 +28,10 @@ export class EvActor {
   alpha = 32;
   t = 0;
   walking = false;
+  /** path points, the goal at [0], walked from the end (FUN_00066c70 buffer) */
   path: [number, number][] = [];
+  /** reached the end of its path this tick (releases WALK_TO wait 0x13 for anyone) */
+  arrived = false;
   /** px per tick while walking (WALK_SPEED, default 5) */
   speed = 5;
   /** SET_ACTION: forced anim record (NPC +0x24), -1 = idle / walk */
@@ -60,53 +64,41 @@ export class EvActor {
 
   get moving(): boolean { return this.path.length > 0; }
 
-  /** Breadth-first path over walkable 16 px cells to cell (cx, cy); straight line when none. */
-  walkTo(field: Field, cx: number, cy: number): void {
-    const sx = Math.floor(this.x / 16), sy = Math.floor(this.y / 16);
-    const W = field.map.header.width, H = field.map.header.height;
-    const prev = new Map<number, number>();
-    const key = (x: number, y: number) => y * W + x;
-    const q: [number, number][] = [[sx, sy]];
-    prev.set(key(sx, sy), -1);
-    let found = sx === cx && sy === cy;
-    while (q.length && !found) {
-      const [x, y] = q.shift()!;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H || prev.has(key(nx, ny))) continue;
-        if (!(nx === cx && ny === cy) && !field.walkCell(nx, ny)) continue;
-        prev.set(key(nx, ny), key(x, y));
-        if (nx === cx && ny === cy) { found = true; break; }
-        q.push([nx, ny]);
-      }
-    }
-    const pts: [number, number][] = [[cx * 16, cy * 16]];
-    if (found) {
-      let k = prev.get(key(cx, cy)) ?? -1;
-      while (k >= 0 && k !== key(sx, sy)) { pts.unshift([(k % W) * 16, Math.floor(k / W) * 16]); k = prev.get(k) ?? -1; }
-    }
-    this.path = pts;
+  /** body box of the current frame flipped for the facing (FUN_000231e4: dx = -dx - w when dir & 1) */
+  private bodyNow(): [number, number, number, number] {
+    const s8 = (v: number) => (v << 24) >> 24;
+    const [bx, by, bw, bh] = bodyBox(this.cmf, this.frame).map(s8);
+    return [this.dir & 1 ? -bx - bw : bx, by, bw, bh];
   }
 
-  /** Teleport to the end of the current path (skip). */
+  /** WALK_TO / MOVE_TO (FUN_00067318): nothing when already on the cell's top-left; no path -> no walk */
+  walkTo(field: Field, cx: number, cy: number): void {
+    this.path = [];
+    if (this.x === cx * 16 && this.y === cy * 16) return;
+    const W = field.map.header.width;
+    this.path = findPath((c, r) => field.walkAt(c + r * W) === 1, W, field.map.header.height,
+      { x: this.x, y: this.y, lastH: this.lastH, lastV: this.lastV, body: this.bodyNow() }, cx * 16, cy * 16, false) ?? [];
+  }
+
+  /** skip (FUN_00065534): party members go to the goal cell's top-left; others keep walking */
   finishPath(): void {
-    const end = this.path[this.path.length - 1];
-    if (end) { this.x = end[0]; this.y = end[1]; }
+    if (!this.party) return;
+    const goal = this.path[0];
+    if (goal) { this.x = goal[0]; this.y = goal[1]; }
     this.path = [];
     this.walking = false;
-    this.speed = 5;
   }
+
+  /** a skipped WALK_TO / MOVE_TO record places the actor directly */
+  placeAt(x: number, y: number): void { this.path = []; this.x = x; this.y = y; this.walking = false; }
 
   update(): void {
     this.walking = false;
-    if (this.path.length) {
-      const [tx, ty] = this.path[0];
-      const dx = tx - this.x, dy = ty - this.y;
-      if (dx !== 0) { const s = Math.min(this.speed, Math.abs(dx)); this.x += Math.sign(dx) * s; this.face(dx < 0 ? 0 : 1); }
-      else if (dy !== 0) { const s = Math.min(this.speed, Math.abs(dy)); this.y += Math.sign(dy) * s; this.face(dy < 0 ? 2 : 3); }
-      if (this.x === tx && this.y === ty) this.path.shift();
-      this.walking = true;
-      if (!this.path.length) this.speed = 5;                  // back to 5 on arrival
+    this.arrived = false;
+    if (this.path.length) {                                     // FUN_00070918
+      const [bx, by] = this.bodyNow();
+      this.arrived = walkPathTick(this, [bx, by], this.path, this.speed);
+      this.walking = !this.arrived;
     }
     if (this.balloon) this.balloonT++;
     if (this.party && this.pose && this.poseFrame()) { this.t++; return; }

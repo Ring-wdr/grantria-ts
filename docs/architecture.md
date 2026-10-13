@@ -34,6 +34,7 @@ web/
    ├─ build.rs         ACL: 앱 명령(AppManifest)과 인라인 플러그인 native의 권한 생성
    ├─ src/lib.rs       플러그인·명령 등록, 창 최소화와 Android Suspended/Resumed → 'host-pause' 이벤트, touch_first
    ├─ src/native.rs    플러그인 native: vibrate, display_name. 데스크톱은 Rust, Android는 NativePlugin.kt
+   ├─ src/rumble.rs    Windows DualSense 진동(hidapi, USB 0x02 / 블루투스 0x31 + CRC32)
    ├─ src/saves.rs     saves_load / saves_write: 앱 데이터 폴더의 saves/<키>.json, 원자적 쓰기
    └─ gen/android/…/   MainActivity.kt(창: 전체 화면, 자동 재생, 패드 B 대체 BACK 차단),
                        NativePlugin.kt(@TauriPlugin: 진동, ContentResolver 파일 이름)
@@ -58,7 +59,7 @@ web/
 |---|---|---|---|
 | 저장소 | localStorage (막히면 메모리) | Rust `saves_*`: `<앱 데이터>/saves/<키>.json`, 임시 파일 + sync + rename | 같음 |
 | 파일 | `<input type=file>`, `<a download>` | plugin-dialog + plugin-fs, 이름은 `native\|display_name`(경로의 마지막 부분) | 같음. 고른 파일은 `content://` URI라 이름을 NativePlugin이 ContentResolver로 찾는다 |
-| 진동 | `navigator.vibrate` + 패드 진동 | `native\|vibrate`(아무것도 안 함) + 패드 진동 | `native\|vibrate` → NativePlugin(시스템 Vibrator, `VIBRATE` 권한) + 패드 진동 |
+| 진동 | `navigator.vibrate` + 패드 진동 | `native\|vibrate`: Windows는 DualSense를 HID 출력 리포트로 직접 진동(`rumble.rs`, WebView2 Gamepad API가 못 움직임) + 웹뷰 패드 진동(XInput) | `native\|vibrate` → NativePlugin(시스템 Vibrator, `VIBRATE` 권한) + 패드 진동 |
 | 생명주기: 백그라운드 | `visibilitychange` | + `'host-pause'` 이벤트(창 최소화. WebView2는 최소화해도 visible) | + `'host-pause'` 이벤트(`WindowEvent::Suspended`/`Resumed` = onPause/onResume) |
 | 생명주기: 뒤로 | 없음 | 없음 | Tauri app 플러그인의 `back-button` 이벤트(`onBackButtonPress`). 게임이 쓰지 않으면(로고·타이틀) plugin-dialog `ask` 후 `exit()`. 패드 B가 대체 BACK으로 다시 오는 것은 MainActivity가 막는다 |
 | 터치 우선 | `(pointer: coarse)` 미디어 쿼리(바뀌면 다시 배치) | Rust `touch_first` = `cfg!(mobile)` → false | true |
@@ -75,6 +76,10 @@ web/
 
 - `web/game/fieldScene.ts`(필드 진행)와 `web/game/events.ts`(이벤트 VM)는 로직과 그리기가 한 클래스에 섞여 있다. 웹뷰 호스트(브라우저, Tauri)는 이대로 공유하면 되지만, 네이티브 렌더러를 붙이려면 이 둘의 진행 로직을 `core`로 옮기고 그리기만 `web`에 남겨야 한다.
 - `web/game/gather.ts`, `fortune.ts`는 로직과 뷰가 한 파일이다(작아서 남겨 둠).
+
+## 문제 기록
+
+원인 조사가 필요했던 문제와 그때 쓴 확인 방법(실기기 CDP, 데스크톱 WebView2 디버깅)은 [troubleshooting.md](troubleshooting.md)에 있다.
 
 ## 실행
 

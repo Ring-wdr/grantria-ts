@@ -57,7 +57,7 @@ src/tauri/      Tauri 호스트 플랫폼. 네이티브 쪽과는 Tauri(invoke·
 src-tauri/      Tauri 2 셸 (Rust: 세이브 명령, 인라인 플러그인 native), Android 프로젝트(gen/android)
 tests/          node --test 단위 테스트 (계층 경계와 셸 전역·스크립트 평가 금지도 검사)
 tools/          APK 에셋 → 웹 에셋 변환, 규칙 표 추출(에뮬레이터)
-docs/           설계 문서 (구조: architecture.md, 데스크톱 배포 비교)
+docs/           설계 문서 (구조: architecture.md, 데스크톱 배포 비교, 문제 기록: troubleshooting.md)
 ```
 소스 주석의 `analysis/features/*.md`, `FUN_xxxxxxxx` 표기는 이 포트를 만들 때 쓴 분석 노트(이 저장소에 없음)와 원본 함수 주소를 가리킵니다.
 

@@ -548,3 +548,11 @@
 /* menu lists (view.ts menuList): rows spread evenly in the space above the note, the same in every tab */
 .v-menu-list { justify-content: space-evenly; padding: 2px 6px; }
 .v-menu-list > .v-btn, .v-menu-gap { flex: none; height: 22px; }
+
+/* promptDialog (hosts without window.prompt) */
+.prompt-back { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); }
+.prompt-box { min-width: 260px; padding: 14px 16px; border: 2px solid #8fb8e8; border-radius: 6px; background: #12203a; color: #fff; font: 13px Galmuri, sans-serif; }
+.prompt-box p { margin: 0 0 10px; }
+.prompt-box input { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit; }
+.prompt-box div { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+.prompt-box button { padding: 3px 12px; font: inherit; }

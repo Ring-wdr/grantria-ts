@@ -49,3 +49,16 @@ web/
 
 - `web/game/fieldScene.ts`(필드 진행)와 `web/game/events.ts`(이벤트 VM)는 로직과 그리기가 한 클래스에 섞여 있다. 웹뷰 호스트(브라우저, Tauri)는 이대로 공유하면 되지만, 네이티브 렌더러를 붙이려면 이 둘의 진행 로직을 `core`로 옮기고 그리기만 `web`에 남겨야 한다.
 - `web/game/gather.ts`, `fortune.ts`는 로직과 뷰가 한 파일이다(작아서 남겨 둠).
+
+## 실행
+
+| 대상 | 명령 | 엔트리 |
+|---|---|---|
+| 브라우저 | `npm run dev` → `http://localhost:5173/game.html` | `game.html` → `src/web/main.ts` |
+| Tauri 개발 | `npm run tauri:dev` (Vite 개발 서버를 같이 띄운다) | `tauri.html` → `src/tauri/main.ts` |
+| Tauri 배포 빌드 | `npm run tauri:build` → `src-tauri/target/release/bundle/` | 같음 |
+
+- Tauri 빌드에는 Rust 툴체인(rustup, stable)과 Windows의 MSVC 빌드 도구·WebView2가 필요하다.
+- 세이브는 Tauri에서 앱 데이터 폴더의 `grantria.json`(plugin-store)에 둔다. 처음 실행할 때 웹뷰 localStorage에 남아 있던 `grantria.*` 값을 한 번 옮긴다.
+- 게임 데이터(`public/assets`, 원본 APK에서 생성)는 지금 프론트엔드 번들에 같이 들어간다. 개인 빌드용이다. 배포용으로는 APK 가져오기로 앱 데이터 폴더에 에셋을 만들고 `AssetSource`를 바꿔 끼워야 한다(`desktop-electron-vs-tauri.md` §4).
+- 권한은 `src-tauri/capabilities/default.json`: 저장소, 열기·저장 대화상자, 대화상자로 고른 파일의 읽기·쓰기만 연다.

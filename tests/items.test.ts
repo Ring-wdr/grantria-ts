@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { ItemDb } from '../src/game/items.ts';
+import { ItemDb } from '../src/core/rules/items.ts';
 
 const DDAT = new URL('../public/assets/d.dat', import.meta.url);
 const skip = existsSync(DDAT) ? false : 'needs npm run assets (generated from your own APK)';

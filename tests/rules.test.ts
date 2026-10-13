@@ -2,7 +2,7 @@
 // Run: npm test (node --test with built-in TypeScript type stripping)
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Rng, cdiv, derive, expNeed, killExp, monsterHit, monsterStats, playerHit, rdiv } from '../src/game/rules.ts';
+import { Rng, cdiv, derive, expNeed, killExp, monsterHit, monsterStats, playerHit, rdiv } from '../src/core/rules/rules.ts';
 
 test('rounding helpers', () => {
   assert.equal(rdiv(7, 2), 4);

@@ -2,8 +2,8 @@
 // bag slot, and old saves are migrated. No game data.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Inventory, UNLOCK_1B, type Item, type ItemDb } from '../src/game/items.ts';
-import { Rng } from '../src/game/rules.ts';
+import { Inventory, UNLOCK_1B, type Item, type ItemDb } from '../src/core/rules/items.ts';
+import { Rng } from '../src/core/rules/rules.ts';
 
 const fakeDb = { a: { text: [] as string[] }, model: () => 0 } as unknown as ItemDb;
 const rng = new Rng(1n, () => 0);

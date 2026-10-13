@@ -1,7 +1,7 @@
 // Original save files: XTEA against tools/grantria_save.py, slot and gamedata round trips, checksums.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { SLOT_SIZE, buildGamedata, buildOption, buildSlot, fileKind, memberFromName, parseGamedata, parseOption, parseSlot, xtea } from '../src/game/origfile.ts';
+import { SLOT_SIZE, buildGamedata, buildOption, buildSlot, fileKind, memberFromName, parseGamedata, parseOption, parseSlot, xtea } from '../src/core/save/origfile.ts';
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex');
 const sum8 = (b: Uint8Array, end: number) => b.subarray(0, end).reduce((s, x) => s + x, 0) & 0xff;

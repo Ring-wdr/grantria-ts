@@ -2,7 +2,7 @@
 // inside a group, item quick slots following their item. Needs no game data.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Inventory, type Item, type ItemDb } from '../src/game/items.ts';
+import { Inventory, type Item, type ItemDb } from '../src/core/rules/items.ts';
 
 const item = (type: number, sub: number, tag: string, grade = 0) => ({ type, sub, grade, name: tag }) as unknown as Item;
 

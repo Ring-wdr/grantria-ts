@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { blur8, smear } from '../src/game/screenfx.ts';
+import { blur8, smear } from '../src/core/world/screenfx.ts';
 
 const data = JSON.parse(readFileSync(new URL('./data/screenfx_cases.json', import.meta.url), 'utf-8'));
 

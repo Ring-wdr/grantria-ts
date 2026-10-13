@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { findPath, setPathMemory } from '../src/game/pathfind.ts';
+import { findPath, setPathMemory } from '../src/core/world/pathfind.ts';
 
 const data = JSON.parse(readFileSync(new URL('./data/path_cases.json', import.meta.url), 'utf-8'));
 

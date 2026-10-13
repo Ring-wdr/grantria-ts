@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { Player } from '../src/game/player.ts';
+import { Player } from '../src/core/combat/player.ts';
 
 const data = JSON.parse(readFileSync(new URL('./data/corner_cases.json', import.meta.url), 'utf-8'));
 

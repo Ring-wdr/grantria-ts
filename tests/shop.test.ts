@@ -1,9 +1,9 @@
-// Checks the shop formulas (src/game/shopRules.ts) against tests/fixtures/shop/*.json, which
+// Checks the shop formulas (src/core/rules/shopRules.ts) against tests/fixtures/shop/*.json, which
 // tools/grantria_shop.py produces by running the original native code of your own APK (npm run fixtures).
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { enhGold, enhRate, enhStones, itemPrice } from '../src/game/shopRules.ts';
+import { enhGold, enhRate, enhStones, itemPrice } from '../src/core/rules/shopRules.ts';
 
 const DDAT = new URL('../public/assets/d.dat', import.meta.url), FIX = new URL('./fixtures/shop/enhance.json', import.meta.url);
 const skip = !existsSync(DDAT) || !existsSync(FIX) ? 'needs npm run assets and npm run fixtures (generated from your own APK)' : false;

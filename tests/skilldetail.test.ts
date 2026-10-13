@@ -1,10 +1,10 @@
-// Skill detail texts (src/game/skillDetail.ts) against the original FUN_0004f6a8(2) run in the
+// Skill detail texts (src/core/data/skillDetail.ts) against the original FUN_0004f6a8(2) run in the
 // emulator over every class / skill / level / points / requirement state
 // (tests/fixtures/skills/detail.json from tools/grantria_skilldetail.py, npm run fixtures; not committed).
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { skillDetail } from '../src/game/skillDetail.ts';
+import { skillDetail } from '../src/core/data/skillDetail.ts';
 
 const DDAT = new URL('../public/assets/d.dat', import.meta.url), FIX = new URL('./fixtures/skills/detail.json', import.meta.url);
 const skip = !existsSync(DDAT) || !existsSync(FIX) ? 'needs npm run assets and npm run fixtures (generated from your own APK)' : false;

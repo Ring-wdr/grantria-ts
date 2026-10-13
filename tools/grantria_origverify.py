@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check web-built original save files against the game's own native code (Thumb emulator).
 
-The web port (web/src/game/origfile.ts) writes save.dat / gamedata.dat / option.dat. This tool runs the
+The web port (src/core/save/origfile.ts) writes save.dat / gamedata.dat / option.dat. This tool runs the
 original functions of libGrantria.so on the same bytes:
   FUN_00035f28 / FUN_00035f94   XTEA block encrypt / decrypt (EncryptFile / DecryptFile inner loop)
   FUN_00021508                  slot checksum (writes the member number at +0x3340, sums [0, 0x3370))

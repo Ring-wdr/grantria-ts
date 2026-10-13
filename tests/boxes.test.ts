@@ -4,9 +4,9 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { Inventory, ItemDb } from '../src/game/items.ts';
-import { boxEquipment } from '../src/game/boxes.ts';
-import { Rng } from '../src/game/rules.ts';
+import { Inventory, ItemDb } from '../src/core/rules/items.ts';
+import { boxEquipment } from '../src/core/rules/boxes.ts';
+import { Rng } from '../src/core/rules/rules.ts';
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url));
 const skip = existsSync(new URL('../public/assets/d.dat', import.meta.url)) && existsSync(new URL('./fixtures/tier2_boxes.json', import.meta.url))

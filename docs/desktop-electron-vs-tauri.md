@@ -60,7 +60,7 @@
 
 ## 6. UI 레이어와 게임패드의 플랫폼 차이 (2026-10-13 추가)
 
-UI는 WebGL 그리기에서 HTML/CSS(`src/game/domUi.ts`, `ui.css`)로 옮겼다. 필드와 월드 이펙트는 WebGL에서 20Hz 틱으로 그리고, UI 애니메이션(선택 글로우, 팝업 열림, 이동)은 CSS로 화면 주사율에 맞춰 돈다. 패키징할 때 확인할 차이는 아래와 같다.
+UI는 WebGL 그리기에서 HTML/CSS(`src/web/render/domUi.ts`, `ui.css`)로 옮겼다. 필드와 월드 이펙트는 WebGL에서 20Hz 틱으로 그리고, UI 애니메이션(선택 글로우, 팝업 열림, 이동)은 CSS로 화면 주사율에 맞춰 돈다. 패키징할 때 확인할 차이는 아래와 같다.
 
 | 항목 | Chromium (Electron, WebView2) | WebKit (WKWebView, WebKitGTK) |
 |---|---|---|

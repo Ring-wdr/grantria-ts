@@ -1,0 +1,739 @@
+// NPC shop / blacksmith screens (analysis/features/shop.md §1): function menu 0x16, list 0x15
+// (buy / sell / enhance / potion craft list), item action popup kind 1, quantity popup 0x0C,
+// confirm / progress / result popups, blacksmith combine·decompose and potion detail 0x2B,
+// enhance 0x2C and the decompose result window. Drawn on the 1.3x layer in C220 coordinates as
+// declarative views (view.ts, css/shop.css); item icons stay the original sprites.
+// The dark merchant (kind 3) sells its night stock at price × 10. The quantity popup's touch areas
+// (FUN_0004690c) are its five buttons; the -10 % buy text flag DAT_003d1b09 is buff slot 25 (청명의 비약).
+import '../styles/shop.css';
+import type { FieldScene } from './fieldScene';
+import { AVK } from '../input/input';
+import type { Item } from '../../core/rules/items';
+import { Popup } from './popup';
+import type { GameContext } from './scene';
+import {
+  auxNeeded, buyCost, combine, combineNeeds, countOf, craftPotion, decompose, decomposeCost, enhBonus,
+  enhGold, enhRate, enhStones, enhance, genStock, haveNeeds, potionNeeds, priceOf, sellValue, shopRegion,
+  shownBuyPrice, shownSellPrice, darkGroup, type Need,
+} from '../../core/rules/shopRules';
+import { ActionPopup, drawItemDetail } from './tabs';
+import type { Ui } from '../render/ui';
+import { button, gt, h, padBadge, slot, sprite, win, type KeyAct, type ScrollRef, type VChild, type VNode } from '../render/view';
+import { platform } from '../../core/platform';
+
+/** URL of an image under assets/images (resolved per call: the platform is installed at boot) */
+const imageUrl = (name: string) => platform().assets.url(`images/${name}.png`);
+const YELLOW565 = 0xffe0;
+const GREY565 = 0x9cf3;
+/** menu table d.dat 0x3F81E4 (action v × kind): which actions each shop offers */
+const MENU: number[][] = [[0, 1, 7], [0, 1, 3, 7], [2, 3, 4, 7], [0, 7]];
+
+/** josa codes (text-rendering.md §0.6): |[ 는/은, |] 가/이, |{ 를/을, |} 로/으로, |( 와/과 */
+export function josa(s: string): string {
+  return s.replace(/\|([[\]{}(])/g, (_m, c: string, off: number) => {
+    let i = off - 1;
+    while (i >= 1 && s[i - 1] === '|') i -= 2;
+    const ch = s.charCodeAt(i);
+    const hangul = ch >= 0xac00 && ch <= 0xd7a3;
+    const jong = hangul ? (ch - 0xac00) % 28 : 1;
+    const has = jong !== 0;
+    switch (c) {
+      case '[': return has ? '은' : '는';
+      case ']': return has ? '이' : '가';
+      case '{': return has ? '을' : '를';
+      case '}': return has && jong !== 8 ? '으로' : '로';
+      default: return has ? '과' : '와';
+    }
+  });
+}
+
+type Screen = 'menu' | 'list' | 'craft' | 'enhance';
+
+export class ShopScreen {
+  private screen: Screen = 'menu';
+  private menuCur = 0;
+  private action = 0;
+  private t = 0;
+  /** list 0x15: stock (buy / craft list) or the inventory (sell / enhance) */
+  private stock: Item[] = [];
+  private bag = 0;
+  private focus: 0 | 1 = 0;
+  private sel = 0;
+  private actionPopup: ActionPopup | null = null;
+  private detail: Item | null = null;
+  private qty = 0;
+  private qtyMax = 0;
+  private qtyOpen = false;
+  private popup: { p: Popup; yes?: () => void; ok?: () => void; no?: () => void } | null = null;
+  private progress: { p: Popup; n: number; run: () => void } | null = null;
+  /** 0x2B: combine (recipes), decompose (equipment) or the potion detail */
+  private c2b = { list: [] as number[], cur: 0, focus: 0 as 0 | 1, scroll: { y: 0 } as ScrollRef, potion: -1 };
+  /** 0x2C */
+  private enh = { idx: 0, focus: 0 as 0 | 1, aux: false, protect: false };
+  private result: { gains: [number, number, number][] } | null = null;
+
+  /** opened from the inventory (returnState 0x1E, shop.md §2.9): enhance / decompose / combine one item */
+  readonly fromInv: 'enhance' | 'decompose' | 'combine' | null;
+  private closed = false;
+
+  constructor(private ctx: GameContext, private fs: FieldScene, readonly kind: number,
+    inv?: { mode: 'enhance' | 'decompose' | 'combine'; idx: number }) {
+    this.action = kind === 2 ? 2 : 0;
+    this.fromInv = inv?.mode ?? null;
+    if (inv?.mode === 'enhance') { this.action = 2; this.enh = { idx: inv.idx, focus: 0, aux: false, protect: false }; this.screen = 'enhance'; }
+    else if (inv?.mode === 'combine') { this.action = 3; this.screen = 'craft'; this.build2B(); this.c2b.cur = Math.max(0, this.c2b.list.indexOf(inv.idx)); }
+    else if (inv?.mode === 'decompose') { this.action = 4; this.startInvDecompose(inv.idx); }
+    void ctx.ui13.preload(['t', 'c', 'touch', 'sIcon', 'i0', 'i1', 'i2', 'i3']);
+  }
+
+  private get a() { return this.ctx.assets; }
+  private text(id: number): string { return this.a.text[id] ?? ''; }
+  private verb(action = this.action): string { return this.kind === 1 && action === 3 ? this.text(0x1a37) : this.text(0x17b + action); }
+  private get inv() { return this.fs.inv; }
+  private get region(): number { return shopRegion(this.fs.field.map.header.zone, this.fs.field.mapId); }
+  private get bags(): number { return this.action === 1 || this.action === 2 ? 3 : Math.max(1, Math.ceil(this.stock.length / 16)); }
+  private get idx(): number { return this.bag * 16 + this.sel; }
+  private listItem(): Item | undefined { return this.action === 1 || this.action === 2 ? this.inv.items[this.idx] : this.stock[this.idx]; }
+
+  private msg(id: number, body?: string, ok?: () => void): void {
+    this.popup = { p: new Popup(this.ctx, id, 0, body !== undefined ? () => josa(body) : undefined), ok };
+  }
+  private ask(id: number, body: string, yes: () => void): void {
+    this.popup = { p: new Popup(this.ctx, id, 0, () => josa(body)), yes };
+  }
+  private run(id: number, f: () => void): void { this.progress = { p: new Popup(this.ctx, id), n: 0, run: f }; }
+
+  /** inventory decompose: popup 0x12, no fee, result window, back to the inventory */
+  private startInvDecompose(idx: number): void {
+    const it = this.inv.items[idx];
+    this.ask(0x12, ` ${this.verb(4)}하시겠습니까?`, () => this.run(0x3b, () => {
+      const g = decompose(this.fs.db, this.inv, idx, this.fs.rng, false);
+      if (!g) { this.msg(0x7b, undefined, () => { this.closed = true; }); return; }
+      this.fs.achieve({ k: 'dismantle' });
+      this.fs.recompute(); this.fs.autosave();
+      this.result = { gains: g };
+    }));
+    this.popup!.no = () => { this.closed = true; };
+    void it;
+  }
+
+  /** 'close' when the player leaves the shop */
+  update(presses: number[]): 'close' | null {
+    if (this.closed) return 'close';
+    this.t++;
+    if (this.progress) {                                   // "제작중..." etc.: 20 frames, then the action
+      if (++this.progress.n > 0x13) { const r = this.progress.run; this.progress = null; r(); }
+      return null;
+    }
+    if (this.popup) {
+      const r = this.popup.p.handle(presses);
+      if (r) {
+        const { yes, ok, no } = this.popup;
+        this.popup = null;
+        if (r === 'yes') yes?.(); else if (r === 'ok') ok?.();
+        if (r === 'no') { this.qty = 0; no?.(); }
+      }
+      return null;
+    }
+    if (this.qtyOpen) { this.qtyKeys(presses); return null; }
+    if (this.result) { if (presses.includes(AVK.OK) || presses.includes(AVK.CLR)) { this.result = null; if (this.fromInv) return 'close'; this.build2B(); } return null; }
+    if (this.detail) { if (presses.includes(AVK.OK) || presses.includes(AVK.CLR)) this.detail = null; return null; }
+    if (this.actionPopup) {
+      const r = this.actionPopup.handle(presses);
+      if (r !== null) { this.actionPopup = null; if (r) this.runAction(r); }
+      return null;
+    }
+    switch (this.screen) {
+      case 'menu': return this.menuKeys(presses);
+      case 'list': this.listKeys(presses); break;
+      case 'craft': this.craftKeys(presses); break;
+      case 'enhance': this.enhanceKeys(presses); break;
+    }
+    return null;
+  }
+
+  // ---- 0x16 ----
+  private menuKeys(presses: number[]): 'close' | null {
+    const menu = MENU[this.kind];
+    for (const k of presses) {
+      if (k === AVK.UP || k === AVK.DOWN) {
+        this.menuCur = (this.menuCur + (k === AVK.DOWN ? 1 : menu.length - 1)) % menu.length;
+        this.action = menu[this.menuCur];
+      } else if (k === AVK.CLR || (k === AVK.OK && this.action === 7)) return 'close';
+      else if (k === AVK.OK) this.enter();
+    }
+    return null;
+  }
+
+  private enter(): void {
+    this.bag = 0; this.sel = 0; this.focus = 0;
+    const rng = this.fs.rng, db = this.fs.db;
+    switch (this.action) {
+      case 0:
+        if (this.kind === 3) {                               // dark merchant: the 4 slots of this map
+          const g = darkGroup(this.fs.field.mapId);
+          this.stock = g < 0 ? [] : this.fs.darkStock.slice(g * 4, g * 4 + 4).map((x) => x ?? (null as unknown as Item));
+        } else this.stock = genStock(db, rng, this.kind, this.region);
+        this.screen = 'list';
+        break;
+      case 1: case 2: this.screen = 'list'; this.focus = 1; break;
+      case 3:
+        if (this.kind === 2) { this.c2b = { list: [], cur: 0, focus: 0, scroll: { y: 0 } as ScrollRef, potion: -1 }; this.screen = 'craft'; this.build2B(); }
+        else { this.stock = genStock(db, rng, 1, this.region, true); this.screen = 'list'; }
+        break;
+      case 4: this.c2b = { list: [], cur: 0, focus: 0, scroll: { y: 0 } as ScrollRef, potion: -1 }; this.screen = 'craft'; this.build2B(); break;
+    }
+  }
+
+  // ---- 0x15 ----
+  private listKeys(presses: number[]): void {
+    for (const k of presses) {
+      if (this.focus === 0) {
+        if (k === AVK.UP || k === AVK.DOWN) { this.bag = (this.bag + (k === AVK.DOWN ? 1 : this.bags - 1)) % this.bags; this.sel = 0; }
+        else if (k === AVK.OK) this.focus = 1;
+        else if (k === AVK.POUND && (this.action === 1 || this.action === 2)) this.inv.sortBag();   // 가방정리 FUN_0003b3a8(0)
+        else if (k === AVK.CLR) { this.screen = 'menu'; this.c2b.potion = -1; }
+      } else {
+        // sell / enhance lists start on the grid and CLR leaves them: LEFT from the first column reaches the bag column
+        if (k === AVK.LEFT && (this.action === 1 || this.action === 2) && (this.sel & 3) === 0) this.focus = 0;
+        else if (k === AVK.LEFT && this.sel > 0) this.sel--;
+        else if (k === AVK.RIGHT && this.sel < 15) this.sel++;
+        else if (k === AVK.UP && this.sel >= 4) this.sel -= 4;
+        else if (k === AVK.DOWN) this.sel = Math.min(this.sel + 4, 15);
+        else if (k === AVK.CLR) { if (this.action === 1 || this.action === 2) this.screen = 'menu'; else this.focus = 0; }
+        else if (k === AVK.OK) this.pick();
+        else if (k === AVK.POUND && (this.action === 1 || this.action === 2)) this.inv.sortBag();
+      }
+    }
+  }
+
+  private pick(): void {
+    const it = this.listItem();
+    if (!it) return;
+    if (this.action === 3 && this.kind === 1) {              // potion craft detail (0x2B)
+      this.c2b = { list: [], cur: 0, focus: 0, scroll: { y: 0 } as ScrollRef, potion: it.sub };
+      this.screen = 'craft';
+      return;
+    }
+    if (this.action === 2 && it.type >= 0x10) return;
+    if (this.action === 2 && it.type === 0x0f) return;        // accessories: no popup
+    const e = [9];
+    if (this.action !== 1 || it.type !== 0x1b) e.push(10 + this.action);
+    e.push(6);
+    const col = this.sel % 4, row = this.sel >> 2;
+    this.actionPopup = new ActionPopup(this.ctx, e, col > 1 ? 'left' : 'right', row > 1);
+  }
+
+  private runAction(v: number): void {
+    const it = this.listItem();
+    if (!it) return;
+    if (v === 9) { this.detail = it; return; }
+    const stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
+    if (v === 10) {                                          // buy
+      if (it.type === 0x18 && countOf(this.inv, 0x18, it.sub) > 0) { this.msg(0x56); return; }
+      if (stack && this.kind !== 3) this.openQty(9999); else { this.qty = 1; this.confirmBuy(it); }
+    } else if (v === 11) {                                   // sell
+      if (stack) this.openQty(it.count); else { this.qty = 1; this.confirmSell(it); }
+    } else if (v === 12) {                                   // enhance -> 0x2C
+      this.enh = { idx: this.idx, focus: 0, aux: false, protect: false };
+      this.screen = 'enhance';
+    }
+  }
+
+  // ---- quantity popup 0x0C ----
+  private openQty(max: number): void { this.qty = 0; this.qtyMax = max; this.qtyOpen = true; }
+  private qtyKeys(presses: number[]): void {
+    const it = this.listItem();
+    for (const k of presses) {
+      if (k === AVK.RIGHT) this.qty = (this.qty + 1) % (this.qtyMax + 1);
+      else if (k === AVK.LEFT) this.qty = (this.qty + this.qtyMax) % (this.qtyMax + 1);
+      else if (k === AVK.UP) this.qty = Math.min(this.qty + 100, this.qtyMax);
+      else if (k === AVK.DOWN) this.qty = this.qty < 100 ? 0 : this.qty - 100;
+      else if (k === AVK.CLR) { this.qty = 0; this.qtyOpen = false; }
+      else if (k === AVK.OK && it) {
+        if (this.qty === 0) { this.msg(0x0d); return; }
+        this.qtyOpen = false;
+        if (this.action === 0) this.confirmBuy(it);
+        else if (it.count < this.qty) this.msg(0x58);
+        else this.confirmSell(it);
+        return;
+      }
+    }
+  }
+
+  // ---- buy / sell (FUN_0004e6d8 -> FUN_0003f9ec) ----
+  private fail(code: number, it: Item, n = 1): void {
+    const ids = [0x1a1, 0x1a2, 0x1a3, 0x1a4, 0x1a5, 0x1a6, 0x1a7, 0x1a8];
+    let s = this.text(ids[code] ?? 0x1a1).replace('%s', code >= 5 ? it.name : this.verb()).replace('%d', String(n));
+    if (code === 7) s = this.text(0x1a8).replace('%s', it.name).replace('%s', this.verb());
+    this.msg(0x18, s);
+  }
+
+  /** FUN_0004e6d8 for buy / sell / enhance / decompose: 8 = pass, else the failure code */
+  private precheck(action: number, it: Item): number {
+    const inv = this.inv, db = this.fs.db;
+    if (action === 0) {
+      const mul = it.type < 0x10 ? 10 : it.type === 0x19 ? 20 : 1;
+      if (inv.gold < priceOf(this.a, it) * Math.max(this.qty, 1) * mul) return 0;
+      const stack = db.stackable(it.type, it.sub) && it.type !== 0x18;
+      const have = inv.items.find((x) => x.type === it.type && x.sub === it.sub && x.grade === it.grade);
+      if (!stack || !have) { if (inv.items.length >= inv.cap) return 2; }
+      if (stack && have && have.count + this.qty > 9999) return 5;
+    }
+    if (action === 2) { if (inv.gold < enhGold(this.a, it)) return 0; if (it.enh >= 20) return 6; }
+    if (action === 4) { if (inv.gold < decomposeCost(it)) return 0; if (inv.items.length + 2 >= inv.cap) return 2; if (it.type >= 0x10) return 7; }
+    if (action === 1 && (it.type === 0x1a || it.type === 0x1b || it.type === 0x1d)) return 7;
+    return 8;
+  }
+
+  /** FUN_0004d18c: unit price in the buy text (kind 3 × 10); DAT_003d1b09 is the active flag of buff slot 25
+   *  (청명의 비약), which takes 10 % off the shown price only — the charge stays the same (original) */
+  private shownUnit(it: Item): number {
+    let unit = priceOf(this.a, it) * (this.kind === 3 ? 10 : 1);
+    if (this.fs.buffs.isOn(25)) unit += Math.trunc(unit / -10);
+    return unit;
+  }
+
+  private confirmBuy(it: Item): void {
+    const stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
+    const verb = `${this.verb()}${this.text(0x19f).replace(/^%s %s/, '')}`;
+    const body = stack
+      ? this.text(0x1b1).replace('%s', it.name).replace('%d', String(this.qty)).replace('%d', String(this.shownUnit(it) * this.qty)) + verb
+      : this.text(0x1b0).replace('%s', it.name).replace(/\|b$/, '|b ') + verb;
+    this.ask(0x0e, body, () => {
+      const c = this.precheck(0, it);
+      if (c !== 8) { this.fail(c, it, 1); return; }
+      this.buy(it);
+    });
+  }
+
+  private buy(it: Item): void {
+    const inv = this.inv, rng = this.fs.rng, cost = this.kind === 3 ? priceOf(this.a, it) * 10 : buyCost(this.a, it, this.qty);
+    let ok: boolean;
+    if (it.type < 0x10) {
+      const copy: Item = { ...it, options: it.options.map((o) => [...o] as [number, number]), sockets: [...it.sockets] };
+      ok = inv.gain(it.type, it.sub, it.grade, 1, rng, copy);
+    } else {
+      const n = it.type === 0x18 ? 20 : this.qty;
+      ok = inv.gain(it.type, it.sub, it.grade, n, rng);
+    }
+    if (!ok) { this.msg(0x6a, this.text(0x507)); return; }
+    inv.gold = cost < inv.gold ? inv.gold - cost : 0;
+    if (this.kind === 3) {                                   // sold out: the slot is emptied
+      const g = darkGroup(this.fs.field.mapId), j = this.stock.indexOf(it);
+      if (g >= 0 && j >= 0) { this.fs.darkStock[g * 4 + j] = null; this.stock[j] = null as unknown as Item; }
+    }
+    this.qty = 0;
+    this.fs.quests.onItems();
+    if (this.kind !== 3 && it.type < 0x10 && (it.type === 0x0f || it.type % 3 === this.fs.model.cls)) {
+      this.ask(0x14, this.text(0x1a0).replace('%s', this.verb()), () => {
+        const i = inv.items.length - 1;
+        if (inv.usable(inv.items[i], this.fs.model.level, this.fs.model.cls)) { inv.equipFrom(i); this.fs.recompute(); }
+      });
+    }
+  }
+
+  private confirmSell(it: Item): void {
+    const stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
+    const verb = `${this.verb()}${this.text(0x19f).replace(/^%s %s/, '')}`;
+    const body = stack
+      ? this.text(0x1b1).replace('%s', it.name).replace('%d', String(this.qty)).replace('%d', String(Math.trunc(priceOf(this.a, it) / 5) * this.qty)) + verb
+      : this.text(0x1b0).replace('%s', it.name).replace(/\|b$/, '|b ') + verb;
+    const idx = this.idx;
+    this.ask(0x0f, body, () => {
+      const c = this.precheck(1, it);
+      if (c !== 8) { this.fail(c, it); return; }
+      const inv = this.inv, v = sellValue(this.fs.db, it, this.qty);
+      inv.gain(0x1c, v, 0, 1, this.fs.rng);
+      if (it.type >= 0x10 && it.type !== 0x18 && it.count - this.qty > 0) it.count -= this.qty; else inv.remove(idx);
+      this.qty = 0;
+      this.fs.quests.onItems();
+      this.fs.recompute();
+    });
+  }
+
+  // ---- 0x2C enhance ----
+  private enhanceKeys(presses: number[]): void {
+    const it = this.inv.items[this.enh.idx];
+    if (!it) { this.screen = 'list'; return; }
+    const N = enhStones(this.a, it), ok = it.enh < 20 && (this.fromInv === 'enhance' || countOf(this.inv, 0x16, 0) >= N);
+    if (!ok) this.enh.focus = 1;
+    for (const k of presses) {
+      if (k === AVK.LEFT || k === AVK.RIGHT) this.enh.focus = ok ? ((this.enh.focus ^ 1) as 0 | 1) : 1;
+      else if (k === AVK.STAR) {
+        if (this.enh.aux) this.enh.aux = false;
+        else if (countOf(this.inv, 0x16, 1) >= auxNeeded(N)) this.ask(0x3c, this.text(0x9ef) + '|{ 추가 하시겠습니까?', () => { this.enh.aux = true; });
+      } else if (k === AVK.POUND) {
+        if (this.enh.protect) this.enh.protect = false;
+        else if (countOf(this.inv, 0x1b, 0) > 0) this.ask(0x3c, this.text(0xa0c) + '|{ 추가 하시겠습니까?', () => { this.enh.protect = true; });
+        else this.msg(0x46, this.text(0xa0c) + '|] 없습니다.');
+      } else if (k === AVK.CLR || (k === AVK.OK && this.enh.focus === 1)) { if (this.fromInv) this.closed = true; else this.screen = 'list'; }
+      else if (k === AVK.OK) {
+        const c = this.precheck(2, it);
+        if (c !== 8) { this.fail(c, it); return; }
+        const body = this.text(0x1af).replace('%s', `${it.name}|{ ${this.verb(2)}하시겠습니까?`).replace('%s', this.verb(2));
+        this.ask(0x10, body, () => this.run(0x3d, () => {
+          const r = enhance(this.fs.db, this.inv, it, this.fs.rng, this.enh.aux, this.enh.protect, this.fromInv === 'enhance');
+          this.fs.achieve({ k: 'enhanceTry' });
+          if (r.ok) this.fs.achieve({ k: 'enhanceOk', enh: it.enh });
+          this.enh.aux = this.enh.protect = false;
+          this.fs.recompute();
+          this.fs.autosave();
+          const after = () => { if (this.fromInv) this.closed = true; else this.screen = 'list'; };
+          this.msg(r.ok ? 0x2f : 0x30, undefined, after);
+          // type 10 layout (FUN_0005f948 case 10): item cell (41,65), name, red "파괴되었습니다." when destroyed
+          const shown = { ...it }, destroyed = !r.ok && r.destroyed;
+          // the cell, then the name (wraps) and the red line beside it, above the body text
+          this.popup!.p.content = () => h('div.v-row.v-center.shop-enh-res', null,
+            this.cell(shown, { plain: true }),
+            h('div.v-col.shop-enh-res-text', null,
+              gt(shown.name),
+              destroyed && gt(this.text(0x1a29), { pen: 0xf800 })));
+        }));
+      }
+    }
+  }
+
+  // ---- 0x2B combine / decompose / potion detail ----
+  private build2B(): void {
+    if (this.screen !== 'craft' || this.c2b.potion >= 0) return;
+    const items = this.inv.items;
+    this.c2b.list = items.map((x, i) => [x, i] as const)
+      .filter(([x]) => (this.action === 3 ? x.type === 0x19 : x.type < 0x10)).map(([, i]) => i);
+    this.c2b.cur = Math.min(this.c2b.cur, Math.max(0, this.c2b.list.length - 1));
+  }
+  private c2bItem(): Item | undefined { return this.inv.items[this.c2b.list[this.c2b.cur]]; }
+  private c2bNeeds(): Need[] {
+    if (this.c2b.potion >= 0) return potionNeeds(this.a, this.c2b.potion);
+    const it = this.c2bItem();
+    return it && this.action === 3 ? combineNeeds(this.a, it) : [];
+  }
+  private c2bOk(): boolean {
+    if (this.c2b.potion >= 0 || this.action === 3) return this.c2b.potion >= 0 || this.c2bItem() ? haveNeeds(this.inv, this.c2bNeeds()) : false;
+    return !!this.c2bItem();
+  }
+
+  private craftKeys(presses: number[]): void {
+    const ok = this.c2bOk();
+    if (!ok) this.c2b.focus = 1;
+    const back = () => {
+      if (this.c2b.potion >= 0) { this.c2b.potion = -1; this.screen = 'list'; } else if (this.fromInv) this.closed = true; else this.screen = 'menu';
+    };
+    for (const k of presses) {
+      if ((k === AVK.K1 || k === AVK.K3) && this.c2b.potion < 0) {
+        const n = this.c2b.list.length;
+        if (n) this.c2b.cur = (this.c2b.cur + (k === AVK.K3 ? 1 : n - 1)) % n;
+        this.c2b.scroll.y = 0;
+      } else if (k === AVK.LEFT || k === AVK.RIGHT) this.c2b.focus = ok ? ((this.c2b.focus ^ 1) as 0 | 1) : 1;
+      else if (k === AVK.UP) this.c2b.scroll.y = Math.max(0, this.c2b.scroll.y - 12);
+      else if (k === AVK.DOWN) this.c2b.scroll.y += 12;                 // the browser clamps at the end
+      else if (k === AVK.CLR || (k === AVK.OK && this.c2b.focus === 1)) back();
+      else if (k === AVK.OK) this.craftRun();
+    }
+  }
+
+  private craftRun(): void {
+    const inv = this.inv, db = this.fs.db, rng = this.fs.rng;
+    if (this.c2b.potion >= 0) {                              // potion crafting
+      if (!this.c2bOk()) { this.msg(inv.items.length < inv.cap ? 0x53 : 0x52, this.text(0x1a2).replace('%s', this.verb())); return; }
+      const sub = this.c2b.potion;
+      this.ask(0x11, ` ${this.verb()}하시겠습니까?`, () => this.run(0x39, () => {
+        const r = craftPotion(db, inv, sub, rng);
+        if (r === 'full') this.msg(0x7b);
+        else if (r === 'ok') { this.fs.achieve({ k: 'craft' }); this.msg(0x3a, `${db.create(0x11, sub, 0, rng).name} |b제작을 완료하였습니다.`); this.fs.autosave(); }
+      }));
+      return;
+    }
+    const it = this.c2bItem();
+    if (!it) return;
+    if (this.action === 3) {                                 // combine
+      if (!this.c2bOk()) { this.msg(inv.items.length < inv.cap ? 0x53 : 0x52, this.text(0x1a2).replace('%s', this.verb())); return; }
+      if (inv.items.length >= inv.cap) { this.msg(0x52); return; }
+      const idx = this.c2b.list[this.c2b.cur];
+      this.ask(0x11, ` ${this.verb()}하시겠습니까?`, () => this.run(0x39, () => {
+        const made = combine(db, inv, idx, rng);
+        this.build2B();
+        this.fs.autosave();
+        if (made) { this.fs.achieve({ k: 'combine' }); this.msg(0x3a, `${made.name} |b제작을 완료하였습니다.`); }
+        else this.fail(1, it);
+      }));
+      return;
+    }
+    const c = this.precheck(4, it);                          // decompose
+    if (c !== 8) { this.fail(c, it, 3); return; }
+    const idx = this.c2b.list[this.c2b.cur];
+    const body = this.text(0x1b2).replace('%s', it.name).replace('%d', String(decomposeCost(it))) + ` ${this.verb(4)}하시겠습니까?`;
+    this.ask(0x12, body, () => this.run(0x3b, () => {
+      const g = decompose(db, inv, idx, rng, true);
+      if (!g) { this.msg(0x7b); return; }
+      this.fs.achieve({ k: 'dismantle' });
+      this.fs.recompute();
+      this.fs.autosave();
+      this.result = { gains: g };
+    }));
+  }
+
+  // ---------------- drawing ----------------
+  drawBackground(u: Ui): void { u.alpha = 20; u.fill(0, 0, 480, 320, 0); u.alpha = 32; }
+
+  drawOverlay(): void {
+    const u = this.ctx.ui13;
+    u.pushCenter220();
+    if (this.fromInv === 'decompose') { /* popups / result only */ }
+    else if (this.detail) {                                     // the window stays, the detail covers it
+      u.view('shop', 0, 0, 220, 220, this.frame(null, null));
+      drawItemDetail(u, this.fs, this.detail);
+      u.hit(-200, -200, 700, 700, () => [AVK.OK]);
+    } else {
+      const body = this.screen === 'menu' ? this.menuView() : this.screen === 'list' ? this.listView()
+        : this.screen === 'craft' ? this.craftView() : this.enhanceView();
+      u.view('shop', 0, 0, 220, 220, body ?? this.frame(null, null));
+    }
+    u.pop();
+    u.closeButton(26);
+    if (this.actionPopup) this.actionPopup.draw(u);
+    if (this.qtyOpen) u.view('shopQty', 0, 0, 480, 320, this.qtyView());
+    if (this.result) u.view('shopResult', 0, 0, 480, 320, this.resultView());
+    (this.progress?.p ?? this.popup?.p)?.draw();
+  }
+
+  // ---- view helpers ----
+
+  /** an overlay (action popup, quantity, result, popups) owns the input: the screen below is inert */
+  private get covered(): boolean {
+    return !!(this.actionPopup || this.qtyOpen || this.result || this.popup || this.progress);
+  }
+
+  /**
+   * The shop frame inside the 220 box: the name / price bar above the window (roundFill 4,1,211,19
+   * at alpha 16) and the body inside the window (28..216).
+   */
+  private frame(head: VChild, side: VChild, ...body: VChild[]): VNode {
+    return h('div.v-fill.shop', { cls: this.covered && 'shop-inert' },
+      h('div.v-row.v-box.soft.shop-head', { cls: !(head || side) && 'empty' }, h('div.v-grow.shop-head-name', null, head), side),
+      win('.v-col.shop-window', null, h('div.v-col.shop-body', null, ...body), slot('tab-over')));
+  }
+
+  /** gold(v, x, y) FUN_0004c550: the coin sprite, then the amount */
+  private gold(v: number, cls = ''): VNode {
+    return h('span.v-row.shop-gold', { cls }, sprite('t', 38, 24, 12, 12), h('span.shop-num', null, v.toLocaleString('en-US')));
+  }
+
+  /** item icon (16x16 original art); `tint` = the red tint 12 of unusable items (FUN_0003bcf0) */
+  private icon(type: number, sub: number, iconId?: number, tint = false): VNode {
+    const db = this.fs.db, r = db.iconRect(iconId ?? db.icon(type, sub));
+    return sprite(r.image, r.sx, r.sy, 16, 16, tint ? {
+      cls: 'shop-tint', style: `--mask:url("${imageUrl(r.image)}");--mpos:${-r.sx}px ${-r.sy}px;`,
+    } : {});
+  }
+
+  /**
+   * FUN_0007ab44 bevelled cell + FUN_0003bcf0 item cell: icon, count badge top right, red tint when
+   * unusable. `plain` = icon only (buy stock, needs, results); `equip` = the 24 px equipment cell.
+   */
+  private cell(it: Item | null | undefined, o: { plain?: boolean; equip?: boolean; sel?: boolean; dim?: boolean; on?: KeyAct; anchor?: VChild } = {}): VNode {
+    const fs = this.fs;
+    const tint = !!it && !o.plain && !fs.inv.usable(it, fs.model.level, fs.model.cls);
+    return h('div.shop-cell', {
+      cls: [o.equip && 'equip', o.sel && 'cur v-sel', o.dim && 'dim'].filter(Boolean).join(' '), on: o.on,
+    },
+    it && this.icon(it.type, it.sub, it.icon, tint),
+    it && !o.plain && fs.db.showsCount(it) && h('span.shop-count', null, String(it.count)),
+    o.anchor);
+  }
+
+  /** keycap button; off = variant 3 (unavailable) */
+  private btn(label: string, o: { sel?: boolean; off?: boolean; on?: KeyAct; glow?: boolean; cls?: string } = {}): VNode {
+    return button(gt(label), { sel: o.sel && !o.off, glow: o.glow, on: o.on, cls: ['shop-btn', o.off && 'off', o.cls].filter(Boolean).join(' ') });
+  }
+
+  /** ◀ / ▶ arrow (t.pxl 0,19 15x19) */
+  private arrow(right: boolean, on: KeyAct): VNode {
+    return h('span.shop-arrow', { on }, sprite('t', 0, 19, 15, 19, { flip: right }));
+  }
+
+  /** "REQUIRE LV n" (c-font text 0x24) and the class (0x5d + type % 3) */
+  private reqLine(level: number, type: number): VNode {
+    return h('div.v-row.shop-req', null,
+      h('span.shop-label', null, this.text(0x24) || 'REQUIRE LV'),
+      h('span.shop-num', null, String(level)),
+      h('span.v-grow'),
+      type !== 0x0f && type !== 0x10 && type < 15 && h('span.shop-label', null, this.text(0x5d + (type % 3))));
+  }
+
+  /** base value (0x1ad2 / 0x1ad4 / 0x1ad6) and the option lines (1972 + id) */
+  private statLines(it: Item): VNode {
+    return h('div.v-col.shop-stats', null,
+      gt(`${this.text(it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6)} ${it.base}`, { pen: YELLOW565 }),
+      it.options.filter(([id]) => id !== 0xff).map(([id, v]) => gt(this.text(1972 + id).replace('%d', String(v)).replace('%%', '%'))));
+  }
+
+  /** material lines: cell, name, have / need (0x1b16 when short, else 0x1a6f) */
+  private needLines(needs: Need[], withName = true): VNode {
+    const db = this.fs.db;
+    return h('div.v-col.shop-needs', null, needs.map((n) => {
+      const have = countOf(this.inv, n.type, n.sub);
+      const s = (have < n.count ? this.text(0x1b16) : this.text(0x1a6f)).replace('%d', String(have)).replace('%d', String(n.count));
+      return h('div.v-row.shop-need', { cls: have < n.count && 'short' },
+        h('div.shop-cell', null, this.icon(n.type, n.sub)),
+        withName && gt(this.a.text[0x7fc + db.model(n.type, n.sub, 0)] ?? '', { cls: 'v-grow' }),
+        gt(s, { cls: 'shop-num' }));
+    }));
+  }
+
+  // ---- screens ----
+
+  /** function menu 0x16: title, one keycap per action, the action's help line */
+  private menuView(): VNode {
+    return this.frame(gt(this.text(0x1c0 + this.kind), { pen: YELLOW565 }), null,
+      h('div.v-col.v-grow.shop-menu', null, MENU[this.kind].map((v, i) => this.btn(this.verb(v), {
+        sel: v === this.action, on: () => { if (this.action === v) return [AVK.OK]; this.menuCur = i; this.action = v; },
+      }))),
+      h('div.v-box.v-note', null, gt(this.text(this.kind === 1 && this.action === 3 ? 0x1a38 : 0x1c4 + this.action))));
+  }
+
+  /** list 0x15: bag keycaps | 4x4 item grid, gold (and the inventory count in buy mode) */
+  private listView(): VNode {
+    const inv = this.inv, sellMode = this.action === 1 || this.action === 2, cur = this.listItem();
+    const price = this.focus === 1 && cur && (this.action === 0
+      ? this.gold(this.kind === 3 ? priceOf(this.a, cur) * (cur.type < 0x10 ? 15 : 10) : shownBuyPrice(this.a, cur))
+      : this.action === 1 ? this.gold(shownSellPrice(this.a, cur)) : null);
+    const bags = Array.from({ length: Math.min(this.bags, 4) }, (_, i) => button(sprite('t', 15, 24, 16, 16), {
+      sel: i === this.bag, glow: this.focus === 0, cls: 'shop-bag',
+      on: () => { this.focus = 0; if (this.bag !== i) { this.bag = i; this.sel = 0; } },
+    }));
+    const cells = Array.from({ length: 16 }, (_, k) => {
+      const it = sellMode ? inv.items[this.bag * 16 + k] : this.stock[this.bag * 16 + k];
+      return this.cell(it, {
+        plain: !sellMode, sel: this.focus === 1 && k === this.sel, anchor: this.focus === 1 && k === this.sel && this.actionPopup?.anchor(), dim: !!it && this.action === 2 && it.type > 0x0e,
+        on: () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; },
+      });
+    });
+    return this.frame(this.focus === 1 && cur && gt(cur.name), price,
+      h('div.v-row.v-grow.shop-list', null,
+        h('div.v-col.shop-bags', null, bags,
+          !sellMode && h('div.v-box.shop-count-box', null, `${inv.items.length}/${inv.cap}`)),
+        h('div.v-box.shop-grid', null, cells)),
+      h('div.v-row.shop-foot', null,
+        h('div.v-box.v-row.shop-gold-box', null, this.gold(inv.gold)),
+        h('span.v-grow'),
+        sellMode && button([gt(this.text(0x1a1d)), padBadge(this.ctx.input, AVK.POUND, 'v-pad-corner')], { cls: 'shop-btn', on: () => [AVK.POUND] })));   // 가방정리 '#'
+  }
+
+  /** ok / cancel row of 0x2B and 0x2C: ok is variant 3 when unavailable; the glow follows focus */
+  private okCancel(ok: boolean, focus: number, label: number, setFocus: (f: 0 | 1) => void): VNode {
+    const f = ok ? focus : 1;
+    return h('div.v-row.shop-foot', null,
+      this.btn(this.text(label), { sel: f === 0, off: !ok, on: () => { if (!ok) return; setFocus(0); return [AVK.OK]; } }),
+      h('span.v-grow'),
+      this.btn(this.text(0x1a2b), { sel: f === 1, on: () => { setFocus(1); return [AVK.OK]; } }));
+  }
+
+  /** 0x2B: potion detail (§1.7), or the combine / decompose carousel with the item's details */
+  private craftView(): VNode {
+    const fs = this.fs, setFocus = (f: 0 | 1) => { this.c2b.focus = f; };
+    const foot = this.okCancel(this.c2bOk(), this.c2b.focus,
+      this.c2b.potion >= 0 ? 0x1a2a : this.action === 3 ? 0x1a33 : 0x1a34, setFocus);
+    if (this.c2b.potion >= 0) {
+      const it = fs.db.create(0x11, this.c2b.potion, 0, fs.rng);
+      return this.frame(gt(it.name), null,
+        h('div.v-box.v-row.shop-potion', null,
+          this.cell(it),
+          gt(this.text(0xa38 + fs.db.model(0x11, this.c2b.potion, 0)), { cls: 'v-grow' })),
+        h('div.v-box.v-col.v-grow.v-scroll.shop-panel', null, this.needLines(potionNeeds(this.a, this.c2b.potion))),
+        foot);
+    }
+    const it = this.c2bItem(), list = this.c2b.list;
+    const top = Math.max(0, Math.min(this.c2b.cur - 3, list.length - 4));
+    const cells = Array.from({ length: 4 }, (_, k) => {
+      const n = top + k, item = this.inv.items[list[n]];
+      return this.cell(item, {
+        equip: true, sel: n === this.c2b.cur && !!item,
+        on: item ? () => { this.c2b.cur = n; this.c2b.scroll.y = 0; } : undefined,
+      });
+    });
+    let detail: VChild;
+    if (!it) detail = h('div.v-col.v-center.v-fill', null, gt(this.text(this.action === 3 ? 0x1a31 : 0x1a32)));
+    else {
+      const innerType = this.action === 3 ? it.sub >> 4 : it.type, innerSub = this.action === 3 ? it.sub & 15 : it.sub;
+      detail = h('div.v-col.shop-scroller', null,
+        this.reqLine(this.action === 3 ? it.level : it.reqLevel, innerType),
+        gt(this.text(fs.db.descId(innerType, innerSub, 0)), { cls: 'shop-desc' }),
+        h('div.v-rule'),
+        this.action === 3 ? this.needLines(combineNeeds(this.a, it)) : this.statLines(it));
+    }
+    return this.frame(it && gt(it.name), it && this.action === 4 && this.gold(decomposeCost(it)),
+      h('div.v-row.shop-carousel', null,
+        this.arrow(false, () => [AVK.K1]),
+        h('div.v-box.v-row.v-grow.shop-strip', null, cells),
+        this.arrow(true, () => [AVK.K3])),
+      // native scroll (UP / DOWN 12 px, wheel, touch)
+      h('div.v-box.v-grow.v-scroll.shop-panel.shop-detail', { scroll: this.c2b.scroll }, detail),
+      foot);
+  }
+
+  /** enhance 0x2C: item, current -> next value, stones, aux / protect toggles, rate and fee */
+  private enhanceView(): VNode | null {
+    const it = this.inv.items[this.enh.idx];
+    if (!it) return null;
+    const a = this.a, N = enhStones(a, it), G = enhGold(a, it), aux = auxNeeded(N);
+    const have = countOf(this.inv, 0x16, 0), ok = it.enh < 20 && (this.fromInv === 'enhance' || have >= N);
+    const auxHave = countOf(this.inv, 0x16, 1), protHave = countOf(this.inv, 0x1b, 0);
+    let stat: VChild = null;
+    if (it.type < 15) {
+      const label = it.type < 3 ? '공격력' : '방어력';
+      stat = h('div.v-row.shop-enh-stat', null,
+        gt(`|b${label} |d${it.base}|b |i+ ${enhBonus(it, 0)}`),
+        h('span.shop-enh-to', null, '▶'),
+        gt(`|b${label} |d${it.base}|b |i+ ${enhBonus(it, 1)}`, { cls: 'shop-blink' }));
+    }
+    const toggle = (on: boolean, h0: number, need: number, name: number, key: number) =>
+      h('div.v-row.shop-toggle', null,
+        gt(`${this.text(name)} ${h0}/${need}`, { cls: 'v-grow', pen: on ? undefined : GREY565 }),
+        this.btn(on ? '미사용' : '사용', { sel: on, glow: false, off: !on && h0 <= 0, on: () => [key] }));
+    const rate = Math.min(100, enhRate(a, it.enh) + (this.enh.aux ? Math.trunc(enhRate(a, it.enh) / 10) : 0));
+    return this.frame(null, null,
+      h('div.v-box.v-row.shop-enh-item', null,
+        this.cell(it, { equip: true }),
+        gt(it.name, { cls: 'v-grow' })),
+      h('div.v-box.v-col.v-grow.shop-panel.shop-enh', null,
+        stat,
+        !this.fromInv && h('div.shop-enh-stones', null, gt(`${this.text(0x9ee)} ${have < N ? `|c${have}|b` : have}/${N}`)),
+        toggle(this.enh.aux, auxHave, aux, 0x9ef, AVK.STAR),
+        toggle(this.enh.protect, protHave, 1, 0xa0c, AVK.POUND),
+        h('span.v-grow'),
+        h('div.v-rule'),
+        h('div.v-row.shop-enh-rate', null,
+          gt(this.text(0x1b26).replace('%s', this.text(0x1b27)).replace('%d', String(rate)).replace('%%', '%'), { cls: 'v-grow' }),
+          this.gold(G))),
+      this.okCancel(ok, this.enh.focus, 0x1a30, (f) => { this.enh.focus = f; }));
+  }
+
+  /** quantity popup 0x0C (type 7): ◀ [+100 / count / -100] ▶ and OK; the backdrop is modal */
+  private qtyView(): VNode {
+    const step = (label: number, key: number) => h('span.shop-step', { on: () => [key] }, `${this.text(label)}100`);
+    return h('div.v-modal', { on: () => [] },
+      h('div.v-popup.v-pop-fade.v-row.shop-qty', null,
+        this.arrow(false, () => [AVK.LEFT]),
+        h('div.v-col.v-center.shop-qty-mid', null,
+          step(0x55, AVK.UP),
+          h('div.v-row.shop-qty-value', null, h('span.shop-label', null, this.text(0x52)), h('span.shop-num', null, String(this.qty).padStart(4, '0'))),
+          step(0x56, AVK.DOWN)),
+        this.arrow(true, () => [AVK.RIGHT]),
+        this.btn(this.text(0x1a00), { sel: true, on: () => [AVK.OK], cls: 'shop-qty-ok' })));
+  }
+
+  /** decompose result window FUN_0005bd10: title, gained materials ×n, OK */
+  private resultView(): VNode {
+    const db = this.fs.db;
+    return h('div.v-modal', { on: () => [AVK.OK] },
+      h('div.u-window.v-col.v-pop-grow.shop-result', null,
+        h('div.u-btn.s0.v0.shop-result-bar', null, gt(this.text(0x1a35), { pen: YELLOW565 })),
+        h('div.v-col.v-grow.shop-result-list', null, this.result!.gains.map(([t, s, n]) =>
+          h('div.v-row.shop-result-row', null,
+            h('div.shop-cell', null, this.icon(t, s)),
+            gt(this.a.text[0x7fc + db.model(t, s, 0)] ?? '', { cls: 'v-grow' }),
+            h('span.shop-num', null, `${this.text(0x1a36)} ${n}`)))),
+        h('div.v-row.v-center', null, this.btn(this.text(0x1a00), { sel: true, on: () => [AVK.OK] }))));
+  }
+}

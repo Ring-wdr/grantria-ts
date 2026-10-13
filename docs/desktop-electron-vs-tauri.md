@@ -57,3 +57,17 @@
 
 - 웹 서비스 배포(호스팅, CDN)는 하지 않는다.
 - 실제 패키징 스크립트, 서명, 업데이트 서버 구성은 이 문서 범위 밖이다.
+
+## 6. UI 레이어와 게임패드의 플랫폼 차이 (2026-10-13 추가)
+
+UI는 WebGL 그리기에서 HTML/CSS(`src/game/domUi.ts`, `ui.css`)로 옮겼다. 필드와 월드 이펙트는 WebGL에서 20Hz 틱으로 그리고, UI 애니메이션(선택 글로우, 팝업 열림, 이동)은 CSS로 화면 주사율에 맞춰 돈다. 패키징할 때 확인할 차이는 아래와 같다.
+
+| 항목 | Chromium (Electron, WebView2) | WebKit (WKWebView, WebKitGTK) |
+|---|---|---|
+| UI 주사율 | 모니터 주사율 그대로 (120/144Hz) | 기본 60Hz 상한. macOS ProMotion은 설정이 있어야 120Hz |
+| 글꼴 | Galmuri9 번들(woff2). 모든 OS에서 같은 글리프와 폭(한글 10px, ASCII 6px = 원본 폭) | 같음. 다만 글꼴 래스터라이저가 달라 안티에일리어싱 모양이 조금 다를 수 있다 |
+| `mix-blend-mode` (원본 블렌드 모드) | 모두 지원. `plus-lighter`도 지원 | Safari 15.4+ / WebKitGTK 2.36+에서 `plus-lighter` 지원. 그 아래 버전은 add 블렌드가 normal로 보인다 |
+| `mask` (스프라이트 틴트) | 지원 | `-webkit-mask` 접두사로 지원 (둘 다 넣어 두었다) |
+| 게임패드 | 표준 매핑(PS4/PS5/Xbox) | macOS는 GameController 프레임워크를 거쳐 대체로 표준 매핑. WebKitGTK는 libmanette 없이 빌드되면 API 자체가 없다. 표준 매핑이 아닌 DualShock 4/DualSense/xpad는 `gamepad.ts`의 vendor/product 표로 맞춘다 |
+
+게임패드 배치: 아래(A/✕) 확인, 오른쪽(B/○) 취소·메뉴, 왼쪽(X/□) 1, 위(Y/△) 3, L1/LB 7, R1/RB 9, L2/LT *, R2/RT #, Select(VIEW/CREATE)·터치패드 지도, Start(MENU/OPTIONS) 메뉴, R3 저장. 왼쪽 스틱은 터치 가상 스틱과 같은 경로(속도 단계 5..8, 대각 이동)로 들어간다. 패드를 마지막으로 쓴 경우 HUD 터치 버튼 옆에 패드 종류에 맞는 버튼 표시가 나온다.

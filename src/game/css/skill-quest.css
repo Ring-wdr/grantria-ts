@@ -1,0 +1,105 @@
+/* ---- skill tab (skillTab.ts) and quest tab (questTab.ts) views, inside TAB_BODY 208x182 ---- */
+
+/* skill: sub-tab keycaps | name strip + points | tree panel | invest / quick-slot keycaps */
+.sk-tab { gap: 4px; }
+.sk-subtabs { flex: none; gap: 5px; }
+.sk-subtabs > .v-btn { flex: 1 1 0; }
+.sk-info { height: 18px; overflow: hidden; white-space: nowrap; padding: 0 6px; gap: 4px; opacity: 0.6; transition: opacity var(--tick) ease-out; }
+.sk-info.on { opacity: 1; }
+.sk-info .v-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sk-info-lv { flex: none; color: #8df1f2; }
+.sk-points { width: 54px; flex: none; }
+.sk-actions { flex: none; justify-content: space-between; }
+.sk-actions > .v-btn { width: 62px; }
+.sk-off { opacity: 0.45; filter: grayscale(0.6); }
+
+/* tree panel (roundFill 8,77,203,115) */
+.sk-tree { background: linear-gradient(#0d1424, #000 70%); box-shadow: inset 0 0 0 1px #29385a; }
+.sk-active { padding: 6px 4px; align-items: stretch; }
+.sk-branch { flex: 1 1 0; align-items: flex-start; padding-left: 9px; }
+/* connector between two cells of a branch, under the icon centre; lit once the upper skill is 5+ */
+.sk-link {
+  flex: 1 1 auto;
+  min-height: 4px;
+  width: 2px;
+  margin-left: 11px;
+  background: #4b5a78;
+  transition: background calc(var(--tick) * 4) ease-out, box-shadow calc(var(--tick) * 4) ease-out;
+}
+.sk-link.on { background: #8df1f2; box-shadow: 0 0 3px #429ac6; }
+.sk-grid { display: grid; align-content: space-evenly; justify-items: center; padding: 4px 2px; }
+.sk-passive { grid-template-columns: repeat(3, 1fr); }
+.sk-passive > :nth-child(7) { grid-column: 2; }
+.sk-traits { grid-template-columns: repeat(4, 1fr); }
+
+.sk-cell { flex: none; gap: 1px; align-items: flex-end; transition: opacity var(--tick) ease-out; }
+.sk-cell.off { opacity: 0.5; }
+.sk-icon {
+  position: relative;
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px #29385a;
+  transition: transform var(--tick) ease-out, box-shadow var(--tick) ease-out;
+}
+.sk-cell.cur .sk-icon { box-shadow: 0 0 0 1px #429ac6; }
+.sk-cell.v-hit:hover .sk-icon { transform: translateY(-1px); }
+.sk-cell.v-hit:active .sk-icon { transform: scale(0.94); }
+.sk-icon > .v-sprite { display: block; }
+.sk-lv { width: 24px; color: #ffe08a; line-height: 12px; white-space: nowrap; }
+
+/* quick-slot picker left of the window: the HUD slot pads, cursor slot tinted (FUN tint 255,255,153) */
+.sk-quick { gap: 4px; }
+.sk-qslot { position: relative; flex: none; width: 31px; height: 31px; }
+.sk-qslot > .v-sprite { position: absolute; }
+.sk-qpad { left: 0; top: 0; }
+.sk-qicon { left: 4px; top: 3px; }
+.sk-qicon.dim { opacity: 0.5; }
+.sk-qslot.cur .sk-qpad { animation: sk-tint calc(var(--tick) * 32) linear infinite; }
+@keyframes sk-tint {
+  0%, 100% { filter: none; }
+  50% { filter: sepia(0.6) saturate(2) brightness(1.35); }
+}
+
+/* quest list: six keycap rows */
+.qs-list { justify-content: space-evenly; padding: 0 6px; gap: 0; }
+.qs-row { width: 100%; padding: 0 6px; }
+.qs-row .qs-title, .qs-head .qs-title { flex: 1 1 auto; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qs-empty { opacity: 0.7; }
+/* MAIN / SUB / NPC labels (c-font style 1 in the original) */
+.qs-tag {
+  flex: none;
+  padding: 0 3px;
+  line-height: 11px;
+  color: #ffe08a;
+  border: 1px solid rgba(255, 224, 138, 0.55);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* quest detail window (0,23,220,196) */
+.qs-detail { padding: 6px 8px; gap: 4px; }
+.qs-head { flex: none; height: 22px; gap: 4px; padding: 0 6px; background: #111; border-radius: 3px; }
+.qs-scroll { position: relative; flex: 1 1 auto; min-height: 0; }
+.qs-body { padding: 0 4px; text-align: left; }
+.qs-giver { flex: none; height: 15px; gap: 6px; }
+.qs-rule { flex: none; height: 1px; margin: 4px 0; background: #666; }
+.qs-lines { padding-left: 13px; }
+.qs-bar { flex: none; height: 28px; padding: 0 10px; justify-content: space-between; background: #171d24; border-radius: 3px; }
+.qs-bar.single { justify-content: center; }
+.qs-bar > .v-btn { width: 62px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-qslot.cur .sk-qpad { animation: none; filter: brightness(1.2); }
+}
+
+/* skill detail MENUPOP 2 */
+.sk-detail { padding: 4px; gap: 4px; }
+.sk-detail-head { flex: none; gap: 6px; padding: 3px 6px; min-height: 30px; }
+.sk-detail-lv { flex: none; }
+.sk-detail-body { padding: 6px 8px; gap: 8px; }
+.sk-detail-next { flex: none; padding: 4px 8px; gap: 2px; min-height: 48px; }
+.sk-detail-lines { gap: 0; }
+.sk-detail-next { flex: none; align-items: flex-start; gap: 8px; padding: 4px 8px; min-height: 48px; }
+.sk-detail-label { flex: none; color: #9cd3ff; }

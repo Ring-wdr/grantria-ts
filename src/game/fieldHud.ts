@@ -4,8 +4,10 @@
 import type { Cmf } from '../assets';
 import { VIEW_H as H, VIEW_W as W } from './field';
 import { AVK, type Input } from './input';
+import { padButtonFor, padGlyph } from './gamepad';
 import { expNeed } from './rules';
-import type { Ui } from './ui';
+import type { DomUi } from './domUi';
+import { ICONS } from './touchIcons';
 
 export interface HudState {
   /** day/night clock frame of cmf_status (0x51 day) */
@@ -33,6 +35,7 @@ export type SlotView =
 /** Touch zones of the field screen (touchdata.dat state 0x10, game-flow-ui.md §5.2). */
 export const FIELD_ZONES = [
   { x: 0, y: 0, w: 40, h: 40, key: AVK.CLR },
+  { x: 194, y: 0, w: 56, h: 32, key: 10000 },                        // QUEST -> quest tab (key 10000 lights it, FUN_0004b128 idx 12)
   { x: 255, y: 0, w: 60, h: 32, key: AVK.SAVE },
   { x: 156, y: 2, w: 32, h: 32, key: -30 },
   { x: 0, y: 75, w: 80, h: 70, key: AVK.MAP },                     // minimap -> map tab                         // gate icon -> community menu
@@ -47,6 +50,15 @@ export const FIELD_ZONES = [
   { x: 346, y: 265, w: 50, h: 50, key: AVK.K3 },
   { x: 402, y: 208, w: 78, h: 110, key: AVK.OK },
 ];
+
+/** touch control centres (original sprite rects: stick ring, attack 62x60, MENU 40x39, slots 40x39) */
+const STICK = { x: 0x53, y: H - 0x4a + 1 };
+const ATTACK = { x: W - 0x4c + 31, y: H - 0x5a + 30 };
+const MENU = { x: W - 0x2e + 20, y: H - 0xe5 + 20 };
+const SLOT_X = [0xc0, 0x83, 0xb8, 0x7b, 0x72, 0x31], SLOT_Y = [0x31, 0x31, 0x67, 0x66, 0x9c, 0x9b];
+const slotCentre = (i: number): [number, number] => [W - SLOT_X[i] + 20, H - SLOT_Y[i] + 20];
+
+const escapeHtml = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** World-space combat text. */
 interface FloatText {
@@ -69,7 +81,7 @@ export class FieldHud {
   /** HUD message log (FUN_0001e6e8, 6-line queue 0x40f380): text and age */
   private messages: { text: string; age: number }[] = [];
 
-  constructor(private ui: Ui, private status: Cmf, private input: Input) {}
+  constructor(private ui: DomUi, private status: Cmf, private input: Input) {}
 
   static images = ['c', 't', 'touch', 'sIcon', 'i0', 'f', 'ec', 'oc', ...Array.from({ length: 11 }, (_, i) => `face${i}`)];
 
@@ -158,76 +170,66 @@ export class FieldHud {
     u.alpha = 32;
   }
 
-  /** FUN_0004b128 touch buttons (stick mode 1, centre (0x53, H-0x4a)). */
+  /**
+   * Touch controls (FUN_0004b128 layout, stick mode 1 centre (0x53, H-0x4a)) redrawn as CSS + SVG
+   * (ui.css .t-*): same places and touch zones, idle / pressed states as CSS transitions.
+   */
   private touchButtons(s: HudState): void {
     const u = this.ui, inp = this.input;
     const held = inp.lastHeld();
     const idx = ({ [AVK.UP]: 0, [AVK.LEFT]: 1, [AVK.DOWN]: 2, [AVK.RIGHT]: 3, [AVK.K1]: 4, [AVK.K3]: 5, [AVK.K7]: 6,
       [AVK.K9]: 7, [AVK.STAR]: 8, [AVK.POUND]: 9, [-7]: 10, [AVK.SAVE]: 11, [10000]: 12 } as Record<number, number>)[held] ?? 0xff;
-    const cx = 0x53, cy = H - 0x4a;
-    u.alpha = 16;
-    u.image('touch', 0x73, 0x2e, 0x3b, 0x3c, cx - 0x1d, cy - 0x22 + 5);   // stick ring
-    u.alpha = idx < 4 ? 32 : 16;
-    const kx = Math.max(0x28, Math.min(0x50, Math.round(inp.stick.dx) + 5 + cx - 0x17));
-    const ky = Math.max(0xcb, Math.min(0xf3, Math.round(inp.stick.dy) + 5 + cy - 0x17));
-    u.image('touch', 0x76, 0, 0x24, 0x23, kx, ky);                         // knob
-    const arrows: [[number, number], [number, number], number][] = [
-      [[cx - 0xb, cy - 0x2e - 7], [cx - 10, cy + 0x2b - 7], 0],
-      [[cx - 0x39, cy - 4 - 3], [cx + 0x23, cy - 5 - 3], 0xc],
-    ];
-    arrows.forEach(([a, b, fl], i) => {
-      u.alpha = idx === i ? 32 : 16;
-      u.image('touch', 0x9a, 0, 0x16, 0x17, a[0], a[1], fl);               // up / left
-      u.alpha = idx === i + 2 ? 32 : 16;
-      u.image('touch', 0x9a, 0x17, 0x16, 0x17, b[0], b[1], fl);            // down / right
-    });
-    u.alpha = inp.isHeld(AVK.OK) ? 32 : 16;
-    u.image('touch', 0x3f, 0x69, 0x3e, 0x3c, W - 0x4c, H - 0x5a);          // attack (sword)
-    const yo = [0x31, 0x31, 0x67, 0x66, 0x9c, 0x9b], xo = [0xc0, 0x83, 0xb8, 0x7b, 0x72, 0x31];
-    for (let i = 0; i < 6; i++) {                                          // slots 1, 3, 7, 9, *, #
-      u.alpha = idx === i + 4 ? 32 : 16;
-      const x = W - xo[i], y = H - yo[i];
-      u.image('t', 0xcc, 0x1e, 0x14, 0x27, x, y);
-      u.image('t', 0xcc, 0x1e, 0x14, 0x27, x + 0x14, y, 1);
-      const v = s.slots[i];
+    const on = (b: boolean) => (b ? ' on' : '');
+    u.alpha = 32;
+    // virtual stick: ring, four chevrons, a knob that follows the finger / pad stick (radius 22)
+    const cx = STICK.x, cy = STICK.y;
+    u.el(`t-stick${on(inp.stick.active)}`, cx - 30, cy - 30, 60, 60);
+    ([[0, -42, 0], [-43, 0, 270], [0, 42, 180], [43, 0, 90]] as const).forEach(([dx, dy, rot], i) =>
+      u.el(`t-arrow${on(idx === i)}`, cx + dx - 10, cy + dy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` } }));
+    const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 ? 22 / d : 1;
+    u.el(`t-knob${on(idx < 4)}`, cx - 15, cy - 15, 30, 30,
+      { vars: { '--kx': `${Math.round(inp.stick.dx * k)}px`, '--ky': `${Math.round(inp.stick.dy * k)}px` } });
+    // attack
+    u.el(`t-circle t-attack${on(inp.isHeld(AVK.OK))}`, ATTACK.x - 29, ATTACK.y - 29, 58, 58, { html: ICONS.sword });
+    // quick slots 1, 3, 7, 9, *, #: the skill / item icon stays the game's art inside a CSS ring
+    for (let i = 0; i < 6; i++) {
+      const [x, y] = slotCentre(i), v = s.slots[i];
+      u.group(`t-btn${on(idx === i + 4)}`, x, y, `slot${i}`);
+      u.el(`t-circle t-slot${v ? '' : ' empty'}`, x - 19, y - 19, 38, 38);
       if (v) {
-        u.alpha = idx === i + 4 ? 32 : 0x18;
         if ('skill' in v) {
           // skill icon: i3 (skill%10*24, 72) where the loader (FUN_000f9aac) pastes a 24-row band of
           // sIcon at y=72; which sIcon row is copied is not confirmed [추정: class row]
-          u.image('sIcon', (v.skill % 10) * 0x18, s.cls * 0x18, 0x18, 0x18, x + 8, y + 8);
-          if (v.cd > 0) {                                                  // FUN_00029108: shrink + grey while cooling down
-            const h = Math.trunc((v.cd * 0x18) / Math.max(1, v.maxCd));
-            u.alpha = 20;
-            u.fill(x + 8, y + 8 + 0x18 - h, 0x18, h, 0x404040);
-            u.alpha = 32;
-          }
+          u.image('sIcon', (v.skill % 10) * 0x18, s.cls * 0x18, 0x18, 0x18, x - 12, y - 12);
         } else {
-          u.image(v.icon.image, v.icon.sx, v.icon.sy, 0x10, 0x10, x + 12, y + 12);   // FUN_0003bc80 (+4,+4)
-          if (v.cd > 0) {                                                  // cooldown: grey overlay shrinking
-            const h = Math.trunc((v.cd * 0x10) / Math.max(1, v.maxCd));
-            u.alpha = 20;
-            u.fill(x + 12, y + 12 + 0x10 - h, 0x10, h, 0x404040);
-          }
-          u.alpha = 32;
-          if (v.count >= 0) u.number(v.count, x + 8 + 0x18, y + 8, 0, 2);
+          u.image(v.icon.image, v.icon.sx, v.icon.sy, 0x10, 0x10, x - 8, y - 9);   // FUN_0003bc80
+          if (v.count >= 0) u.el('t-count', x - 14, y + 5, 28, 10, { text: String(v.count) });
         }
-        u.alpha = 32;
+        // cooldown (FUN_00029108 shrinking grey): a clockwise sweep over the ring
+        if (v.cd > 0) u.el('t-cd', x - 19, y - 19, 38, 38, { vars: { '--cd': (Math.min(1, v.cd / Math.max(1, v.maxCd))).toFixed(3) } });
       }
+      u.groupEnd();
     }
-    u.alpha = held === AVK.CLR ? 32 : 16;
-    u.image('t', 0xcc, 0x1e, 0x14, 0x27, W - 0x2e, H - 0xe5);
-    u.image('t', 0xcc, 0x1e, 0x14, 0x27, W - 0x1a, H - 0xe5, 1);
-    u.cfontCenter('MENU', W - 0x1a, H - 0xd5, 0);
-    // QUEST / SAVE / SHOP: alpha 24, 32 while pressed (the original swaps the QUEST/SHOP highlight)
-    for (const [lit, sx, sy, dx] of [[12, 0, 0x76, 0xc6], [11, 0, 0x89, 0x106], [10, 0x7e, 0x6a, 0x146]]) {
-      u.alpha = idx === lit ? 32 : 0x18;
-      u.image('touch', sx, sy, 0x2c, 0x13, dx, 7);
-    }
-    u.alpha = 0x18;
-    u.button(W - 0x50, H - 0x101, 0x4c, 0x16, 3, 1);                      // coupon shop
-    u.textId(0x1a08, W - 0x2a, H - 0xfd, 'center');
-    u.alpha = 32;
+    u.el(`t-circle t-menu${on(held === AVK.CLR)}`, MENU.x - 19, MENU.y - 19, 38, 38, { html: ICONS.menu });
+    // QUEST / SAVE / SHOP (the original swaps the QUEST/SHOP highlight) and the coupon shop
+    for (const [lit, icon, label, x] of [[12, 'quest', 'QUEST', 194], [11, 'save', 'SAVE', 258], [10, 'shop', 'SHOP', 322]] as const)
+      u.el(`t-pill${on(idx === lit)}`, x, 6, 52, 20, { html: `${ICONS[icon]}<span>${label}</span>` });
+    u.el('t-pill t-coupon', W - 0x50, H - 0x102, 0x4c, 22, { html: `${ICONS.coupon}<span>${escapeHtml(u.textOf(0x1a08))}</span>` });
+    if (inp.device === 'pad') this.padHints();
+  }
+
+  /** gamepad glyphs on the touch buttons they press (PS / Xbox symbols follow the pad in use) */
+  private padHints(): void {
+    const u = this.ui, kind = this.input.padKind;
+    const hint = (key: number, x: number, y: number) => {
+      const b = padButtonFor(key);
+      if (b) u.padHint(padGlyph(kind, b), kind, b, x, y);
+    };
+    hint(AVK.OK, ATTACK.x + 16, ATTACK.y + 17);
+    [AVK.K1, AVK.K3, AVK.K7, AVK.K9, AVK.STAR, AVK.POUND].forEach((k, i) => { const [x, y] = slotCentre(i); hint(k, x + 9, y + 9); });
+    hint(AVK.CLR, MENU.x + 9, MENU.y + 9);
+    hint(AVK.SAVE, 258 + 44, 6 + 12);
+    hint(AVK.MAP, 4, 47);                                                    // minimap -> map tab
   }
 
   /** Damage numbers (kind 2 style 9, kind 1 red style 6), MISS / CRITICAL from t.pxl, labels. */

@@ -13,6 +13,8 @@ import { idiv, rdiv, type Rng } from './rules';
 import type { GameContext } from './scene';
 import { consume, countOf } from './shopRules';
 import type { Ui } from './ui';
+import { button, gt, h, sprite, type VNode } from './view';
+import './css/screens-misc.css';
 
 /** per dungeon: normal monster pool, boss type, density (monsters per walkable cell of the zone's maps),
  *  recommended level (FUN_0007390c) — tools/grantria_dimension.py */
@@ -200,33 +202,41 @@ export class DimensionScreen {
     this.enter = this.cur;
   }
 
+  /** FUN_00026850 select (name, 3x3 dungeon icons, recommended level) / FUN_00059984 entry
+   *  (icon, name, recommended level, ticket message, 입 장 / 취 소) as a view in the tab body */
   draw(u: Ui): void {
+    u.mount('tab', 'dimension', this.confirm ? this.confirmView() : this.selectView());
+  }
+
+  private icon(k: number): VNode {
+    return sprite('dungeon', (k & 3) * 30, (k >> 2) * 30, 30, 30);
+  }
+
+  private selectView(): VNode {
     const t = this.ctx.assets.text, i = this.cur;
-    u.roundFill(8, 30, 204, 160, 0, 1);
-    if (!this.confirm) {
-      u.string(t[0x4d8 + i] ?? '', 110, 36, 'center', { pen: 0xffe0 });
-      for (let k = 0; k < 9; k++) {
-        const x = 45 * (k % 3) + 49, y = 45 * Math.floor(k / 3) + 52;
-        u.image('dungeon', (k & 3) * 30, (k >> 2) * 30, 30, 30, x, y);
-        if (k === i) u.slotGlow(x - 3, y - 3, 36, 36, this.t);
-        u.hit(x, y, 30, 30, () => { if (this.cur === k) return [AVK.OK]; this.cur = k; });
-      }
-      u.string(this.recText(i), 110, 186, 'center');
-      return;
-    }
-    u.image('dungeon', (i & 3) * 30, (i >> 2) * 30, 30, 30, 20, 38);
-    u.string(t[0x4d8 + i] ?? '', 60, 46, 'left', { pen: 0xffe0 });
-    u.fill(16, 74, 188, 1, 0x666666);
-    u.string(this.recText(i), 110, 82, 'center');
+    return h('div.v-col.v-fill.v-tab', null,
+      h('div.v-box.v-heading', null, gt(t[0x4d8 + i] ?? '', { pen: 0xffe0 })),
+      h('div.v-box.v-grow.v-center.v-col', null,
+        h('div.sm-dim-grid', null, Array.from({ length: 9 }, (_, k) => h(`div.sm-dim-cell${k === i ? '.v-sel.cur' : ''}`, {
+          on: () => { if (this.cur === k) return [AVK.OK]; this.cur = k; },
+        }, this.icon(k))))),
+      h('div.v-box.v-note', null, gt(this.recText(i))));
+  }
+
+  private confirmView(): VNode {
+    const t = this.ctx.assets.text, i = this.cur;
     const tickets = countOf(this.fs.inv, 0x1b, 0x1c);
     const msg = tickets > 0 ? (t[0x1b19] ?? '').replace('%d', String(tickets))
       : !freeUsedToday() ? '하루 한 번 무료로 입장할 수 있습니다.' : (t[0x1c10] ?? '');
-    msg.split('|@').slice(0, 4).forEach((ln, k) => u.string(ln.replace(/%d/g, '0'), 110, 102 + 15 * k, 'center'));
-    for (const [b, x, id] of [[0, 30, 0x1a39], [1, 120, 0x1a2b]] as const) {
-      u.button(x, 160, 70, 22, 3, this.btn === b ? 1 : 0);
-      u.textId(id, x + 35, 164, 'center');
-      u.hit(x, 160, 70, 22, () => { if (this.btn === b) return [AVK.OK]; this.btn = b; });
-    }
+    return h('div.v-col.v-fill.v-tab', null,
+      h('div.v-box.v-col.v-grow.sm-dim-confirm', null,
+        h('div.v-row', { style: 'gap:10px' }, h('div.sm-dim-cell', null, this.icon(i)), gt(t[0x4d8 + i] ?? '', { pen: 0xffe0, cls: 'v-grow v-left' })),
+        h('div.v-rule.sm-rule'),
+        gt(this.recText(i)),
+        h('div.v-grow.v-center.v-col', null, gt(msg.replace(/%d/g, '0')))),
+      h('div.v-row.sm-buttons', null, ([[0, 0x1a39], [1, 0x1a2b]] as const).map(([b, id]) => button(gt(t[id] ?? ''), {
+        sel: this.btn === b, cls: 'sm-wide', on: () => { if (this.btn === b) return [AVK.OK]; this.btn = b; },
+      }))));
   }
   drawPopups(): void { this.popup?.draw(); }
 }

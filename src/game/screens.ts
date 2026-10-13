@@ -15,9 +15,11 @@ import { SLOT_COUNT, deleteSlot, loadGamedata, loadSlot, newGame, saveSlot, setL
 import { Story } from './story';
 import type { GameContext, Scene } from './scene';
 import { tri, type Ui } from './ui';
+import { button, gt, slot, win } from './view';
 import { greyUniform } from '../sprites';
 import { RankingScene } from './ranking';
 import { DataScene } from './dataScene';
+import { OptionTab } from './optionTab';
 
 export const MENU_IMAGES = ['c', 't', 'f', 'logo', 'h_logo', 'title_bg', 'title_bg2', 'char_slot'];
 export const MENU_CMFS = ['cmf_title', 'cmf_c0', 'cmf_c1', 'cmf_c2'];
@@ -132,7 +134,7 @@ class RatingScene implements Scene {
   }
 }
 
-const TITLE_RANKING = -40, TITLE_DATA = -41;
+const TITLE_RANKING = -40, TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43;
 
 /** States 0x08 (110-frame intro) and 0x09 (menu). */
 export class TitleScene implements Scene {
@@ -146,7 +148,8 @@ export class TitleScene implements Scene {
     if (!intro) this.t = 200;
     ctx.audio.playBgm(0);
     // touchdata[9]: 게임시작 (239,252,110,57)
-    ctx.input.uiMode = false; ctx.input.zones = [{ x: 239, y: 252, w: 110, h: 57, key: AVK.OK }, { x: 135, y: 258, w: 99, h: 44, key: TITLE_RANKING }, { x: 0x1b6, y: 7, w: 32, h: 33, key: TITLE_DATA }];
+    ctx.input.uiMode = false; ctx.input.zones = [{ x: 239, y: 252, w: 110, h: 57, key: AVK.OK }, { x: 135, y: 258, w: 99, h: 44, key: TITLE_RANKING },
+      { x: 0x157, y: 7, w: 32, h: 33, key: TITLE_OPTION }, { x: 0x187, y: 7, w: 32, h: 33, key: TITLE_HELP }, { x: 0x1b6, y: 7, w: 32, h: 33, key: TITLE_DATA }];
   }
   update(presses: number[]): void {
     this.t++;
@@ -156,6 +159,8 @@ export class TitleScene implements Scene {
     }
     for (const k of presses) if (k === AVK.LEFT || k === AVK.RIGHT) this.sel ^= 1;
     if (presses.includes(TITLE_DATA)) { this.ctx.go(new DataScene(this.ctx)); return; }
+    if (presses.includes(TITLE_OPTION)) { this.ctx.go(new TitleOptionScene(this.ctx, 'settings')); return; }   // state 0x0C
+    if (presses.includes(TITLE_HELP)) { this.ctx.go(new TitleOptionScene(this.ctx, 'help')); return; }         // state 0x0D
     if (presses.includes(TITLE_RANKING) || (presses.includes(AVK.OK) && this.sel === 1)) { this.ctx.go(new RankingScene(this.ctx)); return; }
     if (presses.includes(AVK.OK)) this.ctx.go(new SlotScene(this.ctx));
   }
@@ -269,12 +274,12 @@ export class SlotScene implements Scene {
         if (this.laps[i] === 2) u.textId(0x1a3c, 0xda, iy + 0x1e, 'right', { pen: 0xf800 });   // red "Hard"
         u.alpha = 32;
       }
-      if (this.slots[this.cur] && this.laps[this.cur] === 1) {         // 하드코어 (FUN_00034040)
-        u.button(0xf0, 0x90, 0x44, 0x16, 3, 1);
-        u.textId(0x19d6, 0xf0 + 0x22, 0x90 + 3, 'center');
-      }
-      u.button(0xf0, 0xbe, 0x44, 0x16, 3, this.slots[this.cur] ? 1 : 3);   // 슬롯삭제
-      u.textId(0x19d7, 0xf0 + 0x22, 0xbe + 3, 'center');
+      const tx = this.ctx.assets.text, full = 'width:100%;height:100%';
+      if (this.slots[this.cur] && this.laps[this.cur] === 1)            // 하드코어 (FUN_00034040)
+        u.view('slotHard', 0xf0, 0x90, 0x44, 0x16, button(gt(tx[0x19d6] ?? ''), { sel: true, glow: false, style: full }));
+      u.view('slotDelete', 0xf0, 0xbe, 0x44, 0x16, button(gt(tx[0x19d7] ?? ''), {   // 슬롯삭제 (variant 3 when empty)
+        sel: !!this.slots[this.cur], glow: false, cls: this.slots[this.cur] ? '' : 'off', style: full,
+      }));
       u.pop();
       u.closeButton();
     });
@@ -346,10 +351,38 @@ export class CharSelectScene implements Scene {
   }
 }
 
+/**
+ * Title settings (state 0x0C) and help (state 0x0D): the in-game settings / help views of OptionTab
+ * in a window over a dark backdrop; −16 (or leaving the screen) returns to the title. The title's
+ * sixth setting "게임 데이터 관리" (→ 0x3B) is the info button's data screen here.
+ */
+class TitleOptionScene implements Scene {
+  private tab: OptionTab;
+  constructor(private ctx: GameContext, mode: 'settings' | 'help') {
+    this.tab = mode === 'help' ? new OptionTab(ctx).openHelp() : new OptionTab(ctx).openSettings();
+    ctx.input.uiMode = true; ctx.input.zones = [];
+  }
+  update(presses: number[]): void {
+    for (const t of this.ctx.input.takeTaps()) { const k = this.ctx.ui13.tapAt(t.x, t.y); if (k) presses = [...presses, ...k]; }
+    this.tab.update(presses);
+    if (!this.tab.busy) this.ctx.go(new TitleScene(this.ctx));
+  }
+  draw(): void {
+    render(this.ctx, () => { this.ctx.ui.alpha = 24; fillScreen(this.ctx.ui, 0x0a0f1a); this.ctx.ui.alpha = 32; }, () => {
+      const u = this.ctx.ui13;
+      u.pushCenter220();
+      u.view('titleSub', 0, 24, 220, 196, win('.v-col.v-fill', { style: 'padding:4px' }, slot('tab')));
+      this.tab.draw(u);
+      u.pop();
+      u.closeButton(26);
+    });
+  }
+}
+
 /** Field play bound to a save slot, with SAVE, a pause popup and the game-over menu (0x1B). */
 /** HUD touch keys: the gate icon (156..188, 2..34) -> community 0x24, SHOP (-7) -> premium shop,
  *  the coupon button -> coupon shop 0x28 (FUN_00047488) */
-export const HUD_COMMUNITY = -30, HUD_SHOP = -7, HUD_COUPON = -31;
+export const HUD_COMMUNITY = -30, HUD_SHOP = -7, HUD_COUPON = -31, HUD_QUEST = 10000;
 
 export class PlayScene implements Scene {
   private overSel = 0;
@@ -387,7 +420,7 @@ export class PlayScene implements Scene {
     const f = this.field;
     this.ctx.input.uiMode = !!(this.field.ending || this.overShop || this.overPopup || this.menu || this.shop || this.pause || this.notice || this.askSave || f.popup || f.busyTalking || f.dead);
     for (const t of this.ctx.input.takeTaps()) {
-      const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? f.ui.tapAt(t.x, t.y);
+      const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? this.ctx.hud.tapAt(t.x, t.y);
       if (keys) presses = [...presses, ...keys];
     }
     if (this.field.ending) {                                  // state 0x3D: black, BGM 0, popup 0x5C unless hard
@@ -450,6 +483,7 @@ export class PlayScene implements Scene {
     }
     if (presses.includes(AVK.CLR) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field); return; }
     if (presses.includes(AVK.MAP) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field).openTab(5); return; }
+    if (presses.includes(HUD_QUEST) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field).openTab(4); return; }
     for (const [key, screen] of [[HUD_COMMUNITY, 'dimension'], [HUD_SHOP, 'premium'], [HUD_COUPON, 'coupon']] as const) {
       if (!presses.includes(key) || this.field.busyTalking) continue;
       const m = new GameMenu(this.ctx, this.field).openTab(7);
@@ -482,7 +516,6 @@ export class PlayScene implements Scene {
 
   draw(): void {
     this.ctx.overlay.getContext('2d')!.clearRect(0, 0, W, H);
-    this.ctx.ui13.hits = []; this.ctx.ui.hits = []; this.field.ui.hits = [];   // only what is drawn this frame is tappable
     const dead = this.field.dead;
     if (this.field.ending) {                                  // black screen with the popup
       this.ctx.ui.begin(); this.ctx.ui.fill(0, 0, W, H, 0); this.ctx.ui.end();
@@ -493,10 +526,12 @@ export class PlayScene implements Scene {
     // game over: the field (map + status bar, no touch buttons) turns grey over 16 frames
     // (SetGray(min(aac, 32)), FUN_000336a8), then the menu is drawn in colour on top
     greyUniform.grey.value = dead ? Math.min(1, this.overTicks / 16) : 0;
+    this.ctx.hud.grey = greyUniform.grey.value;
     this.field.showButtons = !this.menu && !this.shop && !this.pause && !this.notice && !this.askSave;
     if (!this.menu) { this.field.draw(); this.backdropFor = null; }
     else if (this.backdropFor !== this.menu) { this.field.draw(); this.ctx.compositor.freezeBackdrop(); this.backdropFor = this.menu; }
     else this.ctx.compositor.drawBackdrop();                         // the blurred field is frozen while the menu is open
+    if (this.menu) this.ctx.hud.hold();                              // the HUD stays under the menu, darkened and blurred by CSS
     greyUniform.grey.value = 0;
     if (this.shop) {
       this.ctx.ui.begin();
@@ -511,26 +546,29 @@ export class PlayScene implements Scene {
       this.menu.drawOverlay();
       this.ctx.ui13.end();
     }
-    if (dead && this.overTicks >= 16) {
-      const u = this.ctx.ui;
+    if (dead && this.overTicks >= 16) {                              // game-over menu 0x1B (continue / revive / title)
+      const u = this.ctx.ui, t = this.ctx.assets.text;
       u.begin();
       u.pushCenter220();
-      u.window(0, 0x1e, 0xdc, 0xa0);
-      u.glow(0x10, this.overSel * 0x28 + 0x36, 0xbc, 0x1a, this.overTicks);
-      const t = this.ctx.assets.text;
-      [this.field.dim ? t[0x19e8] : t[0x1d1], (t[0x1d2] ?? '').replace('%d', String(countOf(this.field.inv, 0x1b, 3))), t[0x1d3]].forEach((s, i) => {
-        const y = 0x3c + i * 0x28;
-        u.button(0x12, y - 4, 0xb8, 0x16, 3, this.overSel === i ? 1 : 0);
-        u.hit(0x12, y - 4, 0xb8, 0x16, () => { if (this.overSel === i) return [AVK.OK]; this.overSel = i; });
-        u.string(s ?? '', 0x6e, y, 'center');
-      });
+      const items = [this.field.dim ? t[0x19e8] : t[0x1d1], (t[0x1d2] ?? '').replace('%d', String(countOf(this.field.inv, 0x1b, 3))), t[0x1d3]];
+      u.view('gameover', 0, 0x1e, 0xdc, 0xa0, win('.v-col.v-fill.v-center', { style: 'gap:18px;padding:12px 16px' },
+        items.map((s, i) => button(gt(s ?? ''), {
+          sel: this.overSel === i, style: 'width:100%',
+          on: () => { if (this.overSel === i) return [AVK.OK]; this.overSel = i; },
+        }))));
       u.pop();
       u.end();
     }
     if (dead && (this.overShop || this.overPopup)) {
       const u = this.ctx.ui13;
       u.begin();
-      if (this.overShop) { u.pushCenter220(); u.window(0, 0x1e, 0xdc, 0xb4); this.overShop.draw(u); u.pop(); this.overShop.drawPopups(); }
+      if (this.overShop) {                                         // coupon shop in a window, its body mounted in the 'tab' slot
+        u.pushCenter220();
+        u.view('overShop', 0, 0x1e, 0xdc, 0xb4, win('.v-col.v-fill', { style: 'padding:4px' }, slot('tab')));
+        this.overShop.draw(u);
+        u.pop();
+        this.overShop.drawPopups();
+      }
       this.overPopup?.p.draw();
       u.end();
     }

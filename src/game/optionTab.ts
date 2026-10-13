@@ -6,6 +6,9 @@ import { AVK } from './input';
 import { OPTION_COUNTS, OPTION_KEYS, saveOptions } from './options';
 import type { GameContext } from './scene';
 import type { Ui } from './ui';
+import { button, cmfFrame, cSprite, gt, h, menuList, sprite, type ScrollRef, type VChild, type VNode } from './view';
+import { clipImage, DEFAULT_EQUIP } from '../sprites';
+import type { Cmf } from '../assets';
 
 const GREY565 = 0x632c;          // 0x666666
 
@@ -21,11 +24,21 @@ export class OptionTab {
   private help = -1;
   private book = -1;
   private bookDetail = false;
-  private scroll = 0;
+  private scroll: ScrollRef = { y: 0 };
 
-  constructor(private ctx: GameContext, private fs?: FieldScene) {}
+  /** cmf_status for the status-effect help page (loaded on first use) */
+  private statusCmf: Cmf | null = null;
+
+  constructor(private ctx: GameContext, private fs?: FieldScene) {
+    void ctx.assets.cmf('cmf_status').then((c) => { this.statusCmf = c; });
+  }
 
   get busy(): boolean { return this.setting || this.help >= 0 || this.book >= 0; }
+
+  /** open the settings screen directly (title state 0x0C) */
+  openSettings(): this { this.setting = true; this.cur = 0; return this; }
+  /** open the help pages directly (title state 0x0D) */
+  openHelp(): this { this.help = 0; return this; }
 
   update(presses: number[]): boolean {
     this.t++;
@@ -54,8 +67,8 @@ export class OptionTab {
 
   private bookKey(k: number): void {
     if (this.bookDetail) {
-      if (k === AVK.UP) this.scroll = Math.max(0, this.scroll - 12);
-      else if (k === AVK.DOWN) this.scroll += 12;
+      if (k === AVK.UP) this.scroll.y = Math.max(0, this.scroll.y - 12);
+      else if (k === AVK.DOWN) this.scroll.y += 12;                       // the browser clamps at the end
       else if (k === AVK.OK || k === AVK.CLR) this.bookDetail = false;
       return;
     }
@@ -63,7 +76,7 @@ export class OptionTab {
     else if (k === AVK.DOWN) this.book = (this.book + 1) % 40;
     else if (k === AVK.LEFT) this.book = Math.max(0, this.book - 6);
     else if (k === AVK.RIGHT) this.book = Math.min(39, this.book + 6);
-    else if (k === AVK.OK && this.fs!.story.book[this.book]) { this.bookDetail = true; this.scroll = 0; }
+    else if (k === AVK.OK && this.fs!.story.book[this.book]) { this.bookDetail = true; this.scroll.y = 0; }
     else if (k === AVK.CLR) this.book = -1;
   }
 
@@ -82,89 +95,127 @@ export class OptionTab {
   }
 
   draw(u: Ui): void {
-    if (this.help >= 0) { this.drawHelp(u); return; }
-    if (this.book >= 0) { if (this.bookDetail) this.drawBookDetail(u); else this.drawBook(u); return; }
-    if (this.setting) { this.drawSetting(u); return; }
-    u.glow(16, this.sel * 32 + 42, 188, 26, this.t);
-    for (let i = 0; i < 5; i++) {
-      u.button(18, 44 + 32 * i, 184, 22, 3, i === this.sel ? 1 : 0);
-      u.hit(18, 42 + 32 * i, 184, 28, () => { if (this.sel === i) return [AVK.OK]; this.sel = i; });
-      u.textId(0x14f + i, 110, 47 + 32 * i, 'center');
-    }
-    u.roundFill(8, 195, 204, 16, 0, 1);
-    u.textId(0x13f + this.sel, 110, 197, 'center');
+    const view = this.help >= 0 ? this.helpView() : this.book >= 0 ? (this.bookDetail ? this.bookDetailView() : this.bookView())
+      : this.setting ? this.settingView() : this.mainView();
+    u.mount('tab', 'option', view);
   }
 
-  private drawSetting(u: Ui): void {
-    const o = this.ctx.options;
-    u.roundFill(14, 33, 193, 18, 0, 1);
-    u.textId(0xdf, 90, 35);
-    u.roundFill(14, 53, 193, 156, 0, 1);
-    for (let i = 0; i < 5; i++) {
-      const y = 68 + 26 * i, v = o[OPTION_KEYS[i]];
-      u.hit(14, y - 6, 100, 26, () => { this.cur = i; });
-      u.hit(114, y - 6, 46, 26, () => { this.cur = i; return [AVK.LEFT]; });
-      u.hit(160, y - 6, 47, 26, () => { this.cur = i; return [AVK.RIGHT]; });
-      u.textId(0x164 + i, 37, y, 'center');
-      if (i === 2) {
-        u.textId(0x1b67 + v, 133, y, 'center', { pen: this.cur === i ? 0xffff : GREY565 });
-      } else {
-        const t = this.ctx.assets.text;
-        for (let k = 0; k < 2; k++) {
-          const rgb = v === k ? 0xffffff : 0x666666;
-          u.cfontCenter(t[0x1b + k] ?? '', k ? 154 : 104, y + 2, 1,
-            { tint: [(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255], amount: 32 });
-        }
-      }
-      if (this.cur === i) { u.cSprite(9, 71, y + 1); u.cSprite(-9, 189, y + 1); }
-    }
+  private mainView(): VNode {
+    const t = this.ctx.assets.text;
+    return menuList(Array.from({ length: 5 }, (_, i) => button(gt(t[0x14f + i] ?? ''), {
+      sel: i === this.sel, on: () => { if (this.sel === i) return [AVK.OK]; this.sel = i; },
+    })), gt(t[0x13f + this.sel] ?? ''));
   }
 
-  /** help page: title text 0xe7 + page (24 = 0x1c20), body text 0x115 + page */
-  private drawHelp(u: Ui): void {
+  /** settings 0x27: label, then the values (the current one bright), arrows on the cursor row */
+  private settingView(): VNode {
+    const o = this.ctx.options, a = this.ctx.assets, t = a.text;
+    const rows = Array.from({ length: 5 }, (_, i) => {
+      const v = o[OPTION_KEYS[i]], cur = this.cur === i;
+      const values = i === 2
+        ? [gt(t[0x1b67 + v] ?? '', { pen: cur ? 0xffff : GREY565 })]
+        : [0, 1].map((k) => h(`span.v-opt-value${v === k ? '.on' : ''}`, { on: () => { this.cur = i; if (o[OPTION_KEYS[i]] !== k) return [AVK.RIGHT]; } }, t[0x1b + k] ?? ''));
+      return h(`div.v-row.v-opt-set${cur ? '.cur' : ''}`, { on: () => { this.cur = i; } },
+        gt(t[0x164 + i] ?? '', { cls: 'v-opt-label' }),
+        h('div.v-row.v-grow.v-center', { style: 'gap:10px' },
+          h('span.v-opt-arrow', { on: () => { this.cur = i; return [AVK.LEFT]; } }, cur && cSprite(a, 9)),
+          h('div.v-row.v-grow.v-center', { style: 'gap:14px' }, values),
+          h('span.v-opt-arrow', { on: () => { this.cur = i; return [AVK.RIGHT]; } }, cur && cSprite(a, -9))));
+    });
+    return h('div.v-col.v-fill.v-tab', { style: 'gap:3px' },
+      h('div.v-box.v-heading', null, gt(t[0xdf] ?? '')),
+      h('div.v-box.v-col.v-grow', { style: 'padding:6px 8px;justify-content:space-around' }, rows));
+  }
+
+  /**
+   * help page (FUN_0005d890): title 0xe7 + page; page 23 shows 0xe8 + page (게임심의정보, 게임문의 is
+   * skipped) and page 24 0x1c20 (운영정책안내). The body follows FUN_000337f4.
+   */
+  private helpView(): VNode {
     const t = this.ctx.assets.text, p = this.help;
-    u.roundFill(14, 33, 193, 18, 0, 1);
-    u.string(t[p === 24 ? 0x1c20 : 0xe7 + p] ?? '', 110, 35, 'center');
-    u.roundFill(14, 53, 193, 140, 0, 1);
-    u.hit(0, 30, 110, 180, () => [AVK.LEFT]);
-    u.hit(110, 30, 110, 180, () => [AVK.RIGHT]);
-    u.paragraph(t[0x115 + p] ?? '', 18, 60, 186, 'left');
-    u.string(`${p + 1}/25`, 110, 197, 'center');
+    const title = p < 23 ? 0xe7 + p : p === 23 ? 0xe8 + p : 0x1c20;
+    return h('div.v-col.v-fill.v-tab', { style: 'gap:3px' },
+      h('div.v-box.v-heading', null, gt(t[title] ?? '')),
+      h('div.v-box.v-grow.v-scroll.help-body', null, this.helpBody(p)),
+      h('div.v-row.v-pager', null,
+        h('span.v-page-btn', { on: () => [AVK.LEFT] }, '◀'), `${p + 1}/25`, h('span.v-page-btn', { on: () => [AVK.RIGHT] }, '▶')));
+  }
+
+  /** FUN_000337f4 body of help page i */
+  private helpBody(i: number): VChild {
+    const a = this.ctx.assets, t = a.text, frame = this.t;
+    const para = (id: number) => gt(t[id] ?? '', { cls: 'help-text' });
+    switch (i) {
+      case 1:                                                      // controls: the touch text 0x13c in touch mode
+        return para(this.ctx.input.device === 'touch' ? 0x13c : 0x116);
+      case 2: case 3: case 4: {                                    // character: idle animation, name, description 0x129 + i
+        const name = `cmf_c${i - 2}`, cmf = this.ctx.cmfs[name];
+        return [
+          h('div.v-row.help-char', null,
+            h('div.help-sprite', null, cmf && cmfFrame(cmf, frame % 6, 30, 58, (c) => clipImage(a, name, cmf, c, 0, DEFAULT_EQUIP))),
+            h('div.v-grow.v-center.v-col', null, gt(t[0x115 + i] ?? ''))),
+          para(0x129 + i),
+        ];
+      }
+      case 8:                                                      // points: AP / SP / trait icons beside their paragraphs
+        return h('div.help-icons', null,
+          [[0xb7, 0x58, 15], [0xc5, 0x58, 65], [0xef, 0x3f, 115]].map(([sx, sy, y]) =>
+            sprite('c', sx, sy, 14, 14, { style: `position:absolute;left:0;top:${y}px` })),
+          para(0x11d));
+      case 9: {                                                    // status effects: the character with each status icon
+        const sc = this.statusCmf, cls = this.fs?.model.cls ?? 0, name = `cmf_c${cls}`, cmf = this.ctx.cmfs[name];
+        return h('div.v-row', { style: 'gap:6px;align-items:flex-start' },
+          h('div.v-col.help-status', null, [0, 1, 2, 3].map((k) => h('div.help-sprite.small', null,
+            cmf && cmfFrame(cmf, frame % 4, 22, 40, (c) => clipImage(a, name, cmf, c, 0, DEFAULT_EQUIP)),
+            sc && cmfFrame(sc, 6 * k + (frame % 6), 22, 40, () => 'c')))),
+          h('div.v-grow', null, para(0x11e)));
+      }
+      case 10:                                                     // resistances: text, then the three icons with their labels
+        return [para(0x11f), h('div.v-col.help-resist', null, [0, 1, 2].map((k) =>
+          h('div.v-row', { style: 'gap:8px' }, cSprite(a, 3 + k), gt((t[0x12f] ?? '').split('|@|@')[k] ?? ''))))];
+      case 22: return h('div.v-col.v-center.v-fill', null, para(0x4e4));
+      case 23:                                                     // 게임심의정보: the rating table 0x130..0x13b
+        return h('div.help-table', null, [0, 1, 2, 3, 4, 5].map((r) =>
+          [gt(t[0x130 + 2 * r] ?? ''), gt(t[0x131 + 2 * r] ?? '')]));
+      case 24: return para(0x1c21);
+      default: return para(0x115 + i);
+    }
   }
 
   /** 0x32: 6 rows per page, names text 0x3e4 + i, unknown "???" (0x1a3a) */
-  private drawBook(u: Ui): void {
+  private bookView(): VNode {
     const t = this.ctx.assets.text, book = this.fs!.story.book, page = Math.floor(this.book / 6);
-    u.string((t[0x1a6f] ?? '%d / %d').replace('%d', String(page + 1)).replace('%d', '7'), 110, 197, 'center');
-    for (let r = 0; r < 6; r++) {
+    const rows = [];
+    for (let r = 0; r < 6 && page * 6 + r < 40; r++) {
       const i = page * 6 + r;
-      if (i >= 40) break;
-      if (i === this.book) u.glow(16, 0x21 + 26 * r, 188, 26, this.t);
-      u.button(18, 0x23 + 26 * r, 184, 22, 3, i === this.book ? 1 : 0);
-      u.hit(18, 0x21 + 26 * r, 184, 26, () => { if (this.book === i) return [AVK.OK]; this.book = i; });
-      u.string(book[i] ? t[0x3e4 + i] ?? '' : t[0x1a3a] ?? '???', 0x6e, 0x26 + 26 * r, 'center');
+      rows.push(button(gt(book[i] ? t[0x3e4 + i] ?? '' : t[0x1a3a] ?? '???'), {
+        sel: i === this.book, on: () => { if (this.book === i) return [AVK.OK]; this.book = i; },
+      }));
     }
+    return h('div.v-col.v-fill.v-tab', null,
+      h('div.v-col.v-grow', { style: 'gap:4px;padding:2px 6px' }, rows),
+      h('div.v-row.v-pager', null,
+        h('span.v-page-btn', { on: () => [AVK.LEFT] }, '◀'),
+        gt((t[0x1a6f] ?? '%d / %d').replace('%d', String(page + 1)).replace('%d', '7')),
+        h('span.v-page-btn', { on: () => [AVK.RIGHT] }, '▶')));
   }
 
-  /** 0x33: habitat, drop material, attribute, description, kills, deaths */
-  private drawBookDetail(u: Ui): void {
-    const fs = this.fs!, a = this.ctx.assets, t = a.text, i = this.book, b = fs.story.book[i]!, s = this.scroll;
-    u.roundFill(14, 33, 193, 18, 0, 1);
-    u.string(t[0x3e4 + i] ?? '', 110, 35, 'center');
-    u.roundFill(14, 53, 193, 140, 0, 1);
-    u.hit(0, 30, 220, 80, () => [AVK.UP]);
-    u.hit(0, 110, 220, 100, () => [AVK.DOWN]);
-    let y = 60 - s;
-    const line = (label: string, value: string) => { if (y >= 55 && y < 185) { u.string(label, 20, y); u.string(value, 200, y, 'right'); } y += 16; };
-    line('서식지', t[470 + b.z] ?? '');
+  /** 0x33: habitat, drop material, attribute, description, kills, deaths (UP / DOWN scroll 12 px) */
+  private bookDetailView(): VNode {
+    const fs = this.fs!, a = this.ctx.assets, t = a.text, i = this.book, b = fs.story.book[i]!;
     const drop = a.s8(0x23e3b + i);
-    line('드랍재료템', drop < 0 ? '없음.' : t[0x7fc + fs.db.model(0x12, drop, 0)] ?? '');
-    line('몬스터 속성', t[0x4a8 + (a.d8(0x251a3 + (i + 3) * 12) || 0)] ?? '');
-    line('퇴치한 횟수', String(b.k));
-    line('죽은 횟수', String(b.d));
-    u.fill(18, y, 184, 1, 0x9ecad7);
-    y += 6;
-    if (y < 185) u.paragraph(t[0x453 + i] ?? '', 20, y, 180, 'left');
+    const line = (label: string, value: string) => h('div.v-row.v-kv', null, h('span.v-grow', null, label), gt(value));
+    return h('div.v-col.v-fill.v-tab', { style: 'gap:3px', on: () => [AVK.OK] },
+      h('div.v-box.v-heading', null, gt(t[0x3e4 + i] ?? '')),
+      h('div.v-box.v-grow.v-scroll', { style: 'padding:6px 8px', scroll: this.scroll },
+        h('div.v-col', null,
+          line('서식지', t[470 + b.z] ?? ''),
+          line('드랍재료템', drop < 0 ? '없음.' : t[0x7fc + fs.db.model(0x12, drop, 0)] ?? ''),
+          line('몬스터 속성', t[0x4a8 + (a.d8(0x251a3 + (i + 3) * 12) || 0)] ?? ''),
+          line('퇴치한 횟수', String(b.k)),
+          line('죽은 횟수', String(b.d)),
+          h('div.v-rule'),
+          gt(t[0x453 + i] ?? '', { cls: 'v-left' }))));
   }
 
   drawOverlay(): void { /* no absolute-coordinate overlays */ }

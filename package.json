@@ -9,10 +9,11 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "ref": "python -I tools/build_ref_maps.py",
-    "fixtures": "python -I tools/grantria_shop.py --assets apk/assets --so apk/lib/armeabi/libGrantria.so --out tests/fixtures/shop",
+    "fixtures": "python -I tools/grantria_shop.py --assets apk/assets --so apk/lib/armeabi/libGrantria.so --out tests/fixtures/shop && python -I tools/grantria_skilldetail.py",
     "test": "node --import ./tests/register.mjs --test \"tests/**/*.test.ts\""
   },
   "dependencies": {
+    "galmuri": "2.40.3",
     "three": "0.170.0"
   },
   "devDependencies": {

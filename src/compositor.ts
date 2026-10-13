@@ -134,6 +134,15 @@ export class Compositor {
     return passes;
   }
 
+  /** Clear the internal target to black (a full-screen DOM menu covers the field). */
+  clear(w = this.rt.width, h = this.rt.height): void {
+    if (this.rt.width !== w || this.rt.height !== h) this.rt.setSize(w, h);
+    this.renderer.setRenderTarget(this.rt);
+    this.renderer.setClearColor(0x000000, 1);
+    this.renderer.clear();
+    this.renderer.setRenderTarget(null);
+  }
+
   /** Copy the internal target to the canvas. */
   show(): void {
     this.presentMat.uniforms.src.value = this.rt.texture;

@@ -9,6 +9,7 @@ import type { FieldScene } from './fieldScene';
 import { Dialogue, drawCaption } from './dialogue';
 import { AVK } from './input';
 import type { Ui } from './ui';
+import { button, h } from './view';
 import type { EvActor } from './actors';
 
 const W = 480, H = 320;
@@ -451,11 +452,10 @@ export class EventRunner {
     if (this.active) u.hit(0, 0, W, H, () => [AVK.OK]);       // tap = next line
     if (this.dialogue) this.dialogue.draw(u, this.frame);
     if (this.active && this.clock >= 11 && this.skippable(this.lastCmd) && !this.skipFade) {
-      u.hit(W - 76, 0, 62, 36, () => [AVK.POUND]);
-      u.alpha = 16;
-      u.button(W - 70, 6, 50, 24, 3, 1);
-      u.alpha = 32;
-      if (this.frame % 8 >= 4) u.textId(100, W - 57, 10);
+      // SKIP: the button at alpha 16 with the label blinking every 8 frames (CSS), centred in the button
+      u.view('evSkip', W - 70, 6, 50, 24, button(h('span.ev-skip', null, this.fs.db.a.text[100] ?? 'SKIP'), {
+        sel: true, glow: false, cls: 'ev-skip-btn', style: 'width:100%;height:100%', on: () => [AVK.POUND],
+      }));
     }
   }
 }

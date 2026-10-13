@@ -3,19 +3,20 @@
 // Enhance / decompose / combine from the inventory open the shop screens (shop.md §2.9); socket reset
 // and gem attach / detach follow shop.md §2.8. Bag purchase: locked bag -> popup 0x7E (community.ts). Not ported: "가방정리".
 import type { Cmf } from '../assets';
-import { stringWidth } from '../text';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
 import type { Item } from './items';
 import { Popup } from './popup';
 import { buyBag } from './community';
 import { ShopScreen } from './shop';
-import { countOf, consume } from './shopRules';
+import { combineNeeds, countOf, consume } from './shopRules';
 import type { GameContext } from './scene';
 import type { Ui } from './ui';
+import { button, cSprite, gt, h, sprite, type KeyAct, type VChild, type VNode } from './view';
+import './css/tabs.css';
 
-const CELL_EDGE = 0x354e73;
-const EQUIP_FILL = 0x20252c;
+const IMAGE_BASE = `${import.meta.env.BASE_URL}assets/images/`;
+const YELLOW565 = 0xffe0;
 
 /** Action ids of the item action popup (text 0x171 + id), kind 0 = inventory, 4 = equipment tab. */
 const ACTION = { DETAIL: 1, USE: 2, DECOMPOSE: 3, QUICK: 5, DROP: 4, CANCEL: 6, UNEQUIP: 7, EQUIP: 8, ENHANCE: 12, SOCKET: 28 } as const;
@@ -31,17 +32,43 @@ export function drawItemCell(u: Ui, fs: FieldScene, it: Item, x: number, y: numb
   if (fs.db.showsCount(it)) u.number(it.count, x + 24, y, 0, 2);
 }
 
-/** Item action popup (FUN_00055820 / FUN_000552e0 / FUN_00055004), L1 absolute coordinates. */
+/** item icon as a view sprite; unusable items get the red tint 12 (FUN_0003bcf0) */
+export function itemIcon(fs: FieldScene, it: Item, cls = ''): VNode {
+  const r = fs.db.iconRect(it.icon);
+  const usable = fs.inv.usable(it, fs.model.level, fs.model.cls);
+  return sprite(r.image, r.sx, r.sy, 16, 16, usable ? { cls } : {
+    cls: `v-tint ${cls}`, style: `--tint:rgb(255,0,0);--tint-a:${12 / 32};--mask:url("${IMAGE_BASE}${r.image}.png");`,
+  });
+}
+
+/** FUN_0003bcf0 item cell as a view: bevelled cell, icon, count badge; `empty` fills an empty cell */
+export function cellView(fs: FieldScene, it: Item | null | undefined, opts: { sel?: boolean; on?: KeyAct; cls?: string; empty?: VChild; shade?: VChild; anchor?: VChild } = {}): VNode {
+  return h('div.tb-cell', { cls: [opts.cls, opts.sel && 'v-sel'].filter(Boolean).join(' '), on: opts.on },
+    it ? itemIcon(fs, it) : opts.empty,
+    it && opts.shade,
+    it && fs.db.showsCount(it) && h('span.tb-count', null, String(it.count)),
+    opts.anchor);
+}
+
+/** stat option line (text 1972 + id, "%d" / "%%") */
+function optionText(t: string[], id: number, v: number): string {
+  return (t[1972 + id] ?? '').replace('%d', String(v)).replace('%%', '%');
+}
+
+/** ◀ / ▶ arrow (t.pxl 0,0x13 15x19) that presses LEFT / RIGHT */
+function arrow(right: boolean): VNode {
+  return h('span.tb-arrow', { on: () => [right ? AVK.RIGHT : AVK.LEFT] }, sprite('t', 0, 0x13, 0xf, 0x13, { flip: right }));
+}
+
+/**
+ * Item action popup (FUN_00055820 / FUN_000552e0 / FUN_00055004): a column of keycaps attached to
+ * the selected cell by CSS (beside it, sliding in), not at computed coordinates. `side` / `up`
+ * choose the direction so it stays inside the window.
+ */
 export class ActionPopup {
   sel = 0;
   private c = 0;
-  readonly w: number;
-  readonly h: number;
-  constructor(private ctx: GameContext, readonly entries: number[], private x0: number, private y0: number) {
-    const t = ctx.assets.text;
-    this.w = Math.max(...entries.map((v) => stringWidth(t[0x171 + v] ?? ''))) + 66;
-    this.h = entries.length * 25 + 6;
-  }
+  constructor(private ctx: GameContext, readonly entries: number[], private side: 'left' | 'right' = 'right', private up = false) {}
   /** returns the chosen action id, 0 for cancel, or null */
   handle(presses: number[]): number | null {
     if (this.c < 3) return null;
@@ -53,55 +80,86 @@ export class ActionPopup {
     }
     return null;
   }
+  /** per frame: the opening frames gate input (as the original slide-in) and taps elsewhere close it */
   draw(u: Ui): void {
-    const s = [4, 7, 9][this.c] ?? 10;
     this.c = this.c < 10 ? this.c + 1 : 3;
-    const x = this.x0 + Math.trunc(((10 - s) * this.w) / 10), y0 = this.y0, t = this.ctx.assets.text;
-    u.hit(-1000, -1000, 3000, 3000, () => [AVK.CLR]);           // tap outside closes
-    u.glow(x + 1, y0 + 1 + this.sel * 25, 66, 26, this.c);
-    this.entries.forEach((v, i) => {
-      u.alpha = i === this.sel ? 32 : 24;
-      u.button(x + 3, y0 + 3 + 25 * i, 0x3e, 0x16, 3, i === this.sel ? 1 : 0);
-      u.hit(x, y0 + 25 * i, this.w, 25, () => { this.sel = i; return [AVK.OK]; });
-      u.string(t[v === 0x1c ? 0x1bca : v === 0x14 ? 0x198 : 0x171 + v] ?? '', x + 33, y0 + 7 + 25 * i, 'center');
-    });
-    u.alpha = 32;
-    u.finger(x - 20, y0 + 3 + this.sel * 25, this.c);
+    u.hit(-1000, -1000, 3000, 3000, () => [AVK.CLR]);
+  }
+  /** the menu, to be placed inside the selected cell (cellView opts.anchor) */
+  anchor(): VNode {
+    const t = this.ctx.assets.text;
+    return h(`div.tb-anchor.${this.side}${this.up ? '.up' : ''}`, null,
+      h('div.v-col.tb-actions', null, this.entries.map((v, i) => button(gt(t[v === 0x1c ? 0x1bca : v === 0x14 ? 0x198 : 0x171 + v] ?? ''), {
+        sel: i === this.sel, on: () => { this.sel = i; return [AVK.OK]; },
+      }))));
+  }
+  /** over the screen's view, under the menu: a tap outside closes it */
+  backdrop(): VNode {
+    return h('div.v-modal.tb-backdrop', { on: () => [AVK.CLR] });
   }
 }
 
-/** Item detail (MENUPOP 1, FUN_00032344 + FUN_0002ae5c), simplified: no scroll, sets or sockets. */
+/**
+ * Item detail (MENUPOP 1, FUN_00032344 + FUN_0002ae5c), simplified: no sets or sockets. A view over
+ * the 220 window (0, 23, 220, 196); `footer` adds a button row, `overlay` floats over the body.
+ */
+export function itemDetailView(fs: FieldScene, it: Item, footer?: VChild, overlay?: VChild): VNode {
+  if (it.type === 0x19) return recipeDetailView(fs, it, footer, overlay);
+  const t = fs.db.a.text, gear = it.type < 0x10;
+  const label = it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6;
+  const desc = t[fs.db.descId(it.type, it.sub, it.grade)] ?? '';
+  return h('div.u-window.v-col.v-fill.tb-detail', null,
+    h('div.v-box.v-row.tb-detail-head', null,
+      cellView(fs, it),
+      h('div.v-col.v-grow', { style: 'gap:1px' },
+        h('div.v-row', { style: 'gap:4px' },
+          gear && it.enh > 0 && h('span.tb-enh', null, `+${it.enh}`),
+          gt(it.name, { cls: 'v-grow tb-ellipsis' })),
+        gear && h('div.v-row.tb-sub', null,
+          h('span.v-grow', null, `${t[0x24] ?? 'REQUIRE LV'} ${it.reqLevel}`),
+          it.type < 15 && gt(t[0x5d + (it.type % 3)] ?? '', { pen: 0x9e7f })))),
+    h('div.v-box.v-col.v-grow.v-scroll.tb-detail-body', null,
+      gt(desc),
+      gear && h('div.v-rule'),
+      gear && gt(`${t[label] ?? ''} ${it.base}`, { pen: YELLOW565 }),
+      gear && it.options.filter(([id]) => id !== 0xff).map(([id, v]) => gt(optionText(t, id, v), { pen: 0x9e7f }))),
+    footer,
+    overlay);
+}
+
+/**
+ * Recipe detail (FUN_00032344 type 0x19 branch, text buffers from FUN_000390f0): the product's icon,
+ * name, REQUIRE LV and its own description (0xa50 + model(product)), then the three materials. The
+ * "%s를 만들기 위한 제작서" texts (0xc33..) are never shown by the original (only a dead load in FUN_0003ab88).
+ */
+function recipeDetailView(fs: FieldScene, it: Item, footer?: VChild, overlay?: VChild): VNode {
+  const db = fs.db, t = db.a.text, pt = it.sub >> 4, ps = it.sub & 15;
+  const pr = db.iconRect(db.icon(pt, ps));
+  const needs = combineNeeds(db.a, it).map((n) => {
+    const have = countOf(fs.inv, n.type, n.sub), r = db.iconRect(db.icon(n.type, n.sub));
+    const s = (t[have < n.count ? 0x1b16 : 0x1a6f] ?? '%d/%d').replace('%d', String(have)).replace('%d', String(n.count));
+    return h('div.v-row.tb-need', { cls: have < n.count && 'short' },
+      h('div.tb-cell', null, sprite(r.image, r.sx, r.sy, 16, 16)),
+      gt(t[0x7fc + db.model(n.type, n.sub, 0)] ?? '', { cls: 'v-grow tb-ellipsis' }),
+      gt(s));
+  });
+  return h('div.u-window.v-col.v-fill.tb-detail', null,
+    h('div.v-box.v-row.tb-detail-head', null,
+      h('div.tb-cell', null, sprite(pr.image, pr.sx, pr.sy, 16, 16)),
+      h('div.v-col.v-grow', { style: 'gap:1px' },
+        gt(it.name, { cls: 'tb-ellipsis' }),
+        h('div.v-row.tb-sub', null, `${t[0x24] ?? 'REQUIRE LV'} ${it.level}`))),
+    h('div.v-box.v-col.v-grow.v-scroll.tb-detail-body', null,
+      gt(t[db.descId(pt, ps, it.grade)] ?? ''),
+      h('div.v-rule'),
+      needs),
+    footer,
+    overlay);
+}
+
+/** Item detail drawn as a view over the 220 window (shop and equipment tab) */
 export function drawItemDetail(u: Ui, fs: FieldScene, it: Item): void {
-  const a = fs.db.a, t = a.text;
-  u.window(0, 23, 220, 196);
-  u.roundFill(7, 31, 206, 29, 0, 1);
-  u.bevel(9, 32, 26, 26, CELL_EDGE, 0);
-  const r = fs.db.iconRect(it.icon);
-  u.image(r.image, r.sx, r.sy, 16, 16, 14, 37);
-  u.string((it.enh && it.type < 0x10 ? `+${it.enh} ` : '') + it.name, 210, 40, 'right');
-  u.roundFill(7, 63, 206, 150, 0, 1);
-  let y = 70;
-  if (it.type < 0x10) {
-    u.cfont(t[0x24] ?? 'REQUIRE LV', 11, y);
-    u.number(it.reqLevel, 70, y, 0, 2);
-    if (it.type < 15) u.cfontCenter(t[0x5d + (it.type % 3)] ?? '', 185, y);
-    u.fill(11, 80, 189, 1, 0x9ecad7);
-    y = 85;
-  }
-  const desc = t[0xa50 + fs.db.model(it.type, it.sub, it.grade)] ?? '';
-  y += u.paragraph(desc, 110, y, 180) * 15 + 5;
-  if (it.type < 0x10) {
-    u.fill(11, y, 189, 1, 0x9ecad7);
-    y += 6;
-    const label = it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6;
-    u.string(`${t[label] ?? ''} ${it.base}`, 110, y, 'center');
-    y += 15;
-    for (const [id, v] of it.options) {
-      if (id === 0xff) continue;
-      u.string((t[1972 + id] ?? '').replace('%d', String(v)).replace('%%', '%'), 110, y, 'center');
-      y += 15;
-    }
-  }
+  u.mount('tab-over', 'itemDetail', itemDetailView(fs, it));
 }
 
 /** Inventory tab 0x1E (FUN_0005b744 -> FUN_00058890, keys FUN_000572a8). */
@@ -195,7 +253,7 @@ export class InventoryTab {
     if (it.type < 0x10) e.push(ACTION.SOCKET);
     e.push(ACTION.CANCEL);
     const col = this.sel % 4;
-    this.action = new ActionPopup(this.ctx, e, 130 + (col > 1 ? 12 : 77) + col * 36, 88);
+    this.action = new ActionPopup(this.ctx, e, col > 1 ? 'left' : 'right', Math.trunc(this.sel / 4) > 1);
   }
 
   private run(action: number): void {
@@ -274,110 +332,104 @@ export class InventoryTab {
     this.fs.autosave();
   }
 
+  /** FUN_0005b744 -> FUN_00058890: bag column, 4x4 grid, name bar (FUN_00058740), gold (FUN_0004c550) */
   draw(u: Ui): void {
-    const fs = this.fs, inv = fs.inv, t = this.ctx.assets.text;
     if (this.shop) return;
-    if (this.detail) {
-      drawItemDetail(u, fs, this.detail);
-      u.hit(-200, -200, 700, 700, () => (this.gems ? [AVK.CLR] : [AVK.OK]));
-      if (this.detail.type < 0x10) {                         // gem buttons and the gem list
-        const it = this.detail, empty = it.sockets.filter((g) => g !== 0xff).length < it.count;
-        u.button(6, 192, 62, 22, 3, empty ? 0 : 3);
-        u.hit(6, 192, 62, 22, () => [AVK.K0]);
-        u.textId(0x19e6, 37, 196, 'center');
-        u.button(152, 192, 62, 22, 3, it.sockets.some((g) => g !== 0xff) && countOf(inv, 0x1b, 0x0b) > 0 ? 0 : 3);
-        u.hit(152, 192, 62, 22, () => [AVK.POUND]);
-        u.textId(0x19e7, 183, 196, 'center');
-        if (this.gems) {
-          const g = this.gems;
-          u.roundFill(7, 120, 206, 40, 0, 1);
-          u.image('t', 0, 19, 15, 19, 12, 130);
-          u.image('t', 0, 19, 15, 19, 195, 130, 1);
-          const top = Math.max(0, Math.min(g.cur - 3, g.list.length - 4));
-          for (let k = 0; k < 4; k++) {
-            const gi = g.list[top + k], x = 42 + 35 * k;
-            if (gi !== undefined) u.hit(x, 126, 26, 26, () => { if (g.cur === top + k) return [AVK.OK]; g.cur = top + k; });
-            if (top + k === g.cur && gi !== undefined) u.glow(x - 2, 124, 30, 30, this.t);
-            u.bevel(x, 126, 26, 26, CELL_EDGE, 0);
-            if (gi !== undefined && inv.items[gi]) drawItemCell(u, fs, inv.items[gi], x + 1, 127);
-          }
-          if (!g.list.length) u.string('-', 110, 134, 'center');
-        }
-      }
-      return;
-    }
-    u.roundFill(55, 35, 150, 154, 0, 1);
-    for (let k = 0; k < 16; k++) {
-      const x = (k & 3) * 36 + 63, y = (k >> 2) * 35 + 47;
-      if (this.focus === 1 && k === this.sel) u.glow(x - 2, y - 2, 30, 30, this.t);
-      u.bevel(x, y, 26, 26, CELL_EDGE, 0);
-      u.hit(x - 4, y - 4, 34, 34, () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; this.f = 0; });
-      const it = inv.items[this.bag * 16 + k];
-      if (!it) continue;
-      drawItemCell(u, fs, it, x + 1, y + 1);
-      if (it.type === 0x11 && it.enh) {                     // FUN_000226b0 cooldown shade
-        const max = it.sub < 14 ? 100 : 900;
-        if (it.enh < 4) { u.alpha = it.enh * 8; u.fill(x + 1, y + 1, 24, 24, 0xffffff); }
-        else if (it.enh >= max - 1) { u.alpha = 16; u.fill(x + 1, y + 1, 24, 24, 0); }
-        u.alpha = 32;
-      }
-    }
-    if (this.focus === 0) u.glow(6, this.bag * 32 + 30, 34, 34, this.t);
-    const bags = inv.bags + 3;
-    for (let i = 0; i < 5; i++) {
-      u.alpha = i === this.bag ? 32 : 16;
-      u.button(8, 32 * (i + 1), 0x1e, 0x1e, 3, i >= bags ? 3 : i === this.bag ? 1 : 0);
-      if (i < bags) u.hit(6, 32 * (i + 1) - 2, 34, 32, () => { this.focus = 0; if (this.bag !== i) { this.bag = i; this.sel = 0; } });
-      else u.hit(6, 32 * (i + 1) - 2, 34, 32, () => {                 // locked bag: popup 0x7E (25 coupons, FUN_00047488)
-        this.confirm = { popup: new Popup(this.ctx, 0x7e), idx: -1, yes: () => { this.message = buyBag(this.ctx, this.fs); } };
-      });
-      u.image('t', 15, 24, 16, 16, 15, 38 + 32 * i);
-      u.alpha = 32;
-      if (i < bags) {                                        // FUN_0004c514 "n/16"
-        const n = Math.max(0, Math.min(16, inv.items.length - 16 * i));
-        const w = String(n).length * 4 + 1;
-        u.number(n, 11, 55 + 32 * i, 0, 0);
-        u.cfont(t[80] ?? '/', 11 + w + 2, 55 + 32 * i);
-        u.number(16, 11 + w + 8, 55 + 32 * i, 0, 0);
-      }
-    }
-    for (let k = 0; k < 5 - bags; k++) u.image('c', 208, 63, 7, 9, 28, 175 - 32 * k);
-    const it = inv.items[this.idx];
-    if (this.f > 4 && it && this.focus === 1 && !this.action) {        // FUN_00058740 name tooltip
-      const row = this.sel >> 2;
-      const px = Math.trunc(((this.sel & 3) * 13 + 115) * 0.9);
-      const y = row * 35 + 47 + (row > 2 ? -30 : 50);
-      const anim = Math.min(2 * this.f, 30), k = (anim - 10) >> 1;
-      if (k > 0) { u.alpha = 16; u.fill(px - 100, y - 2 * k, 200, 4 * k, 0); u.alpha = 32; }
-      if (anim === 30) u.string(it.name, px, y - 8, 'center');
-    }
-    u.roundFill(55, 194, 82, 16, 0, 1);                      // FUN_0004c550 gold, 9 digits
-    u.number(inv.gold, 130, 196, 1, 2, 9);
-    u.image('t', 38, 24, 12, 12, 59, 196);
-    u.button(152, 192, 0x3e, 0x16, 3, 0);
-    u.textId(0x1a1d, 183, 196, 'center');
+    if (this.detail) { this.drawDetail(u, this.detail); return; }
+    u.mount('tab', 'inv', this.mainView());
     if (this.quick) this.drawQuick(u);
   }
 
-  /** Quick slot register overlay (FUN_00028a48). */
-  private drawQuick(u: Ui): void {
-    const q = this.quick!, inv = this.fs.inv;
-    for (let i = 0; i < 6; i++) {
-      const y = 18 + 35 * i;
-      u.image('touch', 0, 18, 31, 31, -50, y - 3, 0, i === q.cur ? { tint: [255, 255, 153], amount: Math.abs(16 - (this.t % 32)) } : undefined);
-      u.hit(-50, y - 3, 31, 31, () => { if (q.cur === i) return [AVK.OK]; q.cur = i; });
-      const s = inv.quick[i];
-      u.alpha = 16;
-      if (i !== q.cur && s.kind === 2 && inv.items[s.id]) drawItemCell(u, this.fs, inv.items[s.id], -46, y);
-      if (i !== q.cur && s.kind === 1) u.image('sIcon', (s.id % 10) * 24, this.fs.model.cls * 24, 24, 24, -46, y);
-      u.alpha = 32;
+  private mainView(): VNode {
+    const fs = this.fs, inv = fs.inv, t = this.ctx.assets.text, bags = inv.bags + 3;
+    const bagButtons = Array.from({ length: 5 }, (_, i) => {
+      if (i >= bags) {                                          // locked bag: popup 0x7E (25 coupons, FUN_00047488)
+        return button([sprite('t', 15, 24, 16, 16), sprite('c', 208, 63, 7, 9, { cls: 'tb-lock' })], {
+          cls: 'tb-bag locked', on: () => {
+            this.confirm = { popup: new Popup(this.ctx, 0x7e), idx: -1, yes: () => { this.message = buyBag(this.ctx, this.fs); } };
+          },
+        });
+      }
+      const n = Math.max(0, Math.min(16, inv.items.length - 16 * i));   // FUN_0004c514 "n/16"
+      return button(h('div.v-col.v-center', null, sprite('t', 15, 24, 16, 16), h('span.tb-bag-n', null, `${n}${t[80] ?? '/'}16`)), {
+        sel: i === this.bag, glow: this.focus === 0, cls: 'tb-bag',
+        on: () => { this.focus = 0; if (this.bag !== i) { this.bag = i; this.sel = 0; } },
+      });
+    });
+    const cells = Array.from({ length: 16 }, (_, k) => {
+      const it = inv.items[this.bag * 16 + k];
+      let shade: VChild = null;
+      if (it && it.type === 0x11 && it.enh) {                    // FUN_000226b0 cooldown shade
+        const max = it.sub < 14 ? 100 : 900;
+        if (it.enh < 4) shade = h('span.tb-shade', { style: `background:#fff;opacity:${(it.enh * 8) / 32}` });
+        else if (it.enh >= max - 1) shade = h('span.tb-shade', { style: 'background:#000;opacity:0.5' });
+      }
+      return cellView(fs, it, {
+        sel: this.focus === 1 && k === this.sel, shade, anchor: this.focus === 1 && k === this.sel && this.action?.anchor(),
+        on: () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; this.f = 0; },
+      });
+    });
+    const cur = this.focus === 1 ? inv.items[this.idx] : undefined;
+    return h('div.v-row.v-fill.tb-inv', null,
+      this.action?.backdrop(),
+      h('div.v-col.tb-bags', null, bagButtons),
+      h('div.v-col.v-grow', { style: 'gap:4px' },
+        h('div.v-box.v-heading.tb-name', null, cur && gt(cur.name, { cls: 'tb-ellipsis' })),
+        h('div.v-box.v-grow.tb-grid', null, cells),
+        h('div.v-row', { style: 'gap:6px' },
+          h('div.v-box.v-row.v-grow.tb-gold', null, sprite('t', 38, 24, 12, 12), h('span.v-grow', null, inv.gold.toLocaleString('en-US'))),
+          button(gt(t[0x1a1d] ?? ''), { cls: 'tb-wide' }))));
+  }
+
+  /** item detail with the gem buttons ('0' attach, '#' extract) and the gem list (FUN_000441e4) */
+  private drawDetail(u: Ui, it: Item): void {
+    const fs = this.fs, inv = fs.inv;
+    u.hit(-200, -200, 700, 700, () => (this.gems ? [AVK.CLR] : [AVK.OK]));
+    let footer: VChild = null, overlay: VChild = null;
+    if (it.type < 0x10) {
+      const empty = it.sockets.filter((g) => g !== 0xff).length < it.count;
+      const extract = it.sockets.some((g) => g !== 0xff) && countOf(inv, 0x1b, 0x0b) > 0;
+      footer = h('div.v-row.tb-detail-foot', null,
+        button(gt(this.ctx.assets.text[0x19e6] ?? ''), { cls: `tb-wide${empty ? '' : ' off'}`, on: () => [AVK.K0] }),
+        button(gt(this.ctx.assets.text[0x19e7] ?? ''), { cls: `tb-wide${extract ? '' : ' off'}`, on: () => [AVK.POUND] }));
+      if (this.gems) {
+        const g = this.gems, top = Math.max(0, Math.min(g.cur - 3, g.list.length - 4));
+        const cells = Array.from({ length: 4 }, (_, k) => {
+          const gi = g.list[top + k];
+          return cellView(fs, gi !== undefined ? inv.items[gi] : null, {
+            sel: gi !== undefined && top + k === g.cur,
+            on: gi !== undefined ? () => { if (g.cur === top + k) return [AVK.OK]; g.cur = top + k; } : undefined,
+          });
+        });
+        overlay = h('div.v-box.v-row.tb-gems', null,
+          arrow(false),
+          h('div.v-row.v-grow.v-center', { style: 'gap:9px' }, g.list.length ? cells : '-'),
+          arrow(true));
+      }
     }
-    const it = inv.items[q.idx];
-    if (it) drawItemCell(u, this.fs, it, -46, 18 + 35 * q.cur);
+    u.mount('tab-over', 'itemDetail', itemDetailView(fs, it, footer, overlay));
+  }
+
+  /** Quick slot register overlay (FUN_00028a48): six touch slots left of the window, the cursor slot pulsing. */
+  private drawQuick(u: Ui): void {
+    const q = this.quick!, inv = this.fs.inv, fs = this.fs;
+    const slots = Array.from({ length: 6 }, (_, i) => {
+      const s = inv.quick[i], cur = i === q.cur;
+      const reg = cur ? inv.items[q.idx] : undefined;
+      return h('div.tb-qslot', { on: () => { if (q.cur === i) return [AVK.OK]; q.cur = i; } },
+        sprite('touch', 0, 18, 31, 31, cur ? {
+          cls: 'v-tint tb-pulse', style: `--tint:rgb(255,255,153);--mask:url("${IMAGE_BASE}touch.png");`,
+        } : {}),
+        !cur && s.kind === 2 && inv.items[s.id] && itemIcon(fs, inv.items[s.id], 'tb-qicon dim'),
+        !cur && s.kind === 1 && sprite('sIcon', (s.id % 10) * 24, fs.model.cls * 24, 24, 24, { cls: 'tb-qskill dim' }),
+        reg && itemIcon(fs, reg, 'tb-qicon'),
+        reg && fs.db.showsCount(reg) && h('span.tb-count', null, String(reg.count)));
+    });
+    u.view('invQuick', -50, 15, 31, 6 * 35, h('div.v-col', { style: 'gap:4px' }, slots));
   }
 
   drawOverlay(u: Ui): void {
-    if (this.action) { u.pop(); this.action.draw(u); u.pushCenter220(); }
+    this.action?.draw(u);
   }
 
   drawPopups(): void {
@@ -432,7 +484,7 @@ export class EquipTab {
         const eq = !!inv.equip[this.slot];
         const e = eq ? [ACTION.DETAIL, ACTION.EQUIP, ACTION.UNEQUIP, ACTION.DROP, ACTION.CANCEL] : [ACTION.EQUIP, ACTION.CANCEL];
         const s = this.slot;
-        this.action = new ActionPopup(this.ctx, e, 130 + (s & 1) * 48 + 52, 50 + (s >> 1) * 33 + 45 - ((s >> 1) === 2 ? 30 : 0));
+        this.action = new ActionPopup(this.ctx, e, s & 1 ? 'left' : 'right', (s >> 1) === 2);
       } else return false;
     }
     return true;
@@ -448,78 +500,78 @@ export class EquipTab {
     else if (action === ACTION.DROP && it) { inv.equip[this.slot] = null; this.fs.recompute(); }
   }
 
+  /** FUN_0005b4b8: six slots around the character preview, the slot's item name, stats */
   draw(u: Ui): void {
-    const fs = this.fs, inv = fs.inv, t = this.ctx.assets.text;
+    const fs = this.fs;
     if (this.detail) { drawItemDetail(u, fs, this.detail); u.hit(-200, -200, 700, 700, () => [AVK.OK]); return; }
     if (this.pick) { this.drawPick(u); return; }
-    for (let i = 0; i < 6; i++) {
-      const x = (i & 1) * 116 + 40, y = (i >> 1) * 35 + 33;
-      if (i === this.slot) u.glow(x - 3, y - 3, 30, 30, this.t);
-      u.bevel(x, y, 24, 24, CELL_EDGE, EQUIP_FILL);
-      u.hit(x - 5, y - 5, 34, 34, () => { if (this.slot === i) return [AVK.OK]; this.slot = i; });
-      const it = inv.equip[i];
-      if (it) drawItemCell(u, fs, it, x, y);
-      else u.cSprite(12 + i, x + 12, y + 13, true);
-    }
+    u.mount('tab', 'equip', this.mainView());
+    // the animated character preview stays a cmf frame (with its multiply shadow), between the slot columns
     u.alpha = 20;
     u.image('shadow', 120, 0, 36, 20, 92, 96, 14 << 8);           // multiply
     u.alpha = 32;
     const f = (Math.trunc(this.t / 2) % 6) + 0;                    // idle frames 0..5 (facing down)
     u.frame(`cmf_c${fs.model.cls}`, this.playerCmf, f, 110, 102);
-    u.roundFill(8, 135, 204, 22, 0, 1);
-    const cur = inv.equip[this.slot];
-    if (cur) u.string(cur.name, 110, 139, 'center');
-    u.roundFill(8, 161, 204, 48, 0x171d24, 1);
+  }
+
+  private mainView(): VNode {
+    const fs = this.fs, inv = fs.inv, a = this.ctx.assets, t = a.text;
+    const slot = (i: number) => cellView(fs, inv.equip[i], {
+      cls: 'eq', sel: i === this.slot, empty: cSprite(a, 12 + i), anchor: i === this.slot && this.action?.anchor(),
+      on: () => { if (this.slot === i) return [AVK.OK]; this.slot = i; },
+    });
     const st = fs.stats;
     const vals = [st.D[6], st.D[7], st.D[8], st.D[9], st.atk, st.def];
     const labels = [t[0x15], t[0x16], t[0x17], t[0x18], t[0x4e] ?? 'DMG', t[0x4f] ?? 'DEF'];
-    for (let i = 0; i < 6; i++) {
-      const x = (i >> 1) * 64 + 20, row = (i % 3) - (i > 3 ? 1 : 0) - (i === 2 ? 1 : 0);
-      const y = 172 + 18 * row;
-      u.tfont(labels[i] ?? '', x, y);
-      u.number(vals[i], x + 27, y - 2, 1, 0);
-    }
+    const cur = inv.equip[this.slot];
+    return h('div.v-col.v-fill.v-tab.tb-equip', null,
+      this.action?.backdrop(),
+      h('div.tb-slots', null, [0, 1, 2].map((r) => [slot(2 * r), h('span'), slot(2 * r + 1)])),
+      h('div.v-box.v-heading.tb-name', null, cur && gt(cur.name, { cls: 'tb-ellipsis' })),
+      h('div.v-box.tb-stats', null, [0, 3, 4, 1, 2, 5].map((i) =>               // original 3x2 placement
+        h('div.v-row.v-kv', null, h('span.v-grow.tb-stat-label', null, labels[i] ?? ''), String(vals[i])))));
   }
 
-  /** 0x2F candidate select, simplified comparison (main stat only). */
+  /** 0x2F candidate select (FUN_0005d948), simplified comparison (main stat only). */
   private drawPick(u: Ui): void {
-    const fs = this.fs, inv = fs.inv, p = this.pick!, t = this.ctx.assets.text;
-    u.image('t', 0, 0x13, 0xf, 0x13, 17, 35);
-    u.image('t', 0, 0x13, 0xf, 0x13, 189, 35, 1);
     u.hit(-200, -200, 700, 700, () => [AVK.CLR]);              // tap outside the list closes
-    u.hit(10, 28, 30, 30, () => [AVK.LEFT]);
-    u.hit(182, 28, 30, 30, () => [AVK.RIGHT]);
-    u.roundFill(41, 30, 138, 32, 0, 1);
+    u.mount('tab', 'equipPick', this.pickView());
+  }
+
+  private pickView(): VNode {
+    const fs = this.fs, inv = fs.inv, p = this.pick!, a = this.ctx.assets, t = a.text;
     const top = Math.max(0, p.cur - 3);
-    for (let k = 0; k < 4; k++) {
-      const x = 46 + 34 * k, idx = p.cands[top + k];
-      if (top + k === p.cur && idx !== undefined) u.glow(x - 2, 30, 28, 28, this.t);
-      u.bevel(x, 32, 24, 24, CELL_EDGE, EQUIP_FILL);
-      if (idx !== undefined) u.hit(x - 4, 28, 32, 32, () => { if (p.cur === top + k) return [AVK.OK]; p.cur = top + k; });
-      if (idx !== undefined) drawItemCell(u, fs, inv.items[idx], x, 32);
-      else u.cSprite(12 + this.slot, x + 12, 45, true);
+    const strip = Array.from({ length: 4 }, (_, k) => {
+      const idx = p.cands[top + k];
+      return cellView(fs, idx !== undefined ? inv.items[idx] : null, {
+        cls: 'eq', sel: idx !== undefined && top + k === p.cur, empty: cSprite(a, 12 + this.slot),
+        on: idx !== undefined ? () => { if (p.cur === top + k) return [AVK.OK]; p.cur = top + k; } : undefined,
+      });
+    });
+    let info: VChild;
+    if (!p.cands.length) info = h('div.v-grow.v-row.v-center', null, gt(t[0x1a1e] ?? ''));
+    else {
+      const it = inv.items[p.cands[p.cur]], old = inv.equip[this.slot];
+      const label = t[this.slot === 0 ? 0x1ad2 : this.slot === 5 ? 0x1ad6 : 0x1ad4] ?? '';
+      const d = it.base - (old?.base ?? 0);
+      const cmp = d > 0 ? `${label} ${it.base}(|e+${d}|b)` : d < 0 ? `${label} ${it.base}|b(|c${d}|b)` : `${label} ${it.base}`;
+      info = [
+        h('div.v-row', { style: 'gap:6px' }, cellView(fs, it, { cls: 'eq' }), gt(it.name, { cls: 'v-grow tb-ellipsis' })),
+        h('div.v-row.tb-sub', null, h('span.v-grow'), `${t[0x24] ?? 'REQUIRE LV'} ${it.reqLevel}`),
+        h('div.v-rule'),
+        gt(cmp),
+        it.options.filter(([id]) => id !== 0xff).map(([id, v]) => gt(optionText(t, id, v), { pen: 0x9e7f })),
+      ];
     }
-    u.roundFill(18, 63, 185, 148, 0, 1);
-    if (!p.cands.length) { u.textId(0x1a1e, 110, 70, 'center'); return; }
-    const it = inv.items[p.cands[p.cur]], old = inv.equip[this.slot];
-    u.bevel(38, 68, 24, 24, CELL_EDGE, EQUIP_FILL);
-    drawItemCell(u, fs, it, 38, 68);
-    u.string(it.name, 70, 74);
-    u.cfont(t[0x24] ?? 'REQUIRE LV', 130, 94);
-    u.number(it.reqLevel, 190, 94, 0, 2);
-    const label = t[this.slot === 0 ? 0x1ad2 : this.slot === 5 ? 0x1ad6 : 0x1ad4] ?? '';
-    const d = it.base - (old?.base ?? 0);
-    const cmp = d > 0 ? `${label} ${it.base}(|e+${d}|b)` : d < 0 ? `${label} ${it.base}|b(|c${d}|b)` : `${label} ${it.base}`;
-    u.string(cmp, 110, 110, 'center');
-    let y = 128;
-    for (const [id, v] of it.options) {
-      if (id === 0xff) continue;
-      u.string((t[1972 + id] ?? '').replace('%d', String(v)).replace('%%', '%'), 106, y, 'center');
-      y += 15;
-    }
+    return h('div.v-col.v-fill.v-tab.tb-pick', null,
+      h('div.v-row.v-center', { style: 'gap:6px' },
+        arrow(false),
+        h('div.v-box.v-row.tb-strip', null, strip),
+        arrow(true)),
+      h('div.v-box.v-col.v-grow.v-scroll.tb-pick-info', null, info));
   }
 
   drawOverlay(u: Ui): void {
-    if (this.action) { u.pop(); this.action.draw(u); u.pushCenter220(); }
+    this.action?.draw(u);
   }
 }

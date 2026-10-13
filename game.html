@@ -8,16 +8,18 @@
       html, body { margin: 0; height: 100%; background: #000; color: #ccc; font: 12px system-ui, sans-serif; }
       body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
       canvas { image-rendering: pixelated; display: block; }
-      #stage { position: relative; }
-      #overlay { position: absolute; inset: 0; pointer-events: none; }
+      #frame { position: relative; overflow: hidden; }
+      #overlay { pointer-events: none; }
       #hud { height: 24px; line-height: 24px; color: #8a8; }
     </style>
   </head>
   <body>
     <div id="hud"></div>
-    <div id="stage">
-      <canvas id="screen" width="480" height="320"></canvas>
-      <canvas id="overlay" width="480" height="320"></canvas>
+    <div id="frame">
+      <div id="stage">
+        <canvas id="screen" width="480" height="320"></canvas>
+        <canvas id="overlay" width="480" height="320"></canvas>
+      </div>
     </div>
     <script type="module" src="/src/game/main.ts"></script>
   </body>

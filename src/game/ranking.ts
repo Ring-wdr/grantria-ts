@@ -8,6 +8,9 @@ import { derive, type Derived } from './rules';
 import { SLOT_COUNT, loadGamedata, loadSlot, type SaveData } from './save';
 import type { GameContext, Scene } from './scene';
 import { frozenTitle, playTime, render, TitleScene } from './screens';
+import type { Ui } from './ui';
+import { button, gt, h, sprite, type VNode } from './view';
+import './css/screens-misc.css';
 
 export interface RankEntry {
   slot: number;
@@ -119,72 +122,96 @@ export class RankingScene implements Scene {
   draw(): void {
     render(this.ctx, () => {
       frozenTitle(this.ctx);
-      const u = this.ctx.ui, rows = this.sorted();
+      const u = this.ctx.ui;
       u.pushCenter220();
-      if (this.state === 0x35) {                                      // FUN_00034028 / FUN_00033dcc
-        for (let i = 0; i < 3; i++) {
-          const y = 22 + 66 * i, sl = this.slots[i];
-          u.window(0, 24 + 66 * i, 219, 63);
-          if (this.cur === i) u.slotGlow(2, y + 5, 0xd6, 0x39, this.t);
-          u.hit(0, 24 + 66 * i, 219, 63, () => { if (this.cur === i) return [AVK.OK]; this.cur = i; });
-          if (!sl) { u.cfont('EMPTY SPACE', 0x56, y + 0x1b, 0); continue; }
-          const cmfName = `cmf_c${sl.cls}`;
-          u.frame(cmfName, this.ctx.cmfs[cmfName], this.t % 6, sl.cls === 2 ? 0x23 : 0x26, y + (sl.cls === 2 ? 0x3a : 0x30));
-          u.textId(0x3e1 + sl.cls, 77, y + 8);
-          if ((loadGamedata().lap[i] ?? 0) === 2) u.textId(6716, 110, y + 8, 'left', { pen: 0xf800 });
-          u.textId(6717, 172, y + 8);
-          u.number(sl.level, 187, y + 8, 1);
-          u.textId(0x1d6 + (sl.zone ?? 0), 145, y + 30, 'center');
-          u.string(playTime(sl.playTicks), 218, y + 46, 'right');
-        }
-      } else if (this.state === 0x36) {                               // FUN_00031a44
-        u.window(0, 0, 0xdc, 0xd4);
-        u.textId(6617, 110, 5, 'center');
-        u.button(158, 0, 62, 22, 3, 1); u.textId(this.mine ? 6639 : 6638, 189, 4, 'center'); u.hit(158, 0, 62, 22, () => [AVK.K0]);
-        const pages = Math.max(1, Math.ceil(rows.length / 3));
-        for (let i = 0; i < 3; i++) {
-          const e = rows[this.page * 3 + i], y = 26 + 56 * i;
-          u.window(4, y, 0xd4, 52);
-          if (i === this.sel) u.slotGlow(6, y + 2, 0xd0, 48, this.t);
-          u.hit(4, y, 0xd4, 52, () => { if (this.sel === i) return [AVK.OK]; this.sel = i; });
-          if (!e) continue;
-          u.textId(6727, 12, y + 6); u.number(this.page * 3 + i + 1, 50, y + 6, 1);
-          u.textId(0x3e1 + e.cls, 80, y + 6);
-          u.textId(6717, 150, y + 6); u.number(e.level, 165, y + 6, 1);
-          u.textId(6728, 12, y + 21); u.string(String(e.score), 208, y + 21, 'right', { pen: 0xffe0 });
-          u.textId(6729, 12, y + 36); u.string(String(e.dmg), 90, y + 36, 'right');
-          u.textId(6730, 110, y + 36); u.string(String(e.def), 200, y + 36, 'right');
-        }
-        u.string(`${this.page + 1}/${pages}`, 110, 0xc2, 'center');
-      } else {                                                        // FUN_0003177c
-        const e = rows[this.page * 3 + this.sel];
-        u.window(0, 0, 0xdc, 0xd4);
-        u.textId(6640, 110, 5, 'center');
-        if (e) {
-          u.textId(0x3e1 + e.cls, 15, 30); u.textId(6717, 150, 30); u.number(e.level, 165, 30, 1);
-          u.textId(6731, 15, 50); u.string(String(e.hp), 90, 50, 'right');
-          u.textId(6732, 110, 50); u.string(String(e.mp), 200, 50, 'right');
-          u.textId(6729, 15, 66); u.string(String(e.dmg), 90, 66, 'right');
-          u.textId(6730, 110, 66); u.string(String(e.def), 200, 66, 'right');
-          e.stats.forEach((v, k) => { u.textId(21 + k, 15 + 70 * (k & 1), 105 + 15 * (k >> 1)); u.number(v, 60 + 70 * (k & 1), 105 + 15 * (k >> 1), 0); });
-          u.button(145, 110, 62, 22, 3, this.skillView ? 1 : 0); u.textId(6641, 176, 114, 'center'); u.hit(145, 110, 62, 22, () => [AVK.K0]);
-          e.equip.forEach((it, k) => {
-            const x = 13 + 34 * k;
-            u.bevel(x, 140, 26, 26, 0x354e73, 0);
-            if (k === this.eq) u.glow(x - 2, 138, 30, 30, this.t);
-            u.hit(x, 140, 26, 26, () => { this.eq = k; });
-            if (it) { const r = this.db.iconRect(it.icon); u.image(r.image, r.sx, r.sy, 16, 16, x + 5, 145); }
-          });
-          const it = e.equip[this.eq];
-          if (it) u.string(it.name, 110, 179, 'center');
-          if (this.skillView) {                                       // FUN_00027218 skill view
-            u.window(10, 40, 200, 150);
-            (e.skills ?? []).forEach((lv, k) => u.string(`${k < 9 ? 'A' : 'P'}${k < 9 ? k + 1 : k - 8}  LV ${lv}`, 20 + 95 * (k >> 3), 50 + 16 * (k & 7)));
-          }
-        }
-      }
+      if (this.state === 0x35) this.drawSlots(u);
+      else if (this.state === 0x36) u.view('rank-list', 0, 0, 0xdc, 0xd4, this.listView());
+      else u.view('rank-detail', 0, 0, 0xdc, 0xd4, this.detailView());
       u.pop();
       u.closeButton();
     }, this.popup ? () => this.popup!.p.draw() : undefined);
   }
+
+  /** FUN_00034028 / FUN_00033dcc: three slot cards (class, lap mark, level, zone, play time); the
+   *  walking character (cmf animation) and the EMPTY SPACE c-font stay original art on top. */
+  private drawSlots(u: Ui): void {
+    const t = this.ctx.assets.text, laps = loadGamedata().lap;
+    const cards = this.slots.slice(0, 3).map((sl, i) => h(`div.sm-win.u-window.sm-slot${this.cur === i ? '.v-sel' : ''}`, {
+      on: () => { if (this.cur === i) return [AVK.OK]; this.cur = i; },
+    }, corners(), sl && h('div.v-col.sm-slot-info', null,
+      h('div.v-row', { style: 'gap:6px' },
+        gt(t[0x3e1 + sl.cls] ?? ''),
+        (laps[i] ?? 0) === 2 && gt(t[6716] ?? '', { pen: 0xf800 }),
+        h('span.v-grow'),
+        gt(t[6717] ?? ''), h('span.sm-num', null, String(sl.level))),
+      h('div.v-grow.v-center.v-row', null, gt(t[0x1d6 + (sl.zone ?? 0)] ?? '')),
+      h('div.sm-time', null, playTime(sl.playTicks)))));
+    u.view('rank-slots', 0, 24, 219, 3 * 66 - 3, h('div.v-col.v-fill', { style: 'gap:3px' }, cards));
+    for (let i = 0; i < 3; i++) {
+      const y = 22 + 66 * i, sl = this.slots[i];
+      if (!sl) { u.cfont('EMPTY SPACE', 0x56, y + 0x1b, 0); continue; }
+      const cmfName = `cmf_c${sl.cls}`;
+      u.frame(cmfName, this.ctx.cmfs[cmfName], this.t % 6, sl.cls === 2 ? 0x23 : 0x26, y + (sl.cls === 2 ? 0x3a : 0x30));
+    }
+  }
+
+  /** FUN_00031a44: title, 1위부터 / 내랭킹 toggle, three entries per page, page counter */
+  private listView(): VNode {
+    const t = this.ctx.assets.text, rows = this.sorted(), pages = Math.max(1, Math.ceil(rows.length / 3));
+    const kv = (label: number, value: number, pen?: number) => h('div.v-row.sm-kv', null,
+      gt(t[label] ?? '', { cls: 'v-grow' }), gt(String(value), { pen }));
+    const cards = Array.from({ length: 3 }, (_, i) => {
+      const e = rows[this.page * 3 + i];
+      return h(`div.sm-win.u-window.sm-entry${i === this.sel ? '.v-sel' : ''}`, {
+        on: () => { if (this.sel === i) return [AVK.OK]; this.sel = i; },
+      }, corners(), e && h('div.v-col.sm-entry-body', null,
+        h('div.v-row', { style: 'gap:6px' },
+          h('span.sm-rank', null, gt(t[6727] ?? ''), h('span.sm-num', null, String(this.page * 3 + i + 1))),
+          gt(t[0x3e1 + e.cls] ?? '', { cls: 'v-grow' }),
+          gt(t[6717] ?? ''), h('span.sm-num', null, String(e.level))),
+        kv(6728, e.score, 0xffe0),
+        h('div.sm-pair', null, kv(6729, e.dmg), kv(6730, e.def))));
+    });
+    return h('div.sm-win.u-window.v-col.v-fill.sm-panel', null, corners(),
+      h('div.v-row.sm-head', null,
+        h('span.sm-head-side'),
+        gt(t[6617] ?? '', { cls: 'v-grow sm-title' }),
+        button(gt(t[this.mine ? 6639 : 6638] ?? ''), { sel: true, glow: false, cls: 'sm-head-side', on: () => [AVK.K0] })),
+      h('div.v-col.v-grow', { style: 'gap:4px' }, cards),
+      h('div.v-row.v-pager', null,
+        h('span.v-page-btn', { on: () => [AVK.STAR] }, '◀'), `${this.page + 1}/${pages}`, h('span.v-page-btn', { on: () => [AVK.POUND] }, '▶')));
+  }
+
+  /** FUN_0003177c: class / level, HP MP ATK DEF, base stats, skill button, six equipment cells, item name;
+   *  FUN_00027218 skill list on top */
+  private detailView(): VNode {
+    const t = this.ctx.assets.text, e = this.sorted()[this.page * 3 + this.sel];
+    const kv = (label: string, value: number) => h('div.v-row.sm-kv', null, gt(label, { cls: 'v-grow' }), gt(String(value)));
+    const body = e && [
+      h('div.v-box.v-row.sm-detail-head', null,
+        gt(t[0x3e1 + e.cls] ?? '', { pen: 0xffe0, cls: 'v-grow' }), gt(t[6717] ?? ''), h('span.sm-num', null, String(e.level))),
+      h('div.v-box.sm-pair.sm-block', null,
+        kv(t[6731] ?? '', e.hp), kv(t[6732] ?? '', e.mp), kv(t[6729] ?? '', e.dmg), kv(t[6730] ?? '', e.def)),
+      h('div.v-row', { style: 'gap:6px;align-items:stretch' },
+        h('div.v-box.sm-pair.sm-block.v-grow', null, e.stats.map((v, k) => kv(t[21 + k] ?? '', v))),
+        h('div.v-col.v-center', null, button(gt(t[6641] ?? ''), { sel: this.skillView, glow: false, cls: 'sm-skill-btn', on: () => [AVK.K0] }))),
+      h('div.v-row.sm-equips', null, e.equip.map((it, k) => {
+        const r = it && this.db.iconRect(it.icon);
+        return h(`div.sm-eq${k === this.eq ? '.v-sel.cur' : ''}`, { on: () => { this.eq = k; } }, r && sprite(r.image, r.sx, r.sy, 16, 16));
+      })),
+      h('div.v-box.v-note', null, gt(e.equip[this.eq]?.name ?? '')),
+      this.skillView && h('div.v-modal', { on: () => [AVK.K0] },
+        h('div.sm-win.u-window.sm-skills', null, corners(),
+          (e.skills ?? []).map((lv, k) => h('div.v-row.sm-kv', null,
+            h('span.v-grow', null, `${k < 9 ? 'A' : 'P'}${k < 9 ? k + 1 : k - 8}`), `LV ${lv}`)))),
+    ];
+    return h('div.sm-win.u-window.v-col.v-fill.sm-panel', null, corners(),
+      h('div.v-row.sm-head', null, gt(t[6640] ?? '', { cls: 'v-grow sm-title' })),
+      body);
+  }
+}
+
+/** the four c.pxl corners of a window (FUN_000fb054), positioned by ui.css .u-window > .c0..c3 */
+function corners(): VNode[] {
+  return [0, 1, 2, 3].map((i) => sprite('c', 104, 37, 8, 8, { cls: `u-corner c${i}` }));
 }

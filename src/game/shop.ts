@@ -1,9 +1,10 @@
 // NPC shop / blacksmith screens (analysis/features/shop.md §1): function menu 0x16, list 0x15
 // (buy / sell / enhance / potion craft list), item action popup kind 1, quantity popup 0x0C,
 // confirm / progress / result popups, blacksmith combine·decompose and potion detail 0x2B,
-// enhance 0x2C and the decompose result window. Drawn on the 1.3x layer in C220 coordinates.
+// enhance 0x2C and the decompose result window. Drawn on the 1.3x layer in C220 coordinates as
+// declarative views (view.ts, css/shop.css); item icons stay the original sprites.
 // Not ported: the dark merchant (kind 3, needs the darkness phase), touch zones, the -10 % flag.
-import { stringWidth } from '../text';
+import './css/shop.css';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
 import type { Item } from './items';
@@ -14,11 +15,13 @@ import {
   enhGold, enhRate, enhStones, enhance, genStock, haveNeeds, potionNeeds, priceOf, sellValue, shopRegion,
   shownBuyPrice, shownSellPrice, darkGroup, type Need,
 } from './shopRules';
-import { ActionPopup, drawItemCell, drawItemDetail } from './tabs';
-import { tri, type Ui } from './ui';
+import { ActionPopup, drawItemDetail } from './tabs';
+import type { Ui } from './ui';
+import { button, gt, h, slot, sprite, win, type KeyAct, type ScrollRef, type VChild, type VNode } from './view';
 
-const CELL_EDGE = 0x354e73;
-const EQUIP_FILL = 0x20252c;
+const IMAGE_BASE = `${import.meta.env.BASE_URL}assets/images/`;
+const YELLOW565 = 0xffe0;
+const GREY565 = 0x9cf3;
 /** menu table d.dat 0x3F81E4 (action v × kind): which actions each shop offers */
 const MENU: number[][] = [[0, 1, 7], [0, 1, 3, 7], [2, 3, 4, 7], [0, 7]];
 
@@ -61,7 +64,7 @@ export class ShopScreen {
   private popup: { p: Popup; yes?: () => void; ok?: () => void; no?: () => void } | null = null;
   private progress: { p: Popup; n: number; run: () => void } | null = null;
   /** 0x2B: combine (recipes), decompose (equipment) or the potion detail */
-  private c2b = { list: [] as number[], cur: 0, focus: 0 as 0 | 1, scroll: 0, potion: -1 };
+  private c2b = { list: [] as number[], cur: 0, focus: 0 as 0 | 1, scroll: { y: 0 } as ScrollRef, potion: -1 };
   /** 0x2C */
   private enh = { idx: 0, focus: 0 as 0 | 1, aux: false, protect: false };
   private result: { gains: [number, number, number][] } | null = null;
@@ -77,7 +80,7 @@ export class ShopScreen {
     if (inv?.mode === 'enhance') { this.action = 2; this.enh = { idx: inv.idx, focus: 0, aux: false, protect: false }; this.screen = 'enhance'; }
     else if (inv?.mode === 'combine') { this.action = 3; this.screen = 'craft'; this.build2B(); this.c2b.cur = Math.max(0, this.c2b.list.indexOf(inv.idx)); }
     else if (inv?.mode === 'decompose') { this.action = 4; this.startInvDecompose(inv.idx); }
-    void ctx.ui13.layer.preload(['t', 'c', 'touch', 'sIcon', 'i0', 'i1', 'i2', 'i3']);
+    void ctx.ui13.preload(['t', 'c', 'touch', 'sIcon', 'i0', 'i1', 'i2', 'i3']);
   }
 
   private get a() { return this.ctx.assets; }
@@ -172,10 +175,10 @@ export class ShopScreen {
         break;
       case 1: case 2: this.screen = 'list'; this.focus = 1; break;
       case 3:
-        if (this.kind === 2) { this.c2b = { list: [], cur: 0, focus: 0, scroll: 0, potion: -1 }; this.screen = 'craft'; this.build2B(); }
+        if (this.kind === 2) { this.c2b = { list: [], cur: 0, focus: 0, scroll: { y: 0 } as ScrollRef, potion: -1 }; this.screen = 'craft'; this.build2B(); }
         else { this.stock = genStock(db, rng, 1, this.region, true); this.screen = 'list'; }
         break;
-      case 4: this.c2b = { list: [], cur: 0, focus: 0, scroll: 0, potion: -1 }; this.screen = 'craft'; this.build2B(); break;
+      case 4: this.c2b = { list: [], cur: 0, focus: 0, scroll: { y: 0 } as ScrollRef, potion: -1 }; this.screen = 'craft'; this.build2B(); break;
     }
   }
 
@@ -201,7 +204,7 @@ export class ShopScreen {
     const it = this.listItem();
     if (!it) return;
     if (this.action === 3 && this.kind === 1) {              // potion craft detail (0x2B)
-      this.c2b = { list: [], cur: 0, focus: 0, scroll: 0, potion: it.sub };
+      this.c2b = { list: [], cur: 0, focus: 0, scroll: { y: 0 } as ScrollRef, potion: it.sub };
       this.screen = 'craft';
       return;
     }
@@ -211,7 +214,7 @@ export class ShopScreen {
     if (this.action !== 1 || it.type !== 0x1b) e.push(10 + this.action);
     e.push(6);
     const col = this.sel % 4, row = this.sel >> 2;
-    this.actionPopup = new ActionPopup(this.ctx, e, 130 + (col > 1 ? 31 : 84) + 29 * col, 50 + (row > 1 ? -10 : 50) + 28 * row);
+    this.actionPopup = new ActionPopup(this.ctx, e, col > 1 ? 'left' : 'right', row > 1);
   }
 
   private runAction(v: number): void {
@@ -365,15 +368,12 @@ export class ShopScreen {
           this.msg(r.ok ? 0x2f : 0x30, undefined, after);
           // type 10 layout (FUN_0005f948 case 10): item cell (41,65), name, red "파괴되었습니다." when destroyed
           const shown = { ...it }, destroyed = !r.ok && r.destroyed;
-          this.popup!.p.h = Math.max(this.popup!.p.h, 136);
-          this.popup!.p.extra = (u, w) => {
-            u.bevel(41, 65, 26, 26, CELL_EDGE, 0);
-            const ic = this.fs.db.iconRect(shown.icon);
-            u.image(ic.image, ic.sx, ic.sy, 16, 16, 46, 70);
-            if (stringWidth(shown.name) < 120) u.string(shown.name, 75, 70);
-            else { u.string(shown.name.slice(0, 10), 75, 65); u.string(shown.name.slice(10), 90, 80); }
-            if (destroyed) u.textId(0x1a29, (w >> 1) + 15, 90, 'center', { pen: 0xf800 });
-          };
+          // the cell, then the name (wraps) and the red line beside it, above the body text
+          this.popup!.p.content = () => h('div.v-row.v-center.shop-enh-res', null,
+            this.cell(shown, { plain: true }),
+            h('div.v-col.shop-enh-res-text', null,
+              gt(shown.name),
+              destroyed && gt(this.text(0x1a29), { pen: 0xf800 })));
         }));
       }
     }
@@ -408,10 +408,10 @@ export class ShopScreen {
       if ((k === AVK.K1 || k === AVK.K3) && this.c2b.potion < 0) {
         const n = this.c2b.list.length;
         if (n) this.c2b.cur = (this.c2b.cur + (k === AVK.K3 ? 1 : n - 1)) % n;
-        this.c2b.scroll = 0;
+        this.c2b.scroll.y = 0;
       } else if (k === AVK.LEFT || k === AVK.RIGHT) this.c2b.focus = ok ? ((this.c2b.focus ^ 1) as 0 | 1) : 1;
-      else if (k === AVK.UP) this.c2b.scroll = Math.max(0, this.c2b.scroll - 12);
-      else if (k === AVK.DOWN) this.c2b.scroll += 12;
+      else if (k === AVK.UP) this.c2b.scroll.y = Math.max(0, this.c2b.scroll.y - 12);
+      else if (k === AVK.DOWN) this.c2b.scroll.y += 12;                 // the browser clamps at the end
       else if (k === AVK.CLR || (k === AVK.OK && this.c2b.focus === 1)) back();
       else if (k === AVK.OK) this.craftRun();
     }
@@ -464,237 +464,261 @@ export class ShopScreen {
   drawOverlay(): void {
     const u = this.ctx.ui13;
     u.pushCenter220();
-    if (this.fromInv !== 'decompose') u.window(0, 24, 220, 196);
     if (this.fromInv === 'decompose') { /* popups / result only */ }
-    else if (this.detail) { drawItemDetail(u, this.fs, this.detail); u.hit(-200, -200, 700, 700, () => [AVK.OK]); }
-    else if (this.screen === 'menu') this.drawMenu(u);
-    else if (this.screen === 'list') this.drawList(u);
-    else if (this.screen === 'craft') this.drawCraft(u);
-    else this.drawEnhance(u);
+    else if (this.detail) {                                     // the window stays, the detail covers it
+      u.view('shop', 0, 0, 220, 220, this.frame(null, null));
+      drawItemDetail(u, this.fs, this.detail);
+      u.hit(-200, -200, 700, 700, () => [AVK.OK]);
+    } else {
+      const body = this.screen === 'menu' ? this.menuView() : this.screen === 'list' ? this.listView()
+        : this.screen === 'craft' ? this.craftView() : this.enhanceView();
+      u.view('shop', 0, 0, 220, 220, body ?? this.frame(null, null));
+    }
     u.pop();
     u.closeButton(26);
     if (this.actionPopup) this.actionPopup.draw(u);
-    if (this.qtyOpen) this.drawQty(u);
-    if (this.result) this.drawResult(u);
+    if (this.qtyOpen) u.view('shopQty', 0, 0, 480, 320, this.qtyView());
+    if (this.result) u.view('shopResult', 0, 0, 480, 320, this.resultView());
     (this.progress?.p ?? this.popup?.p)?.draw();
   }
 
-  /** gold(v, x, y) FUN_0004c550: 9 digits, coin left of them */
-  private gold(u: Ui, v: number, x: number, y: number): void {
-    u.number(v, x - 6, y, 1, 2, 9);
-    u.image('t', 38, 24, 12, 12, x - 5 - 9 * 6 - 12, y);
+  // ---- view helpers ----
+
+  /** an overlay (action popup, quantity, result, popups) owns the input: the screen below is inert */
+  private get covered(): boolean {
+    return !!(this.actionPopup || this.qtyOpen || this.result || this.popup || this.progress);
   }
 
-  private drawMenu(u: Ui): void {
-    u.textId(0x1c0 + this.kind, 0, 0);
-    MENU[this.kind].forEach((v, i) => {
-      const on = v === this.action;
-      if (on) u.glow(16, 36 * i + 34, 188, 26, this.t);
-      u.button(18, 36 * (i + 1), 184, 22, 3, on ? 1 : 0);
-      u.hit(18, 36 * (i + 1) - 4, 184, 30, () => { if (this.action === v) return [AVK.OK]; this.menuCur = i; this.action = v; });
-      u.string(this.kind === 1 && v === 3 ? this.text(0x1a37) : this.text(0x17b + v), 110, 36 * i + 38, 'center');
-    });
-    u.roundFill(8, 195, 204, 16, 0, 1);
-    u.textId(this.kind === 1 && this.action === 3 ? 0x1a38 : 0x1c4 + this.action, 110, 197, 'center');
+  /**
+   * The shop frame inside the 220 box: the name / price bar above the window (roundFill 4,1,211,19
+   * at alpha 16) and the body inside the window (28..216).
+   */
+  private frame(head: VChild, side: VChild, ...body: VChild[]): VNode {
+    return h('div.v-fill.shop', { cls: this.covered && 'shop-inert' },
+      h('div.v-row.v-box.soft.shop-head', { cls: !(head || side) && 'empty' }, h('div.v-grow.shop-head-name', null, head), side),
+      win('.v-col.shop-window', null, h('div.v-col.shop-body', null, ...body), slot('tab-over')));
   }
 
-  private drawList(u: Ui): void {
-    const fs = this.fs, inv = this.inv, sellMode = this.action === 1 || this.action === 2;
-    u.alpha = 16; u.roundFill(4, 1, 211, 19, 0, 1); u.alpha = 32;
-    const cur = this.listItem();
-    if (this.focus === 1 && cur) {
-      u.string(cur.name, 10, 3);
-      if (this.action === 0) this.gold(u, this.kind === 3 ? priceOf(this.a, cur) * (cur.type < 0x10 ? 15 : 10) : shownBuyPrice(this.a, cur), 210, 5);
-      else if (this.action === 1) this.gold(u, shownSellPrice(this.a, cur), 210, 5);
-    }
-    u.roundFill(55, 35, 150, 154, 0, 1);
-    for (let k = 0; k < 16; k++) {
-      const x = (k & 3) * 36 + 63, y = (k >> 2) * 35 + 47;
-      if (this.focus === 1 && k === this.sel) u.glow(x - 2, y - 2, 30, 30, this.t);
-      u.bevel(x, y, 26, 26, CELL_EDGE, 0);
-      u.hit(x - 4, y - 4, 34, 34, () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; });
-      const it = sellMode ? inv.items[this.bag * 16 + k] : this.stock[this.bag * 16 + k];
-      if (!it) continue;
-      if (sellMode) drawItemCell(u, fs, it, x + 1, y + 1);
-      else { const r = fs.db.iconRect(it.icon); u.image(r.image, r.sx, r.sy, 16, 16, x + 5, y + 5); }
-      if (this.action === 2 && it.type > 0x0e) { u.alpha = 16; u.fill(x, y, 26, 26, 0); u.alpha = 32; }
-    }
-    if (this.focus === 0) u.glow(6, this.bag * 35 + 30, 34, 34, this.t);
-    for (let i = 0; i < this.bags && i < 4; i++) {
-      u.button(8, 32 + 35 * i, 30, 30, 3, i === this.bag ? 1 : 0);
-      u.hit(6, 30 + 35 * i, 34, 34, () => { this.focus = 0; if (this.bag !== i) { this.bag = i; this.sel = 0; } });
-      u.image('t', 15, 24, 16, 16, 15, 38 + 35 * i);
-    }
-    if (!sellMode) {
-      u.button(8, 180, 30, 30, 3, 2);
-      u.string(`${inv.items.length}/${inv.cap}`, 23, 186, 'center');
-    }
-    u.roundFill(55, 194, 82, 16, 0, 1);
-    this.gold(u, inv.gold, 137, 196);
-    if (sellMode) { u.button(152, 192, 62, 22, 3, 0); u.textId(0x1a1d, 183, 194, 'center'); }
+  /** gold(v, x, y) FUN_0004c550: the coin sprite, then the amount */
+  private gold(v: number, cls = ''): VNode {
+    return h('span.v-row.shop-gold', { cls }, sprite('t', 38, 24, 12, 12), h('span.shop-num', null, v.toLocaleString('en-US')));
   }
 
-  private needLines(u: Ui, needs: Need[], y0: number, gap: number, withName = true): void {
+  /** item icon (16x16 original art); `tint` = the red tint 12 of unusable items (FUN_0003bcf0) */
+  private icon(type: number, sub: number, iconId?: number, tint = false): VNode {
+    const db = this.fs.db, r = db.iconRect(iconId ?? db.icon(type, sub));
+    return sprite(r.image, r.sx, r.sy, 16, 16, tint ? {
+      cls: 'shop-tint', style: `--mask:url("${IMAGE_BASE}${r.image}.png");--mpos:${-r.sx}px ${-r.sy}px;`,
+    } : {});
+  }
+
+  /**
+   * FUN_0007ab44 bevelled cell + FUN_0003bcf0 item cell: icon, count badge top right, red tint when
+   * unusable. `plain` = icon only (buy stock, needs, results); `equip` = the 24 px equipment cell.
+   */
+  private cell(it: Item | null | undefined, o: { plain?: boolean; equip?: boolean; sel?: boolean; dim?: boolean; on?: KeyAct; anchor?: VChild } = {}): VNode {
+    const fs = this.fs;
+    const tint = !!it && !o.plain && !fs.inv.usable(it, fs.model.level, fs.model.cls);
+    return h('div.shop-cell', {
+      cls: [o.equip && 'equip', o.sel && 'cur v-sel', o.dim && 'dim'].filter(Boolean).join(' '), on: o.on,
+    },
+    it && this.icon(it.type, it.sub, it.icon, tint),
+    it && !o.plain && fs.db.showsCount(it) && h('span.shop-count', null, String(it.count)),
+    o.anchor);
+  }
+
+  /** keycap button; off = variant 3 (unavailable) */
+  private btn(label: string, o: { sel?: boolean; off?: boolean; on?: KeyAct; glow?: boolean; cls?: string } = {}): VNode {
+    return button(gt(label), { sel: o.sel && !o.off, glow: o.glow, on: o.on, cls: ['shop-btn', o.off && 'off', o.cls].filter(Boolean).join(' ') });
+  }
+
+  /** ◀ / ▶ arrow (t.pxl 0,19 15x19) */
+  private arrow(right: boolean, on: KeyAct): VNode {
+    return h('span.shop-arrow', { on }, sprite('t', 0, 19, 15, 19, { flip: right }));
+  }
+
+  /** "REQUIRE LV n" (c-font text 0x24) and the class (0x5d + type % 3) */
+  private reqLine(level: number, type: number): VNode {
+    return h('div.v-row.shop-req', null,
+      h('span.shop-label', null, this.text(0x24) || 'REQUIRE LV'),
+      h('span.shop-num', null, String(level)),
+      h('span.v-grow'),
+      type !== 0x0f && type !== 0x10 && type < 15 && h('span.shop-label', null, this.text(0x5d + (type % 3))));
+  }
+
+  /** base value (0x1ad2 / 0x1ad4 / 0x1ad6) and the option lines (1972 + id) */
+  private statLines(it: Item): VNode {
+    return h('div.v-col.shop-stats', null,
+      gt(`${this.text(it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6)} ${it.base}`, { pen: YELLOW565 }),
+      it.options.filter(([id]) => id !== 0xff).map(([id, v]) => gt(this.text(1972 + id).replace('%d', String(v)).replace('%%', '%'))));
+  }
+
+  /** material lines: cell, name, have / need (0x1b16 when short, else 0x1a6f) */
+  private needLines(needs: Need[], withName = true): VNode {
     const db = this.fs.db;
-    needs.forEach((n, i) => {
-      const y = y0 + gap * i;
-      u.bevel(13, y, 26, 26, CELL_EDGE, 0);
-      const r = db.iconRect(db.icon(n.type, n.sub));
-      u.image(r.image, r.sx, r.sy, 16, 16, 18, y + 5);
-      if (withName) u.string(this.a.text[0x7fc + db.model(n.type, n.sub, 0)] ?? '', 48, y + 5);
+    return h('div.v-col.shop-needs', null, needs.map((n) => {
       const have = countOf(this.inv, n.type, n.sub);
       const s = (have < n.count ? this.text(0x1b16) : this.text(0x1a6f)).replace('%d', String(have)).replace('%d', String(n.count));
-      u.string(s, 200, y + 5, 'right');
+      return h('div.v-row.shop-need', { cls: have < n.count && 'short' },
+        h('div.shop-cell', null, this.icon(n.type, n.sub)),
+        withName && gt(this.a.text[0x7fc + db.model(n.type, n.sub, 0)] ?? '', { cls: 'v-grow' }),
+        gt(s, { cls: 'shop-num' }));
+    }));
+  }
+
+  // ---- screens ----
+
+  /** function menu 0x16: title, one keycap per action, the action's help line */
+  private menuView(): VNode {
+    return this.frame(gt(this.text(0x1c0 + this.kind), { pen: YELLOW565 }), null,
+      h('div.v-col.v-grow.shop-menu', null, MENU[this.kind].map((v, i) => this.btn(this.verb(v), {
+        sel: v === this.action, on: () => { if (this.action === v) return [AVK.OK]; this.menuCur = i; this.action = v; },
+      }))),
+      h('div.v-box.v-note', null, gt(this.text(this.kind === 1 && this.action === 3 ? 0x1a38 : 0x1c4 + this.action))));
+  }
+
+  /** list 0x15: bag keycaps | 4x4 item grid, gold (and the inventory count in buy mode) */
+  private listView(): VNode {
+    const inv = this.inv, sellMode = this.action === 1 || this.action === 2, cur = this.listItem();
+    const price = this.focus === 1 && cur && (this.action === 0
+      ? this.gold(this.kind === 3 ? priceOf(this.a, cur) * (cur.type < 0x10 ? 15 : 10) : shownBuyPrice(this.a, cur))
+      : this.action === 1 ? this.gold(shownSellPrice(this.a, cur)) : null);
+    const bags = Array.from({ length: Math.min(this.bags, 4) }, (_, i) => button(sprite('t', 15, 24, 16, 16), {
+      sel: i === this.bag, glow: this.focus === 0, cls: 'shop-bag',
+      on: () => { this.focus = 0; if (this.bag !== i) { this.bag = i; this.sel = 0; } },
+    }));
+    const cells = Array.from({ length: 16 }, (_, k) => {
+      const it = sellMode ? inv.items[this.bag * 16 + k] : this.stock[this.bag * 16 + k];
+      return this.cell(it, {
+        plain: !sellMode, sel: this.focus === 1 && k === this.sel, anchor: this.focus === 1 && k === this.sel && this.actionPopup?.anchor(), dim: !!it && this.action === 2 && it.type > 0x0e,
+        on: () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; },
+      });
     });
+    return this.frame(this.focus === 1 && cur && gt(cur.name), price,
+      h('div.v-row.v-grow.shop-list', null,
+        h('div.v-col.shop-bags', null, bags,
+          !sellMode && h('div.v-box.shop-count-box', null, `${inv.items.length}/${inv.cap}`)),
+        h('div.v-box.shop-grid', null, cells)),
+      h('div.v-row.shop-foot', null,
+        h('div.v-box.v-row.shop-gold-box', null, this.gold(inv.gold)),
+        h('span.v-grow'),
+        sellMode && this.btn(this.text(0x1a1d))));
   }
 
-  private drawCraft(u: Ui): void {
-    const fs = this.fs, s = this.c2b.scroll;
-    u.alpha = 16; u.roundFill(4, 1, 211, 19, 0, 1); u.alpha = 32;
-    if (this.c2b.potion >= 0) {                              // §1.7 potion detail
+  /** ok / cancel row of 0x2B and 0x2C: ok is variant 3 when unavailable; the glow follows focus */
+  private okCancel(ok: boolean, focus: number, label: number, setFocus: (f: 0 | 1) => void): VNode {
+    const f = ok ? focus : 1;
+    return h('div.v-row.shop-foot', null,
+      this.btn(this.text(label), { sel: f === 0, off: !ok, on: () => { if (!ok) return; setFocus(0); return [AVK.OK]; } }),
+      h('span.v-grow'),
+      this.btn(this.text(0x1a2b), { sel: f === 1, on: () => { setFocus(1); return [AVK.OK]; } }));
+  }
+
+  /** 0x2B: potion detail (§1.7), or the combine / decompose carousel with the item's details */
+  private craftView(): VNode {
+    const fs = this.fs, setFocus = (f: 0 | 1) => { this.c2b.focus = f; };
+    const foot = this.okCancel(this.c2bOk(), this.c2b.focus,
+      this.c2b.potion >= 0 ? 0x1a2a : this.action === 3 ? 0x1a33 : 0x1a34, setFocus);
+    if (this.c2b.potion >= 0) {
       const it = fs.db.create(0x11, this.c2b.potion, 0, fs.rng);
-      u.string(it.name, 10, 3);
-      u.roundFill(10, 30, 200, 42, 0, 1);
-      u.bevel(16, 38, 26, 26, CELL_EDGE, 0);
-      drawItemCell(u, fs, it, 17, 39);
-      u.paragraph(this.text(0xa38 + fs.db.model(0x11, this.c2b.potion, 0)), 128, 44, 156);
-      u.roundFill(10, 76, 200, 113, 0, 1);
-      this.needLines(u, potionNeeds(this.a, this.c2b.potion), 82, 32);
-    } else {
-      const it = this.c2bItem();
-      if (it) { u.string(it.name, 10, 3); if (this.action === 4) this.gold(u, decomposeCost(it), 210, 5); }
-      u.image('t', 0, 19, 15, 19, 17, 35);
-      u.roundFill(41, 28, 138, 32, 0, 1);
-      u.image('t', 0, 19, 15, 19, 189, 35, 1);
-      u.hit(7, 28, 34, 32, () => [AVK.K1]);
-      u.hit(181, 28, 34, 32, () => [AVK.K3]);
-      u.hit(7, 62, 206, 63, () => [AVK.UP]);
-      u.hit(7, 125, 206, 63, () => [AVK.DOWN]);
-      const top = Math.max(0, Math.min(this.c2b.cur - 3, this.c2b.list.length - 4));
-      for (let k = 0; k < 4; k++) {
-        const n = top + k, x = 34 * k + 46, item = this.inv.items[this.c2b.list[n]];
-        if (n === this.c2b.cur && item) u.glow(34 * k + 43, 29, 30, 30, this.t);
-        if (item) u.hit(x - 4, 28, 32, 32, () => { this.c2b.cur = n; this.c2b.scroll = 0; });
-        u.bevel(x, 32, 24, 24, CELL_EDGE, EQUIP_FILL);
-        if (item) drawItemCell(u, fs, item, x, 32);
-      }
-      u.roundFill(7, 62, 206, 126, 0, 1);
-      if (!it) u.textId(this.action === 3 ? 0x1a31 : 0x1a32, 110, 110, 'center');
-      else {
-        const y0 = 66 - s, innerType = this.action === 3 ? it.sub >> 4 : it.type, innerSub = this.action === 3 ? it.sub & 15 : it.sub;
-        if (y0 >= 62) {
-          u.cfont(this.text(0x24), 20, y0);
-          u.number(this.action === 3 ? it.level : it.reqLevel, 85, y0, 0, 2);
-          if (innerType !== 0x0f && innerType !== 0x10) u.cfont(this.text(0x5d + (innerType % 3)), 160, y0);
-        }
-        const desc = this.text(0xa50 + fs.db.model(innerType, innerSub, 0));
-        const lines = u.paragraph(desc, 110, 96 - s, 180);
-        const e = (lines - 1) * 7;
-        u.fill(11, e - s + 126, 189, 1, 0x9ecad7);
-        if (this.action === 3) this.needLines(u, combineNeeds(this.a, it), e - s + 136, 30);
-        else {
-          let y = e - s + 140;
-          u.string(`${this.text(it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6)} ${it.base}`, 110, y, 'center');
-          for (const [id, v] of it.options) { if (id === 0xff) continue; y += 15; u.string(this.text(1972 + id).replace('%d', String(v)).replace('%%', '%'), 110, y, 'center'); }
-        }
-      }
+      return this.frame(gt(it.name), null,
+        h('div.v-box.v-row.shop-potion', null,
+          this.cell(it),
+          gt(this.text(0xa38 + fs.db.model(0x11, this.c2b.potion, 0)), { cls: 'v-grow' })),
+        h('div.v-box.v-col.v-grow.v-scroll.shop-panel', null, this.needLines(potionNeeds(this.a, this.c2b.potion))),
+        foot);
     }
-    const ok = this.c2bOk(), f = ok ? this.c2b.focus : 1;
-    u.glow(f ? 150 : 4, 190, 66, 26, this.t);
-    u.button(6, 192, 62, 22, 3, ok ? (f === 0 ? 1 : 0) : 3);
-    u.button(152, 192, 62, 22, 3, f === 1 ? 1 : 0);
-    u.hit(4, 188, 66, 28, () => { if (!ok) return; this.c2b.focus = 0; return [AVK.OK]; });
-    u.hit(150, 188, 66, 28, () => { this.c2b.focus = 1; return [AVK.OK]; });
-    u.textId(this.c2b.potion >= 0 ? 0x1a2a : this.action === 3 ? 0x1a33 : 0x1a34, 37, 194, 'center');
-    u.textId(0x1a2b, 183, 194, 'center');
+    const it = this.c2bItem(), list = this.c2b.list;
+    const top = Math.max(0, Math.min(this.c2b.cur - 3, list.length - 4));
+    const cells = Array.from({ length: 4 }, (_, k) => {
+      const n = top + k, item = this.inv.items[list[n]];
+      return this.cell(item, {
+        equip: true, sel: n === this.c2b.cur && !!item,
+        on: item ? () => { this.c2b.cur = n; this.c2b.scroll.y = 0; } : undefined,
+      });
+    });
+    let detail: VChild;
+    if (!it) detail = h('div.v-col.v-center.v-fill', null, gt(this.text(this.action === 3 ? 0x1a31 : 0x1a32)));
+    else {
+      const innerType = this.action === 3 ? it.sub >> 4 : it.type, innerSub = this.action === 3 ? it.sub & 15 : it.sub;
+      detail = h('div.v-col.shop-scroller', null,
+        this.reqLine(this.action === 3 ? it.level : it.reqLevel, innerType),
+        gt(this.text(fs.db.descId(innerType, innerSub, 0)), { cls: 'shop-desc' }),
+        h('div.v-rule'),
+        this.action === 3 ? this.needLines(combineNeeds(this.a, it)) : this.statLines(it));
+    }
+    return this.frame(it && gt(it.name), it && this.action === 4 && this.gold(decomposeCost(it)),
+      h('div.v-row.shop-carousel', null,
+        this.arrow(false, () => [AVK.K1]),
+        h('div.v-box.v-row.v-grow.shop-strip', null, cells),
+        this.arrow(true, () => [AVK.K3])),
+      // native scroll (UP / DOWN 12 px, wheel, touch)
+      h('div.v-box.v-grow.v-scroll.shop-panel.shop-detail', { scroll: this.c2b.scroll }, detail),
+      foot);
   }
 
-  private drawEnhance(u: Ui): void {
+  /** enhance 0x2C: item, current -> next value, stones, aux / protect toggles, rate and fee */
+  private enhanceView(): VNode | null {
     const it = this.inv.items[this.enh.idx];
-    if (!it) return;
+    if (!it) return null;
     const a = this.a, N = enhStones(a, it), G = enhGold(a, it), aux = auxNeeded(N);
     const have = countOf(this.inv, 0x16, 0), ok = it.enh < 20 && (this.fromInv === 'enhance' || have >= N);
-    u.roundFill(7, 30, 206, 37, 0, 1);
-    u.bevel(23, 36, 24, 24, CELL_EDGE, EQUIP_FILL);
-    drawItemCell(u, this.fs, it, 23, 36);
-    if (stringWidth(it.name) < 120) u.string(it.name, 70, 42); else u.string(it.name, 80, 35);
-    u.roundFill(7, 70, 206, 116, 0, 1);
-    if (it.type < 15) {
-      const atk = it.type < 3, label = atk ? '공격력' : '방어력';
-      const cur = `|b${label} |d${it.base}|b |i+ ${enhBonus(it, 0)}`, next = `|b${label} |d${it.base}|b |i+ ${enhBonus(it, 1)}`;
-      u.string(cur, 24, 75);
-      u.alpha = Math.min(32, (tri(this.t, 32) + 1) * 2);
-      u.string(next, stringWidth(cur) + 50, 75);
-      u.alpha = 32;
-    }
-    if (!this.fromInv) u.string(`${this.text(0x9ee)} ${have < N ? `|c${have}|b` : have}/${N}`, 85, 95, 'center');
     const auxHave = countOf(this.inv, 0x16, 1), protHave = countOf(this.inv, 0x1b, 0);
-    [[this.enh.aux, auxHave, aux, 0x9ef, 113, 118], [this.enh.protect, protHave, 1, 0xa0c, 138, 140]].forEach(([on, h, need, name, by, ty]) => {
-      u.string(`${this.text(name as number)} ${h}/${need}`, 85, ty as number, 'center', on ? undefined : { pen: 0x9cf3 });
-      u.button(150, by as number, 62, 22, 3, on ? 1 : (h as number) > 0 ? 0 : 3);
-      u.hit(150, by as number, 62, 22, () => [name === 0x9ef ? AVK.STAR : AVK.POUND]);
-      u.string(on ? '미사용' : '사용', 181, (by as number) + 3, 'center');
-    });
-    u.fill(11, 165, 189, 1, 0x9ecad7);
-    const rate = Math.min(100, enhRate(a, it.enh) + (this.enh.aux ? Math.trunc(enhRate(a, it.enh) / 10) : 0));
-    u.string(this.text(0x1b26).replace('%s', this.text(0x1b27)).replace('%d', String(rate)).replace('%%', '%'), 15, 170);
-    this.gold(u, G, 203, 172);
-    const f = ok ? this.enh.focus : 1;
-    u.glow((f & 3) * 132 + 11, 189, 66, 26, this.t);
-    u.button(13, 191, 62, 22, 3, ok ? (f === 0 ? 1 : 0) : 3);
-    u.hit(11, 188, 66, 28, () => { if (!ok) return; this.enh.focus = 0; return [AVK.OK]; });
-    u.hit(143, 188, 66, 28, () => { this.enh.focus = 1; return [AVK.OK]; });
-    u.textId(0x1a30, 44, 193, 'center');
-    u.button(145, 191, 62, 22, 3, f === 1 ? 1 : 0);
-    u.textId(0x1a2b, 176, 193, 'center');
-  }
-
-  /** quantity popup 0x0C (type 7), touch build width 164 */
-  private drawQty(u: Ui): void {
-    const w = 164, h = 94;
-    u.push((480 - w) >> 1, (320 - h) >> 1);
-    u.hit(-1000, -1000, 3000, 3000, () => []);
-    u.fill(0, 0, w, 74, 0xd5d5d5);
-    u.hit(0, 20, 40, 40, () => [AVK.LEFT]);
-    u.hit(80, 20, 30, 40, () => [AVK.RIGHT]);
-    u.hit(41, 0, 40, 26, () => [AVK.UP]);
-    u.hit(41, 48, 40, 26, () => [AVK.DOWN]);
-    u.hit(110, 18, 50, 40, () => [AVK.OK]);
-    u.alpha = 20; u.roundFill(3, 3, w - 4, 70, 0x111111, 2); u.alpha = 32;
-    u.image('t', 0, 19, 15, 19, 12, 28);
-    u.cfont(this.text(0x52), 43, 35);
-    u.number(this.qty, 68, 35, 0, 2, 4);
-    u.image('t', 0, 19, 15, 19, 84, 28, 1);
-    u.image('touch', 0, 0, 31, 18, 41, 6); u.cfont(this.text(0x55), 45, 11); u.number(100, 52, 11, 0, 0);
-    u.image('touch', 0, 0, 31, 18, 41, 51); u.cfont(this.text(0x56), 45, 56); u.number(100, 52, 56, 0, 0);
-    u.button(113, 23, 40, 30, 3, 1);
-    u.textId(0x1a00, 119, 33);
-    u.pop();
-  }
-
-  /** decompose result window FUN_0005bd10 */
-  private drawResult(u: Ui): void {
-    const g = this.result!.gains, db = this.fs.db;
-    u.push((480 - 214) >> 1, (320 - 138) >> 1);
-    u.window(0, 0, 214, 138);
-    u.hit(-1000, -1000, 3000, 3000, () => [AVK.OK]);
-    u.alpha = 16; u.button(4, 4, 206, 16, 0, 0); u.alpha = 32;
-    u.textId(0x1a35, 103, 5, 'center', { pen: 0xffe0 });
-    let y = 24 + (g.length < 3 ? (3 - g.length) * 15 : 0);
-    for (const [t, s, n] of g) {
-      u.bevel(27, y, 25, 25, CELL_EDGE, 0);
-      const r = db.iconRect(db.icon(t, s));
-      u.image(r.image, r.sx, r.sy, 16, 16, 32, y + 4);
-      const name = this.a.text[0x7fc + db.model(t, s, 0)] ?? '';
-      u.string(name, 95, y + 6);
-      u.string(`${this.text(0x1a36)} `, stringWidth(name) + 93, y + 6, 'center');
-      u.number(n, stringWidth(name) + 100, y + 7, 1, 0);
-      y += 28;
+    let stat: VChild = null;
+    if (it.type < 15) {
+      const label = it.type < 3 ? '공격력' : '방어력';
+      stat = h('div.v-row.shop-enh-stat', null,
+        gt(`|b${label} |d${it.base}|b |i+ ${enhBonus(it, 0)}`),
+        h('span.shop-enh-to', null, '▶'),
+        gt(`|b${label} |d${it.base}|b |i+ ${enhBonus(it, 1)}`, { cls: 'shop-blink' }));
     }
-    u.glow(70, 108, 66, 26, this.t);
-    u.button(72, 110, 62, 22, 3, 1);
-    u.textId(0x1a00, 103, 114, 'center');
-    u.pop();
+    const toggle = (on: boolean, h0: number, need: number, name: number, key: number) =>
+      h('div.v-row.shop-toggle', null,
+        gt(`${this.text(name)} ${h0}/${need}`, { cls: 'v-grow', pen: on ? undefined : GREY565 }),
+        this.btn(on ? '미사용' : '사용', { sel: on, glow: false, off: !on && h0 <= 0, on: () => [key] }));
+    const rate = Math.min(100, enhRate(a, it.enh) + (this.enh.aux ? Math.trunc(enhRate(a, it.enh) / 10) : 0));
+    return this.frame(null, null,
+      h('div.v-box.v-row.shop-enh-item', null,
+        this.cell(it, { equip: true }),
+        gt(it.name, { cls: 'v-grow' })),
+      h('div.v-box.v-col.v-grow.shop-panel.shop-enh', null,
+        stat,
+        !this.fromInv && h('div.shop-enh-stones', null, gt(`${this.text(0x9ee)} ${have < N ? `|c${have}|b` : have}/${N}`)),
+        toggle(this.enh.aux, auxHave, aux, 0x9ef, AVK.STAR),
+        toggle(this.enh.protect, protHave, 1, 0xa0c, AVK.POUND),
+        h('span.v-grow'),
+        h('div.v-rule'),
+        h('div.v-row.shop-enh-rate', null,
+          gt(this.text(0x1b26).replace('%s', this.text(0x1b27)).replace('%d', String(rate)).replace('%%', '%'), { cls: 'v-grow' }),
+          this.gold(G))),
+      this.okCancel(ok, this.enh.focus, 0x1a30, (f) => { this.enh.focus = f; }));
+  }
+
+  /** quantity popup 0x0C (type 7): ◀ [+100 / count / -100] ▶ and OK; the backdrop is modal */
+  private qtyView(): VNode {
+    const step = (label: number, key: number) => h('span.shop-step', { on: () => [key] }, `${this.text(label)}100`);
+    return h('div.v-modal', { on: () => [] },
+      h('div.v-popup.v-pop-fade.v-row.shop-qty', null,
+        this.arrow(false, () => [AVK.LEFT]),
+        h('div.v-col.v-center.shop-qty-mid', null,
+          step(0x55, AVK.UP),
+          h('div.v-row.shop-qty-value', null, h('span.shop-label', null, this.text(0x52)), h('span.shop-num', null, String(this.qty))),
+          step(0x56, AVK.DOWN)),
+        this.arrow(true, () => [AVK.RIGHT]),
+        this.btn(this.text(0x1a00), { sel: true, on: () => [AVK.OK], cls: 'shop-qty-ok' })));
+  }
+
+  /** decompose result window FUN_0005bd10: title, gained materials ×n, OK */
+  private resultView(): VNode {
+    const db = this.fs.db;
+    return h('div.v-modal', { on: () => [AVK.OK] },
+      h('div.u-window.v-col.v-pop-grow.shop-result', null,
+        h('div.u-btn.s0.v0.shop-result-bar', null, gt(this.text(0x1a35), { pen: YELLOW565 })),
+        h('div.v-col.v-grow.shop-result-list', null, this.result!.gains.map(([t, s, n]) =>
+          h('div.v-row.shop-result-row', null,
+            h('div.shop-cell', null, this.icon(t, s)),
+            gt(this.a.text[0x7fc + db.model(t, s, 0)] ?? '', { cls: 'v-grow' }),
+            h('span.shop-num', null, `${this.text(0x1a36)} ${n}`)))),
+        h('div.v-row.v-center', null, this.btn(this.text(0x1a00), { sel: true, on: () => [AVK.OK] }))));
   }
 }
-

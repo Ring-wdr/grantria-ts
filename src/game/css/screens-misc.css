@@ -1,0 +1,86 @@
+/* Views of the ranking (ranking.ts), 차원의 문 (dimension.ts) and data (dataScene.ts) screens.
+   Built on the shared view classes of ui.css (.v-*, .u-window, .u-btn). */
+
+/* a window frame (FUN_000fb054) laid out as a flex item; corners are c.pxl sprites */
+.ui-view .sm-win { position: relative; }
+.sm-panel { padding: 3px 6px 4px; gap: 4px; }
+.sm-panel > .v-pager { height: 16px; }
+.sm-head { flex: none; min-height: 20px; gap: 4px; }
+.sm-head .v-btn { min-height: 20px; }
+.sm-title { text-align: center; color: #ffe; }
+.sm-head-side { width: 62px; flex: none; }
+.sm-num { color: #fff; font-variant-numeric: tabular-nums; }
+.sm-kv { gap: 6px; line-height: 15px; }
+.sm-pair { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+.sm-block { padding: 3px 8px; }
+.sm-wide { min-width: 70px; }
+.sm-rule { margin: 0; }
+
+/* selectable window cards: a soft blue wash on the current one, under the .v-sel pulse */
+.sm-slot, .sm-entry { flex: 1 1 0; min-height: 0; transition: background var(--tick) ease-out; }
+.sm-slot.v-sel, .sm-entry.v-sel { background: rgba(47, 103, 157, 0.82); }
+.sm-slot.v-sel::after, .sm-entry.v-sel::after { inset: 1px; border-radius: 4px; }
+
+/* ranking slot card: the walking character (primitive) sits in the left 72 px */
+.sm-slot-info { position: absolute; inset: 5px 8px 4px 76px; }
+.sm-time { text-align: right; color: #c8d6ee; }
+
+/* ranking list entry */
+.sm-entry-body { padding: 2px 8px; justify-content: center; height: 100%; }
+.sm-entry-body .v-text, .sm-entry-body .sm-kv { line-height: 13px; }
+.sm-rank { display: inline-flex; gap: 3px; min-width: 44px; color: #8df1f2; }
+.sm-rank .sm-num { color: #8df1f2; }
+
+/* ranking detail */
+.sm-detail-head { gap: 6px; padding: 2px 8px; min-height: 18px; flex: none; }
+.sm-skill-btn { width: 62px; }
+.sm-equips { flex: none; justify-content: center; gap: 8px; padding: 2px 0; }
+.sm-eq {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: #000;
+  box-shadow: inset 0 0 0 1px #354e73;
+  transition: box-shadow var(--tick) ease-out;
+}
+.sm-eq.cur { box-shadow: inset 0 0 0 1px #429ac6, 0 0 4px rgba(141, 241, 242, 0.5); }
+.sm-skills {
+  width: 200px;
+  max-height: 150px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-rows: repeat(8, auto);
+  grid-auto-flow: column;
+  column-gap: 18px;
+  align-content: start;
+}
+
+/* 차원의 문: 3x3 dungeon icons and the entry confirmation */
+.sm-dim-grid { display: grid; grid-template-columns: repeat(3, 36px); gap: 9px; }
+.sm-dim-cell {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: rgba(41, 56, 90, 0.6);
+  box-shadow: inset 0 0 0 1px #29385a;
+  transition: background var(--tick) ease-out, box-shadow var(--tick) ease-out;
+}
+.sm-dim-cell.cur { background: rgba(66, 154, 198, 0.35); box-shadow: inset 0 0 0 1px #429ac6; }
+.sm-dim-cell.v-hit:hover { background: rgba(66, 154, 198, 0.25); }
+.sm-dim-confirm { padding: 6px 10px; gap: 6px; text-align: center; }
+.sm-buttons { flex: none; justify-content: center; gap: 20px; padding: 2px 0 4px; }
+
+/* data management */
+.sm-data-list { gap: 6px; padding: 2px 8px; justify-content: center; }
+.sm-data-list .v-btn { flex: none; }
+.sm-busy { filter: brightness(0.7); }
+.sm-data-note { flex: none; padding: 3px 6px; text-align: center; }
+.sm-data-note .v-text { line-height: 13px; }

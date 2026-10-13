@@ -7,6 +7,8 @@ import { loadOptions, saveOptions } from './options';
 import { SLOT_COUNT, loadSlot, saveSlot, type SaveData } from './save';
 import type { GameContext, Scene } from './scene';
 import { frozenTitle, render, TitleScene } from './screens';
+import { button, gt, h, sprite } from './view';
+import './css/screens-misc.css';
 
 const ITEMS = ['백업 내보내기 (JSON)', '백업 가져오기 (JSON)', '원본 세이브 가져오기', '원본 세이브 내보내기'];
 
@@ -132,15 +134,14 @@ export class DataScene implements Scene {
       frozenTitle(this.ctx);
       const u = this.ctx.ui;
       u.pushCenter220();
-      u.window(0, 0, 0xdc, 0xd4);
-      u.string('데이터 관리', 110, 5, 'center', { pen: 0xffe0 });
-      ITEMS.forEach((s, i) => {
-        const y = 30 + i * 34;
-        u.button(14, y, 192, 24, 3, i === this.cur ? 1 : 0);
-        u.hit(14, y, 192, 24, () => { if (this.cur === i) return [AVK.OK]; this.cur = i; });
-        u.string(s, 110, y + 5, 'center');
-      });
-      u.paragraph(this.msg || '세이브는 이 브라우저에 저장됩니다. 원본 파일은 같은 이름(save.dat.회원번호)으로 내보내야 원본 앱에서 읽힙니다.', 110, 172, 200);
+      u.view('data', 0, 0, 0xdc, 0xd4, h('div.sm-win.u-window.v-col.v-fill.sm-panel', null,
+        [0, 1, 2, 3].map((i) => sprite('c', 104, 37, 8, 8, { cls: `u-corner c${i}` })),
+        h('div.v-row.sm-head', null, gt('데이터 관리', { pen: 0xffe0, cls: 'v-grow sm-title' })),
+        h('div.v-col.v-grow.sm-data-list', null, ITEMS.map((s, i) => button(gt(s), {
+          sel: i === this.cur, cls: this.busy && i === this.cur ? 'sm-busy' : '', on: () => { if (this.cur === i) return [AVK.OK]; this.cur = i; },
+        }))),
+        h('div.v-box.sm-data-note', null,
+          gt(this.msg || '세이브는 이 브라우저에 저장됩니다. 원본 파일은 같은 이름(save.dat.회원번호)으로 내보내야 원본 앱에서 읽힙니다.'))));
       u.pop();
       u.closeButton();
     });

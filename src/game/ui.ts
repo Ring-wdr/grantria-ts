@@ -1,12 +1,15 @@
-// Screen-space UI layer over the field: image blits, bitmap text and number fonts in the
-// original 480x320 coordinates (text-rendering.md §0, §3; engine.md draw primitives).
+// Screen-space UI layer over the field: image blits, text and number fonts in the original
+// 480x320 coordinates (text-rendering.md §0, §3; engine.md draw primitives).
+// Ui holds the drawing API and the composite widgets built from the primitives; GlUi draws into
+// the WebGL compositor (world-space effects), DomUi (domUi.ts) builds HTML elements styled by CSS.
 import * as THREE from 'three';
 import type { Assets, Cmf } from '../assets';
 import type { Compositor } from '../compositor';
 import { AVK } from './input';
-import { SpriteLayer, DEFAULT_EQUIP, type SpriteFx } from '../sprites';
+import { SpriteLayer, DEFAULT_EQUIP, clipImage, type SpriteFx } from '../sprites';
 import { TextRenderer, stringWidth, type TextStyle } from '../text';
 import { VIEW_H, VIEW_W } from './field';
+import type { VNode } from './view';
 
 /** Number font styles of FUN_00078af4: image, glyph size, source of digit d, step. */
 const NUMBER_STYLES: Record<number, { img: string; w: number; h: number; sx: (d: number) => number; sy: (d: number) => number; step: number; scale?: number }> = {
@@ -22,91 +25,85 @@ const NUMBER_STYLES: Record<number, { img: string; w: number; h: number; sx: (d:
 
 export type Align = 'left' | 'center' | 'right';
 
-export class Ui {
-  readonly layer: SpriteLayer;
-  readonly text: TextRenderer;
-  private cam: THREE.OrthographicCamera;
+export abstract class Ui {
   /** drawing origin (FUN_0007a07c translate stack) */
   ox = 0;
   oy = 0;
   private stack: [number, number][] = [];
   /** global alpha 0..32 applied to subsequent draws (FUN_0007abd4) */
   alpha = 32;
-
-  private white: THREE.DataTexture;
+  /** tappable areas registered while drawing (layer coordinates) */
+  hits: { x: number; y: number; w: number; h: number; act: () => number[] | void }[] = [];
 
   /**
    * zoom = 1.3 gives the overlay layer L1 (popups, game menu, tab screens), which the original
    * shows magnified 1.3x around the screen centre (FUN_00016428).
    */
-  /** tappable areas registered while drawing (layer coordinates); begin() starts a new modal group */
-  hits: { x: number; y: number; w: number; h: number; act: () => number[] | void }[] = [];
+  constructor(protected assets: Assets, readonly zoom = 1) {}
 
-  constructor(private assets: Assets, private compositor: Compositor, readonly zoom = 1) {
-    const hw = VIEW_W / 2 / zoom, hh = VIEW_H / 2 / zoom;
-    this.cam = new THREE.OrthographicCamera(VIEW_W / 2 - hw, VIEW_W / 2 + hw, VIEW_H / 2 - hh, VIEW_H / 2 + hh, -1, 1);
-    this.layer = new SpriteLayer(assets);
-    this.text = new TextRenderer(assets);
-    this.white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
-    this.white.needsUpdate = true;
-    this.layer.register(this.white);
-  }
+  abstract init(images: string[]): Promise<void>;
 
-  async init(images: string[]): Promise<void> {
-    await Promise.all([this.text.init(), this.layer.preload(images)]);
-  }
-
+  /** start a drawing pass: origin, alpha and the translate stack are reset */
   begin(): void {
-    this.hits = [];
-    this.layer.clear();
     this.alpha = 32;
     this.ox = this.oy = 0;
     this.stack = [];
   }
 
-  private withAlpha(fn: () => void, fx?: SpriteFx): void {
-    this.layer.fx = this.alpha < 32 || fx ? { ...fx, alpha: Math.round(((fx?.alpha ?? 32) * this.alpha) / 32) } : null;
-    fn();
-    this.layer.fx = null;
-  }
+  /** Composite the UI onto a cleared target (full-screen menus). */
+  abstract endClear(): void;
+  /** Composite the UI over the frame already drawn. */
+  abstract end(): void;
 
   /**
    * DrawImage (FUN_000fb1b4 / FUN_000fa3c4 flip / FUN_000f9ec8 flags): flags bit0 hflip,
    * bits2-3 quarter turns clockwise, bits4-7 scale-1, bits8-12 blend, bits13-15 alpha reduction.
    */
-  image(name: string, sx: number, sy: number, w: number, h: number, x: number, y: number, flags = 0, fx?: SpriteFx): void {
-    if (w <= 0 || h <= 0) return;
-    const alpha8 = 8 - ((flags >> 13) & 7);
-    x += this.ox; y += this.oy;
-    this.withAlpha(() => this.layer.quad(name, sx, sy, w, h, x, y, (flags >> 2) & 3, flags & 1,
-      ((flags >> 4) & 15) + 1, (flags >> 8) & 31, alpha8), fx);
-  }
-
+  abstract image(name: string, sx: number, sy: number, w: number, h: number, x: number, y: number, flags?: number, fx?: SpriteFx): void;
   /** an arbitrary texture (rows top-down) at (x, y), e.g. the minimap */
-  texture(tex: import('three').Texture, w: number, h: number, x: number, y: number): void {
-    this.withAlpha(() => this.layer.texture(tex, 0, 0, w, h, x + this.ox, y + this.oy));
-  }
-
+  abstract texture(tex: THREE.Texture, w: number, h: number, x: number, y: number): void;
   /** FillRect (FUN_0007a370) with an RGB888 colour at the current alpha. */
-  fill(x: number, y: number, w: number, h: number, rgb = 0): void {
-    if (w <= 0 || h <= 0) return;
-    const tint: [number, number, number] = [(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255];
-    x += this.ox; y += this.oy;
-    this.withAlpha(() => this.layer.quad(this.white.uuid, 0, 0, 1, 1, x, y, 0, 0, 1, 0, 8, false, w, h), { tint, amount: 32 });
-  }
+  abstract fill(x: number, y: number, w: number, h: number, rgb?: number): void;
+  /** DrawString / DrawStringCenter / DrawStringRight (FUN_00078e58 / 78ec4 / 79b98). */
+  abstract string(s: string, x: number, y: number, align?: Align, style?: TextStyle): void;
+
+  /**
+   * Group the following draws (until groupEnd) so they can be animated together, e.g. a popup
+   * opening. cls names the CSS animation; the GL backend ignores groups.
+   */
+  group(_cls: string, _cx: number, _cy: number, _id = ''): void { /* GL: no-op */ }
+  groupEnd(): void { /* GL: no-op */ }
+
+  /** declarative HTML view laid out by CSS in the (x, y, w, h) box (view.ts); DOM only */
+  view(_id: string, _x: number, _y: number, _w: number, _h: number, _root: VNode): void { /* GL: no-op */ }
+
+  /** mount a view into a named slot of a view drawn earlier this frame (menu window body); DOM only */
+  mount(_slot: string, _id: string, _root: VNode): void { /* GL: no-op */ }
+
+  /** gamepad button hint badge (glyph text) with its top-left at (x, y); DOM only */
+  padHint(_glyph: string, _kind: string, _button: string, _x: number, _y: number): void { /* GL: no-op */ }
 
   /** register a tappable area at local (x, y); act may mutate state and/or return keys to press */
   hit(x: number, y: number, w: number, h: number, act: () => number[] | void): void {
     this.hits.push({ x: x + this.ox, y: y + this.oy, w, h, act });
   }
-  /** run the topmost hit under a screen point (480×320); null when none */
-  tapAt(sx: number, sy: number): number[] | null {
-    const lx = (sx - VIEW_W / 2) / this.zoom + VIEW_W / 2, ly = (sy - VIEW_H / 2) / this.zoom + VIEW_H / 2;
+  /** layer coordinates of a screen point (480×320) */
+  toLayer(sx: number, sy: number): { x: number; y: number } {
+    return { x: (sx - VIEW_W / 2) / this.zoom + VIEW_W / 2, y: (sy - VIEW_H / 2) / this.zoom + VIEW_H / 2 };
+  }
+  /** topmost hit under a screen point, or null */
+  hitAt(sx: number, sy: number): Ui['hits'][number] | null {
+    const { x: lx, y: ly } = this.toLayer(sx, sy);
     for (let i = this.hits.length - 1; i >= 0; i--) {
       const h = this.hits[i];
-      if (lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h) return h.act() ?? [];
+      if (lx >= h.x && lx < h.x + h.w && ly >= h.y && ly < h.y + h.h) return h;
     }
     return null;
+  }
+  /** run the topmost hit under a screen point (480×320); null when none */
+  tapAt(sx: number, sy: number): number[] | null {
+    const h = this.hitAt(sx, sy);
+    return h ? h.act() ?? [] : null;
   }
 
   push(x: number, y: number): void {
@@ -290,14 +287,27 @@ export class Ui {
     this.cfont(s, cx - Math.trunc((wsum - n + 1) / 2), y, style, fx);
   }
 
-  /** FUN_0004ad90: 9-slice button from t.pxl (d.dat tables 0x4010c8 / 0x4010d2 / 0x4010d7). */
-  button(x: number, y: number, w: number, h: number, style: number, variant: number, textId?: number): void {
+  /** d.dat slice tables of the 9-slice button (0x4010c8 row by style, 0x4010d2 edge, 0x4010d7 bottom). */
+  buttonSlices(style: number, variant: number): { row: number[]; edge: number[]; bot: number[] } {
     const a = this.assets;
     const read = (addr: number, off: number) => Array.from({ length: 5 }, (_, i) => a.dd(addr, off + i));
     const row = read(0x4010c8, style < 3 ? style * 5 : 5), edge = read(0x4010d2, 0), bot = read(0x4010d7, 0);
     for (const arr of [row, edge, bot]) arr[2] += variant * 6;
-    let W = style === 1 ? 0x3e : style === 0 ? Math.max(w, 0x14) : w;
-    if (style === 2 && textId !== undefined) W = stringWidth(a.text[textId] ?? '') + 0x1c;
+    return { row, edge, bot };
+  }
+
+  /** drawn width of a button (style 1 is fixed, style 2 fits its text) */
+  buttonWidth(style: number, w: number, textId?: number): number {
+    if (style === 1) return 0x3e;
+    if (style === 0) return Math.max(w, 0x14);
+    if (style === 2 && textId !== undefined) return stringWidth(this.assets.text[textId] ?? '') + 0x1c;
+    return w;
+  }
+
+  /** FUN_0004ad90: 9-slice button from t.pxl (d.dat tables 0x4010c8 / 0x4010d2 / 0x4010d7). */
+  button(x: number, y: number, w: number, h: number, style: number, variant: number, textId?: number): void {
+    const { row, edge, bot } = this.buttonSlices(style, variant);
+    const W = this.buttonWidth(style, w, textId);
     const rows = h >= 0x12 ? h - 0x11 : 0;
     const [c0, c1, c2, c3, c4] = row;
     this.image('t', c2, c3, c0, c1, x, y);
@@ -320,17 +330,18 @@ export class Ui {
 
   /** Draw a cmf frame (UI animations such as the title logo); image overrides every clip's image. */
   frame(cmfName: string, cmf: Cmf, fi: number, x: number, y: number, image?: string, fx?: SpriteFx): void {
-    x += this.ox; y += this.oy;
-    if (!image) { this.withAlpha(() => this.layer.frame(cmfName, cmf, fi, x, y, 0, DEFAULT_EQUIP), fx); return; }
-    for (const p of cmf.frames[fi]?.parts ?? []) this.withAlpha(() => this.layer.part(cmf, image, p, x, y), fx);
+    for (const p of cmf.frames[fi]?.parts ?? []) {
+      const c = cmf.clips[p.clip];
+      const img = image ?? clipImage(this.assets, cmfName, cmf, p.clip, 0, DEFAULT_EQUIP);
+      if (!c || !img) continue;
+      const flags = (p.hflip & 1) | ((p.rot & 3) << 2) | (((p.scale - 1) & 15) << 4) | ((p.blend & 31) << 8) | (((8 - p.alpha8) & 7) << 13);
+      this.image(img, c[0], c[1], c[2], c[3], x + p.dx, y + p.dy, flags, fx);
+    }
   }
 
-  /** DrawString / DrawStringCenter / DrawStringRight (FUN_00078e58 / 78ec4 / 79b98). */
-  string(s: string, x: number, y: number, align: Align = 'left', style?: TextStyle): void {
-    const w = stringWidth(s);
-    const x0 = align === 'center' ? x - Math.trunc(w / 2) : align === 'right' ? x - w : x;
-    const r = this.text.render(s, style);
-    this.withAlpha(() => this.layer.texture(r.texture, 0, 0, r.width, r.height, x0 + this.ox, y + this.oy));
+  /** text*.dat string by id */
+  textOf(id: number): string {
+    return this.assets.text[id] ?? '';
   }
 
   /** FUN_00078e84 width of a text id. */
@@ -361,17 +372,76 @@ export class Ui {
     for (let i = 0; i < digits; i++) {
       cx -= st.step;
       const d = v % 10;
-      this.withAlpha(() => this.layer.quad(st.img, st.sx(d), st.sy(d), st.w, st.h, cx + this.ox, y + this.oy, 0, 0, scale));
+      this.image(st.img, st.sx(d), st.sy(d), st.w, st.h, cx, y, (scale - 1) << 4);
       v = Math.trunc(v / 10);
     }
   }
+}
 
-  /** Composite the UI onto a cleared target (full-screen menus). */
+/** WebGL backend: quads in painter's order through the compositor (world-space effects). */
+export class GlUi extends Ui {
+  readonly layer: SpriteLayer;
+  readonly text: TextRenderer;
+  private cam: THREE.OrthographicCamera;
+  private white: THREE.DataTexture;
+
+  constructor(assets: Assets, private compositor: Compositor, zoom = 1) {
+    super(assets, zoom);
+    const hw = VIEW_W / 2 / zoom, hh = VIEW_H / 2 / zoom;
+    this.cam = new THREE.OrthographicCamera(VIEW_W / 2 - hw, VIEW_W / 2 + hw, VIEW_H / 2 - hh, VIEW_H / 2 + hh, -1, 1);
+    this.layer = new SpriteLayer(assets);
+    this.text = new TextRenderer(assets);
+    this.white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+    this.white.needsUpdate = true;
+    this.layer.register(this.white);
+  }
+
+  async init(images: string[]): Promise<void> {
+    await Promise.all([this.text.init(), this.layer.preload(images)]);
+  }
+
+  override begin(): void {
+    super.begin();
+    this.hits = [];
+    this.layer.clear();
+  }
+
+  private withAlpha(fn: () => void, fx?: SpriteFx): void {
+    this.layer.fx = this.alpha < 32 || fx ? { ...fx, alpha: Math.round(((fx?.alpha ?? 32) * this.alpha) / 32) } : null;
+    fn();
+    this.layer.fx = null;
+  }
+
+  image(name: string, sx: number, sy: number, w: number, h: number, x: number, y: number, flags = 0, fx?: SpriteFx): void {
+    if (w <= 0 || h <= 0) return;
+    const alpha8 = 8 - ((flags >> 13) & 7);
+    x += this.ox; y += this.oy;
+    this.withAlpha(() => this.layer.quad(name, sx, sy, w, h, x, y, (flags >> 2) & 3, flags & 1,
+      ((flags >> 4) & 15) + 1, (flags >> 8) & 31, alpha8), fx);
+  }
+
+  texture(tex: THREE.Texture, w: number, h: number, x: number, y: number): void {
+    this.withAlpha(() => this.layer.texture(tex, 0, 0, w, h, x + this.ox, y + this.oy));
+  }
+
+  fill(x: number, y: number, w: number, h: number, rgb = 0): void {
+    if (w <= 0 || h <= 0) return;
+    const tint: [number, number, number] = [(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255];
+    x += this.ox; y += this.oy;
+    this.withAlpha(() => this.layer.quad(this.white.uuid, 0, 0, 1, 1, x, y, 0, 0, 1, 0, 8, false, w, h), { tint, amount: 32 });
+  }
+
+  string(s: string, x: number, y: number, align: Align = 'left', style?: TextStyle): void {
+    const w = stringWidth(s);
+    const x0 = align === 'center' ? x - Math.trunc(w / 2) : align === 'right' ? x - w : x;
+    const r = this.text.render(s, style);
+    this.withAlpha(() => this.layer.texture(r.texture, 0, 0, r.width, r.height, x0 + this.ox, y + this.oy));
+  }
+
   endClear(): void {
     this.compositor.draw(this.layer.group, this.cam, VIEW_W, VIEW_H, undefined, true);
   }
 
-  /** Composite the UI over the frame already in the compositor target. */
   end(): void {
     this.compositor.draw(this.layer.group, this.cam, VIEW_W, VIEW_H, undefined, false);
   }

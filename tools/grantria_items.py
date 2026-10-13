@@ -53,7 +53,7 @@ TYPE_BASE = None          # d16[0x1b998 + 2*type]   FUN_00036458 / FUN_000365ac
 
 
 def model_id(t, sub, grade=0):
-    """FUN_00036458: model index; name text = 0x7fc + model, desc text = 0xa50 + model."""
+    """FUN_00036458: model index; name text = 0x7fc + model (descriptions: desc_id)."""
     if t == 0x1c:
         k = 0
     elif t == 0x1d:
@@ -67,6 +67,14 @@ def model_id(t, sub, grade=0):
     else:
         k = sub
     return k + TYPE_BASE[t]
+
+
+def desc_id(t, sub, grade=0):
+    """Item detail FUN_00032344: equipment 0xa50 + model; gems one text per kind
+    (model(0x10, 0, grade) + sub // 5); types above 0x10 sit 0x18 below their model."""
+    if t == 0x10:
+        return 0xa50 + model_id(0x10, 0, grade) + sub // 5
+    return 0xa50 + model_id(t, sub, grade) - (0x18 if t > 0x10 else 0)
 
 
 ICON_1B = {0x1b: 0x178, 0x1c: 0x179, 0x1d: 0x172, 0x1e: 0x14b, 0x21: 0x142,
@@ -105,7 +113,7 @@ def item_entry(t, sub, grade=0):
     ic = icon_id(t, sub)
     return {'type': t, 'sub': sub, 'grade': grade, 'model': m,
             'name_text_id': 0x7fc + m, 'name': text(0x7fc + m),
-            'desc_text_id': 0xa50 + m, 'desc': text(0xa50 + m),
+            'desc_text_id': desc_id(t, sub, grade), 'desc': text(desc_id(t, sub, grade)),
             'icon': ic, 'icon_rect': icon_rect(ic)}
 
 
@@ -137,7 +145,8 @@ def gen_catalog():
     return {
         'source': 'FUN_00036458 (model), FUN_000365ac (icon), FUN_0003bc80 (icon blit), FUN_0003c944 (name)',
         'rules': {
-            'name_text_id': '0x7fc + model', 'desc_text_id': '0xa50 + model',
+            'name_text_id': '0x7fc + model',
+            'desc_text_id': '0xa50 + model (type < 0x10); gems 0xa50 + model(0x10,0,grade) + sub/5; type > 0x10: 0xa50 + model - 0x18 (FUN_00032344)',
             'icon_image_index': '4 + icon/117 (images i0..i3)', 'icon_rect': '((icon%9)*16, ((icon%117)/9)*16, 16, 16)',
             'equipment_model': 'type*21 + d[0x245ff + sub*5 + grade]',
             'equipment_icon': '11*type + sub',

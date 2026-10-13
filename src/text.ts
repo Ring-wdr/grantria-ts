@@ -13,7 +13,7 @@ const BDY_CHO = [3, 3, 4, 4, 4, 5, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 5, 4, 5];
 const BDY_JONG = [3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3];
 
 /** '|a'..'|r' pen colours (RGB565). */
-const COLOR_CODES: Record<string, number> = {
+export const COLOR_CODES: Record<string, number> = {
   a: 0x0000, b: 0xffff, c: 0xf800, d: 0xffe0, e: 0x666c, f: 0x001f, g: 0xc99f, h: 0xed26, i: 0x34df,
   j: 0x9cd3, k: 0xfe6c, l: 0xab31, m: 0xfff5, n: 0xfc40, o: 0xfd5f, p: 0xafe0, r: 0xfd59,
 };

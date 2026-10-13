@@ -2,7 +2,7 @@
 // FUN_0004b9dc, character page 0 FUN_0005c560), drawn on the 1.3x layer L1
 // (analysis/features/ui-screens.md §0.8–0.10, tools/grantria_ui.py screen_gamemenu / tab_frame /
 // screen_tab_char). Tab bodies other than character page 0 are placeholders until ui-tabs.md.
-import { stringWidth } from '../text';
+import { cmfImages } from '../sprites';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
 import { expNeed } from './rules';
@@ -13,7 +13,8 @@ import { OptionTab } from './optionTab';
 import { QuestTab } from './questTab';
 import { MapTab } from './mapTab';
 import { CommunityTab } from './community';
-import { tri, type Ui } from './ui';
+import type { Ui } from './ui';
+import { button, gt, h, menuList, slot, sprite, win } from './view';
 
 const STAT_HELP = [0x1a18, 0x1a19, 0x1a1a, 0x1a1b, 0x1a1c];
 
@@ -47,9 +48,8 @@ export class GameMenu {
     this.quest = new QuestTab(ctx, field);
     this.map = new MapTab(ctx, field);
     this.community = new CommunityTab(ctx, field);
-    const L = ctx.ui13.layer;
-    void L.preload([...['touch', 'shadow', 'sIcon', 'i0', 'i1', 'i2', 'i3', 'map', 'dungeon'],
-      ...L.allImages(field.player.cmfName, field.player.cmf, 0, field.player.equip)]);
+    void ctx.ui13.preload([...['touch', 'shadow', 'sIcon', 'i0', 'i1', 'i2', 'i3', 'map', 'dungeon'],
+      ...cmfImages(ctx.assets, field.player.cmfName, field.player.cmf, 0, field.player.equip)]);
   }
 
   /** open a tab directly (MAP key -6 → map tab) */
@@ -86,6 +86,17 @@ export class GameMenu {
       if (req) { this.option.request = null; return req === 'save' ? 'save' : 'title'; }
     }
     if (this.titles) { for (const k of presses) if (this.titles) this.titleKey(k); return null; }
+    if (this.release) {
+      for (const k of presses) {
+        const r = this.release;
+        if (!r) break;
+        if (k === AVK.LEFT) r.cur = (r.cur + 5) % 6;
+        else if (k === AVK.RIGHT) r.cur = (r.cur + 1) % 6;
+        else if (k === AVK.OK) { this.field.inv.clearQuick(r.cur); this.release = null; }
+        else if (k === AVK.CLR) this.release = null;
+      }
+      return null;
+    }
     for (const k of presses) {
       if (k === AVK.K1) { this.type = (this.type + 7) & 7; this.page = 0; }      // FUN_00056198
       else if (k === AVK.K3) { this.type = (this.type + 1) & 7; this.page = 0; }
@@ -104,6 +115,8 @@ export class GameMenu {
 
   /** title list 0x31 (FUN_0005b804 / keys FUN_00051b10): 12 pages × 5, detail MENUPOP 10 */
   private titles: { page: number; sel: number; detail: boolean } | null = null;
+  /** quick-slot release overlay (character page '7', DAT_003b3c52 from 0x1D: FUN_000560c4 -> FUN_00037118) */
+  private release: { cur: number } | null = null;
 
   private titleKey(k: number): void {
     const tl = this.titles!, fs = this.field, id = tl.page * 5 + tl.sel;
@@ -121,32 +134,32 @@ export class GameMenu {
     if (this.titles && this.titles.page * 5 + this.titles.sel > 55) this.titles.sel = 55 - this.titles.page * 5;
   }
 
+  /** title list 0x31: 5 rows per page, the worn title in yellow; detail MENUPOP 10 over the list */
   private drawTitles(u: Ui): void {
     const tl = this.titles!, fs = this.field, t = this.ctx.assets.text;
-    u.glow(16, tl.sel * 28 + 54, 188, 26, this.t);
-    for (let i = 0; i < 5; i++) {
+    const name = (id: number) => (fs.story.titles.has(id) ? t[0xcff + id] ?? '' : t[0x1b63] ?? '???');
+    const rows = [];
+    for (let i = 0; i < 5 && tl.page * 5 + i <= 55; i++) {
       const id = tl.page * 5 + i;
-      if (id > 55) break;
-      u.button(18, 56 + 28 * i, 184, 22, 3, i === tl.sel ? 1 : 0);
-      u.hit(18, 56 + 28 * i, 184, 22, () => { if (tl.sel === i) return [AVK.OK]; tl.sel = i; });
-      const owned = fs.story.titles.has(id);
-      u.string(owned ? t[0xcff + id] ?? '' : t[0x1b63] ?? '???', 110, 59 + 28 * i, 'center', fs.story.title === id ? { pen: 0xffe0 } : undefined);
+      rows.push(button(gt(name(id), fs.story.title === id ? { pen: 0xffe0 } : {}), {
+        sel: i === tl.sel, on: () => { if (tl.sel === i) return [AVK.OK]; tl.sel = i; },
+      }));
     }
-    u.string(`${tl.page + 1}/12`, 110, 36, 'center');
-    u.hit(0, 190, 60, 27, () => [AVK.LEFT]); u.hit(160, 190, 60, 27, () => [AVK.RIGHT]);
-    if (tl.detail) {                                                  // MENUPOP 10: name, condition (0xD37 + n)
-      const id = tl.page * 5 + tl.sel, owned = fs.story.titles.has(id);
-      u.window(10, 70, 200, 100);
-      u.string(owned ? t[0xcff + id] ?? '' : t[0x1b63] ?? '???', 110, 78, 'center', { pen: 0xffe0 });
-      u.paragraph(t[0xd37 + id] ?? '', 110, 100, 180);
-      if (owned) u.string(fs.story.title === id ? '[5] 해제' : '[5] 장착', 110, 150, 'center');
-      u.hit(10, 70, 200, 100, () => [AVK.OK]);
-    }
+    const id = tl.page * 5 + tl.sel, owned = fs.story.titles.has(id);
+    const detail = tl.detail && h('div.v-modal', { on: () => [AVK.OK] },
+      win('.v-col.v-detail', null,
+        gt(name(id), { pen: 0xffe0 }),
+        gt(t[0xd37 + id] ?? '', { cls: 'v-grow' }),
+        owned && h('div.v-dim-note', null, fs.story.title === id ? '[5] 해제' : '[5] 장착')));
+    u.mount('tab', 'titles', menuList([...rows, ...Array.from({ length: 5 - rows.length }, () => h('div.v-menu-gap'))], undefined,
+      [h('div.v-row.v-pager', null,
+        h('span.v-page-btn', { on: () => [AVK.LEFT] }, '◀'), `${tl.page + 1}/12`, h('span.v-page-btn', { on: () => [AVK.RIGHT] }, '▶')), detail]));
   }
 
   /** Character page 0: 2x2 stat buttons, '5' spends a stat point (applied at once here). */
   private charKey(k: number): void {
     if (k === AVK.K0) { this.titles = { page: 0, sel: 0, detail: false }; return; }   // title list 0x31
+    if (k === AVK.K7) { this.release = { cur: 0 }; return; }                          // 퀵슬롯해제 overlay
     if (k === AVK.LEFT || k === AVK.RIGHT) this.statCur ^= 1;
     else if (k === AVK.UP || k === AVK.DOWN) this.statCur ^= 2;
     else if (k === AVK.OK && this.field.statPoints > 0) {
@@ -183,43 +196,35 @@ export class GameMenu {
       ang -= 0x2d;
     }
     u.alpha = 32;
-    u.button(0x56, 0x56, 0x3c, 0x1e, 3, 1);
-    u.hit(0x56, 0x56, 0x3c, 0x1e, () => [AVK.OK]);
-    if (k === 8) u.textId(0x147 + this.type, 0x75, 0x5c, 'center');
+    u.view('ringCentre', 0x56, 0x56, 0x3c, 0x1e, button(k === 8 && gt(this.ctx.assets.text[0x147 + this.type] ?? ''), {
+      sel: true, glow: false, style: 'width:100%;height:100%', on: () => [AVK.OK],
+    }));
     u.pop();
     u.closeButton();
   }
 
   /** FUN_00059600 tab frame + FUN_0004b9dc tab bar. */
+  /**
+   * FUN_00059600 tab frame + FUN_0004b9dc tab bar as one CSS grid view (ui.css .mf): the tab bar
+   * over the window, the window with its 'tab' slot (tab bodies mount there) and 'tab-over' slot
+   * (detail overlays), the page indicator of mode 0 and the close button beside the window.
+   */
   private drawFrame(u: Ui): void {
     u.pushCenter220();
-    u.window(0, 0x18, 0xdc, 0xc4);
-    if (this.type === 0) {                                  // mode 0: page indicator (mode 1 tabs have none)
-      const page = `${this.page + 1}/${this.pages()}`;
-      const tw = stringWidth(page), b = tri(this.t >> 1, 0xf);
-      u.image('t', 0, 0x13, 0xf, 0x13, (0x55 - (tw >> 1)) - b, 0xc2);
-      u.image('t', 0, 0x13, 0xf, 0x13, (tw >> 1) + 0x78 + b, 0xc2, 1);
-      u.string(page, 0x6e, 0xc4, 'center');
-      u.hit(0x30, 0xbc, 0x30, 0x1c, () => [AVK.STAR]);
-      u.hit(0x78, 0xbc, 0x30, 0x1c, () => [AVK.POUND]);
-    }
-    let off = 0;
-    for (let i = 0; i < 8; i++) {
-      u.hit(i * 0x20 - 0x14 + (i > this.type ? 8 : 0), -10, 0x20, 0x22, () => { if (this.type !== i) { this.type = i; this.page = 0; } });
-      if (i === this.type) {
-        const x = i * 0x20 - 0x14;
-        u.glow(x + 1, -10, 0x22, 0x22, this.t);
-        u.button(x + 3, -8, 0x1e, 0x1e, 3, 1);
-        u.image('t', i << 4, 0x57, 0x10, 0x10, i * 0x20 + 1 - 0xb, -3);
-        off = 8;
-      } else {
-        u.button(1 - 0x14 + off + i * 0x20, -6, 0x1a, 0x1a, 3, 0);
-        u.image('t', i << 4, 0x57, 0x10, 0x10, i * 0x20 + 1 - 0xf + off, -1);
-      }
-    }
-    u.button(0xe6, 0x1a, 0x22, 0x22, 3, 0);
-    u.image('c', 0xa4, 0x3a, 0x12, 0x11, 0xec, 0x20);
-    u.hit(0xe0, 0x14, 0x2e, 0x2e, () => [AVK.CLR]);
+    const tabs = Array.from({ length: 8 }, (_, i) => {
+      const sel = i === this.type;
+      return button(sprite('t', i << 4, 0x57, 0x10, 0x10), {
+        sel, cls: 'mf-tab', on: () => { if (this.type !== i) { this.type = i; this.page = 0; } },
+      });
+    });
+    const pager = this.type === 0 && h('div.v-row.mf-pager', null,                        // mode 0: page indicator
+      h('span.mf-arrow.left', { on: () => [AVK.STAR] }, sprite('t', 0, 0x13, 0xf, 0x13)),
+      `${this.page + 1}/${this.pages()}`,
+      h('span.mf-arrow.right', { on: () => [AVK.POUND] }, sprite('t', 0, 0x13, 0xf, 0x13, { flip: true })));
+    u.view('menuFrame', -24, -12, 294, 234, h('div.mf', { cls: (this.body?.busy || this.titles?.detail || this.release) && 'mf-inert' },
+      h('div.v-row.mf-tabs', null, tabs),
+      win('.v-col.mf-window', null, slot('tab'), pager, slot('tab-over')),
+      button(sprite('c', 0xa4, 0x3a, 0x12, 0x11), { cls: 'mf-close', glow: false, on: () => [AVK.CLR] })));
     u.pop();
   }
 
@@ -229,61 +234,58 @@ export class GameMenu {
     const body = this.body;
     if (body) { body.draw(u); body.drawOverlay(u); }
     else if (this.type === 0 && this.page === 0 && this.titles) this.drawTitles(u);
-    else if (this.type === 0 && this.page === 0) this.drawCharPage0(u);
-    else {
-      u.textId(0x147 + this.type, 0x6e, 0x50, 'center');
-      u.string('준비 중', 0x6e, 0x70, 'center', { pen: 0x9cd3 });
-    }
+    else if (this.type === 0 && this.page === 0) { this.drawCharPage0(u); if (this.release) this.drawRelease(u); }
+    else u.mount('tab', 'soon', h('div.v-col.v-fill.v-center', { style: 'gap:16px' },
+      gt(this.ctx.assets.text[0x147 + this.type] ?? ''), gt('준비 중', { pen: 0x9cd3 })));
     u.pop();
     const b = this.body;
     if (b && 'drawPopups' in b) b.drawPopups();
   }
 
-  /** FUN_0005c560 character page 0. */
-  private drawCharPage0(u: Ui): void {
-    const fs = this.field, m = fs.model, v = fs.vitals, st = fs.stats, a = this.ctx.assets;
-    u.button(8, 0x20, 0x3e, 0x16, 3, 1);
-    u.textId(0x1a14, 0x25, 0x22, 'center');                                     // 칭호
-    u.roundFill(0x4c, 0x23, 0x88, 0x10, 0, 1);
-    const worn = fs.story.title;                                                   // worn title (+0x2eb8), 없음 when none
-    if (worn === 0xff) u.textId(0x1a15, 0x90, 0x24, 'center', { pen: 0x37ff });      // 없음 (cyan 0x33FFFF)
-    else u.textId(0xcff + worn, 0x90, 0x24, 'center', { pen: 0x37ff });
-    u.hit(0x4c, 0x23, 0x88, 0x10, () => [AVK.K0]);                                  // tap: title list 0x31
-    u.image(`face_s_${m.cls}`, 0, 0, 0x38, 0x38, 10, 0x39);
-    const lv = `LV ${m.level}`;
-    u.string(lv, 0x8c, 0x3a);
-    u.textId(0x3e1 + m.cls, 0x8c + stringWidth(lv), 0x3a);
-    u.cfont('HP', 0x47, 0x4b);
-    u.cfont('MP', 0x47, 0x57);
-    u.cfont('EXP', 0x44, 0x65);
-    const lo = expNeed(m.level - 1), hi = expNeed(m.level);
-    const bars: [number, number, number][] = [
-      [0x4c, 10, Math.trunc(Math.max(0, v.hp) * 0x7b / Math.max(1, st.maxHp))],
-      [0x58, 0x10, Math.trunc(Math.max(0, v.mp) * 0x7b / Math.max(1, st.maxMp))],
-      [100, 0x16, Math.trunc(Math.max(0, v.exp - lo) * 0x7b / Math.max(1, hi - lo))],
-    ];
-    bars.forEach(([y, sy, w], k) => {
-      u.image('t', 0x42, 0, 0x7d, 10, 0x58, 0x4a + k * 0xc);
-      u.image('t', 0x42, sy, w, 6, 0x59, y);
+  /** quick-slot release overlay left of the window: the six HUD slots with what they hold, cursor pulsing */
+  private drawRelease(u: Ui): void {
+    const r = this.release!, fs = this.field, inv = fs.inv;
+    const slots = Array.from({ length: 6 }, (_, i) => {
+      const q = inv.quick[i], it = q.kind === 2 ? inv.items[q.id] : undefined, ir = it && fs.db.iconRect(it.icon);
+      return h(`div.cq-slot${i === r.cur ? '.cur' : ''}`, { on: () => { if (r.cur === i) return [AVK.OK]; r.cur = i; } },
+        sprite('touch', 0, 18, 31, 31),
+        q.kind === 1 && sprite('sIcon', (q.id % 10) * 24, fs.model.cls * 24, 24, 24, { cls: 'cq-icon skill' }),
+        ir && sprite(ir.image, ir.sx, ir.sy, 16, 16, { cls: 'cq-icon' }));
     });
-    const nums = [`${v.hp}/${st.maxHp}`, `${v.mp}/${st.maxMp}`, `${v.exp - lo}/${hi - lo}`];
-    nums.forEach((s, k) => u.string(s, 0xd2, 0x4d + k * 0xc, 'right'));
+    u.view('charRelease', -50, 15, 31, 6 * 35, h('div.v-col', { style: 'gap:4px' }, slots));
+  }
+
+  /** FUN_0005c560 character page 0: title, portrait with level / bars, stats 2x2, points, help line. */
+  private drawCharPage0(u: Ui): void {
+    const fs = this.field, m = fs.model, v = fs.vitals, st = fs.stats, a = this.ctx.assets, t = a.text;
+    const worn = fs.story.title;                                                   // worn title (+0x2eb8), 없음 when none
+    const lo = expNeed(m.level - 1), hi = expNeed(m.level);
+    const bar = (label: string, cls: string, cur: number, max: number) =>
+      h('div.v-row.v-stat-bar', null,
+        h('span.v-bar-label', null, label),
+        h(`div.v-bar.${cls}`, { style: `--p:${Math.max(0, Math.min(1, cur / Math.max(1, max))).toFixed(3)}` }),
+        h('span.v-bar-value', null, `${cur}/${max}`));
     const c = this.statCur;
-    u.glow((c & 1) * 0x46 + 8, (c >> 1) * 0x20 + 0x72, 0x42, 0x1a, this.t);
-    for (let i = 0; i < 4; i++) {
-      const x = (i & 1) * 0x46, y = (i >> 1) * 0x20;
-      u.alpha = i === c ? 32 : 0x18;
-      u.button(x + 10, y + 0x74, 0x3e, 0x16, 3, i === c ? 1 : 0);
-      u.hit(x + 10, y + 0x74, 0x3e, 0x16, () => { if (this.statCur === i) return [AVK.OK]; this.statCur = i; });
-      u.string(`${a.text[0x15 + i] ?? ''} ${m.stats[i]}`, x + 0x29, y + 0x78, 'center');
-      u.alpha = 32;
-    }
-    u.button(0x96, 0x74, 0x3e, 0x16, 3, 1);
-    u.textId(0x1a16, 0xb5, 0x78, 'center');                                     // 퀵슬롯해제
-    u.roundFill(0x9a, 0x99, 0x36, 0x10, 0, 1);
-    u.image('c', 0xb7, 0x58, 0xe, 0xe, 0x9e, 0x9a);
-    u.string(String(fs.statPoints), 200, 0x9b, 'right');
-    u.roundFill(8, 0xaf, 0xcc, 0x10, 0, 1);
-    u.textId(STAT_HELP[c], 0x6e, 0xb0, 'center');
+    const stats = Array.from({ length: 4 }, (_, i) => button(`${t[0x15 + i] ?? ''} ${m.stats[i]}`, {
+      sel: i === c, on: () => { if (this.statCur === i) return [AVK.OK]; this.statCur = i; },
+    }));
+    u.mount('tab', 'char', h('div.v-col.v-fill.v-tab.v-char', null,
+      h('div.v-row', { style: 'gap:6px' },
+        button(gt(t[0x1a14] ?? ''), { sel: true, glow: false, style: 'width:62px' }),             // 칭호
+        h('div.v-box.v-grow.v-title-box', { on: () => [AVK.K0] },                                 // tap: title list 0x31
+          gt(worn === 0xff ? t[0x1a15] ?? '' : t[0xcff + worn] ?? '', { pen: 0x37ff }))),
+      h('div.v-row', { style: 'gap:8px;align-items:flex-start' },
+        sprite(`face_s_${m.cls}`, 0, 0, 0x38, 0x38, { cls: 'v-portrait' }),
+        h('div.v-col.v-grow', { style: 'gap:3px' },
+          h('div.v-row', { style: 'gap:6px' }, `LV ${m.level}`, gt(t[0x3e1 + m.cls] ?? '')),
+          bar('HP', 'hp', v.hp, st.maxHp),
+          bar('MP', 'mp', v.mp, st.maxMp),
+          bar('EXP', 'exp', v.exp - lo, hi - lo))),
+      h('div.v-row', { style: 'gap:6px;align-items:stretch' },
+        h('div.v-stat-grid.v-grow', null, stats),
+        h('div.v-col', { style: 'gap:6px;width:62px' },
+          button(gt(t[0x1a16] ?? ''), { sel: true, glow: false, on: () => [AVK.K7] }),            // 퀵슬롯해제 = '7'
+          h('div.v-box.v-row.v-points', null, sprite('c', 0xb7, 0x58, 0xe, 0xe), h('span.v-grow', { style: 'text-align:right' }, String(fs.statPoints))))),
+      h('div.v-box.v-note', null, gt(t[STAT_HELP[c]] ?? ''))));
   }
 }

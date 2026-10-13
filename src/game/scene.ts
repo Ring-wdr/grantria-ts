@@ -3,7 +3,7 @@ import type * as THREE from 'three';
 import type { Assets, Cmf } from '../assets';
 import type { Compositor } from '../compositor';
 import type { Input } from './input';
-import type { Ui } from './ui';
+import type { DomUi } from './domUi';
 import type { GameAudio } from './audio';
 import type { Options } from './options';
 
@@ -14,9 +14,11 @@ export interface GameContext {
   input: Input;
   /** 2D canvas over the WebGL screen (provisional text until the bitmap font is ported) */
   overlay: HTMLCanvasElement;
-  /** screen-space UI layer and the 1.3x overlay layer L1 (popups) */
-  ui: Ui;
-  ui13: Ui;
+  /** screen-space UI layer and the 1.3x overlay layer L1 (popups), HTML/CSS */
+  ui: DomUi;
+  ui13: DomUi;
+  /** field HUD layer (status bar, touch buttons, minimap, dialogue) under the screen UI */
+  hud: DomUi;
   /** sprites used by menus (title logo, class idle animations) */
   cmfs: Record<string, Cmf>;
   audio: GameAudio;

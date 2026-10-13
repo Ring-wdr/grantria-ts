@@ -6,7 +6,7 @@ import { Buffs, DAY_EVENTS, TINT_BASE, clockFrame, dayPhase, isSafeMap, returnPo
 import { boxEquipment } from './boxes';
 import { Gimmick } from './gimmicks';
 import { Minimap } from './minimap';
-import { drawFortune, drawFortuneResult, today } from './fortune';
+import { drawFortune, fortuneAskView, fortuneResultView, FORTUNE_CMF, today, type FortuneArt } from './fortune';
 import { achCheck, achEvent, challengeGold, titleBonus, type AchEvent, type Awards } from './achievements';
 import { accountBook, accountDay, clearUnsavedUses, countUnsavedUse, saveAccount, setAccountDay, takeUnsavedUses, account, secondDrop, traitBox, traitOnLevelUp, traitReset, traitStatBonus, traitVal } from './account';
 import { dimStats, dungeonStart, generateFloor, newRun, resultValues, rollDimDrops, type DimRun } from './dimension';
@@ -21,7 +21,9 @@ import { QuestLog } from './quests';
 import { Story, StoryDb } from './story';
 import { Field, VIEW_H, VIEW_W, type Drawable } from './field';
 import { FIELD_ZONES, FieldHud } from './fieldHud';
-import { Ui } from './ui';
+import { GlUi } from './ui';
+import { button, gt, win } from './view';
+import type { DomUi } from './domUi';
 import { AVK } from './input';
 import { Inventory, ItemDb } from './items';
 import { groundBox, groundDrawable, rollBossDrops, rollDrop, updateGround, type GroundItem } from './drops';
@@ -48,7 +50,10 @@ const OPENING = [0, 10, 0x14];
 
 export class FieldScene implements Scene {
   readonly field: Field;
-  readonly ui: Ui;
+  /** world-space effects (aura, quest marks, status icons, balloons) drawn with WebGL on the tick */
+  readonly ui: GlUi;
+  /** HUD, minimap, dialogue and event overlays (HTML layer) */
+  readonly hudUi: DomUi;
   hud!: FieldHud;
   readonly player: Player;
   readonly model: PlayerModel;
@@ -180,7 +185,8 @@ export class FieldScene implements Scene {
 
   private constructor(readonly ctx: GameContext, save: SaveData, playerCmf: Cmf, readonly db: ItemDb) {
     this.field = new Field(ctx.assets, ctx.compositor);
-    this.ui = new Ui(ctx.assets, ctx.compositor);
+    this.ui = new GlUi(ctx.assets, ctx.compositor);
+    this.hudUi = ctx.hud;
     this.inv = new Inventory(db);
     this.tables = db.equipTables();
     if (save.inv) {
@@ -253,7 +259,7 @@ export class FieldScene implements Scene {
     s.lap = lap;
     await s.ui.init(FieldHud.images);
     s.statusCmf = await ctx.assets.cmf('cmf_status');
-    s.hud = new FieldHud(s.ui, s.statusCmf, ctx.input);
+    s.hud = new FieldHud(s.hudUi, s.statusCmf, ctx.input);
     s.inv.log = (_kind, text) => s.hud.message(text);
     s.inv.onCollect = (sub) => s.story.collect.add(sub);              // keys / sage stones are flags
     s.sheets = await Promise.all([0, 1, 2].map((c) => ctx.assets.cmf(`cmf_c${c}`)));
@@ -311,7 +317,19 @@ export class FieldScene implements Scene {
 
   /** popup 0x54: OK draws the fortune (FUN_00052610(1)), CLR gives up today's fortune; both save */
   private openFortune(): void {
-    this.popup = { p: new Popup(this.ctx, 0x54), onYes: () => this.runFortune(), onCancel: () => this.autosave() };
+    // FUN_00051edc(0x54) loads the portrait actor (어둠의 상인, cmf c72) when the popup opens
+    void this.ctx.assets.cmf(FORTUNE_CMF).then((c) => { this.fortuneCmf = c; });
+    void this.ctx.ui13.preload(['c72', 'shadow']);
+    const p = new Popup(this.ctx, 0x54);
+    p.content = () => fortuneAskView(this.db.a.text, this.fortuneArt());
+    this.popup = { p, onYes: () => this.runFortune(), onCancel: () => this.autosave() };
+  }
+
+  /** the portrait cmf once loaded; its frame counter advances once per popup draw (one tick), frame % 6 */
+  private fortuneCmf: import('../assets').Cmf | null = null;
+  private fortuneFrame = 0;
+  private fortuneArt(): FortuneArt | null {
+    return this.fortuneCmf ? { cmf: this.fortuneCmf, frame: this.fortuneFrame++ } : null;
   }
 
   private runFortune(): void {
@@ -327,7 +345,7 @@ export class FieldScene implements Scene {
       }
     }
     const p = new Popup(this.ctx, 0x55);
-    p.extra = (u) => drawFortuneResult(u, t, ok ? res : null, item);
+    p.content = () => fortuneResultView(t, ok ? res : null, item, this.fortuneArt());
     p.hideBody = true;
     this.popup = { p };
     this.autosave();
@@ -771,14 +789,11 @@ export class FieldScene implements Scene {
     const w = this.warpList!, u = this.ctx.ui13, t = this.db.a.text;
     u.begin();
     u.pushCenter220();
-    u.window(20, 30, 180, 30 + w.rows.length * 26);
-    w.rows.forEach((row, i) => {
-      const y = 44 + i * 26, map = this.stone(row).map;
-      if (i === w.cur) u.glow(28, y - 4, 164, 26, this.tick);
-      u.button(30, y - 2, 160, 22, 3, i === w.cur ? 1 : 0);
-      u.string(t[0x1e4 + map] ?? '', 110, y + 2, 'center');
-      u.hit(30, y - 2, 160, 22, () => { if (w.cur === i) return [AVK.OK]; w.cur = i; });
-    });
+    u.view('warps', 20, 30, 180, 30 + w.rows.length * 26, win('.v-col.v-fill.v-center', { style: 'gap:4px;padding:10px 10px' },
+      w.rows.map((row, i) => button(gt(t[0x1e4 + this.stone(row).map] ?? ''), {
+        sel: i === w.cur, style: 'width:100%',
+        on: () => { if (w.cur === i) return [AVK.OK]; w.cur = i; },
+      }))));
     u.pop();
     u.closeButton();
     u.end();
@@ -1709,10 +1724,12 @@ export class FieldScene implements Scene {
     setDayShift(0, 0, 0);
     if (this.events.grey) greyUniform.grey.value = 0;           // the filter is applied before the dialogue
     this.ui.begin();
+    const hud = this.hudUi;
+    hud.begin();
     if (ev) {
       this.drawBalloons(originX);
-      this.events.drawOverlay(this.ui);
       this.ui.end();
+      this.events.drawOverlay(hud);
       this.drawPopup();
       return;
     }
@@ -1729,8 +1746,9 @@ export class FieldScene implements Scene {
     if (this.run) this.run.draw(this.ui, this.run.node.x - ox, this.run.node.y - oy);
     if (this.warpT >= 0) this.ui.frame('cmf_status', this.statusCmf, 0x34 + (this.warpT >> 1), player.x - ox, player.y - 90 - oy, 'c');
     if (this.arriveT >= 0) this.ui.frame('cmf_status', this.statusCmf, 0x34 + (this.arriveT >> 1), player.x - ox, player.y - 90 - oy, 'c');
+    this.ui.end();
     if (this.ctx.options.minimap && !this.talk && !this.dead && this.showButtons)   // FUN_00022228 in state 0x10
-      this.minimap?.draw(this.ui, player.x, player.y, [
+      this.minimap?.draw(hud, player.x, player.y, [
         ...this.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y, monster: true })),
         // objects in slots 3..40 that are not monsters (type >= 43): actors created by the event (SPAWN_TYPE)
         ...this.actors.filter((a) => a.spawned && a.visible && a.id >= 43).map((a) => ({ x: a.x, y: a.y, monster: false })),
@@ -1747,9 +1765,8 @@ export class FieldScene implements Scene {
         return { icon: this.db.iconRect(it.icon), count: this.db.showsCount(it) ? it.count : -1, cd: q.cd, maxCd: it.type === 0x11 && it.sub >= 14 ? 900 : 100 };
       }),
     }, this.cam.x - originX - sx, this.cam.y - sy, this.showButtons && !this.dead && !this.talk);
-    if (this.flash) { this.ui.alpha = Math.min(32, this.flash * 4); this.ui.fill(0, 0, VIEW_W, VIEW_H, 0xffffff); this.ui.alpha = 32; }
-    if (this.talk) { this.ui.hit(0, 0, VIEW_W, VIEW_H, () => [AVK.OK]); this.talk.d.draw(this.ui, this.tick); }
-    this.ui.end();
+    if (this.flash) { hud.alpha = Math.min(32, this.flash * 4); hud.fill(0, 0, VIEW_W, VIEW_H, 0xffffff); hud.alpha = 32; }
+    if (this.talk) { hud.hit(0, 0, VIEW_W, VIEW_H, () => [AVK.OK]); this.talk.d.draw(hud, this.tick); }
     this.drawPopup();
   }
 

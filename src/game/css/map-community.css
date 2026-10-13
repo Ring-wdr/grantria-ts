@@ -1,0 +1,77 @@
+/* Map tab 0x22 and community menu 0x24 (mapTab.ts / community.ts) on the declarative views (ui.css). */
+
+/* ---- shared ---- */
+/* SpriteFx tint on a view sprite: its own shape filled with --tint at --tint-a (mask = the sheet) */
+.mc-tint { position: relative; }
+.mc-tint::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--tint);
+  opacity: var(--tint-a);
+  -webkit-mask: var(--mask) no-repeat;
+  mask: var(--mask) no-repeat;
+  -webkit-mask-position: var(--mpos);
+  mask-position: var(--mpos);
+}
+/* stage elements in 220-window coordinates (after .mc-tint so absolute wins) */
+.mc-abs { position: absolute; display: block; transform-origin: 0 0; }
+
+/* style-0 digits (c.pxl 5x7, 4 px step) */
+.mc-num { display: inline-flex; flex: none; }
+.mc-num > .v-sprite + .v-sprite { margin-left: -1px; }
+.mc-qty { position: absolute; top: 1px; right: 1px; }
+
+/* greyed entries (button variant 3) and the non-current bag tabs (alpha 16) */
+.v-btn.mc-off { opacity: 0.4; filter: grayscale(0.7); }
+.v-btn.mc-faint { opacity: 0.5; }
+
+/* menu lists: five keycaps over a note */
+.mc-list { gap: 8px; padding: 6px; justify-content: center; }
+.mc-row { justify-content: flex-start; gap: 6px; padding: 0 8px; }
+.mc-price { flex: none; }
+
+/* bottom button row (# / 0 / * actions) */
+.mc-buttons { flex: none; gap: 8px; padding: 0 2px; }
+.mc-buttons > .v-btn { flex: 1 1 0; min-width: 0; }
+
+/* item cells */
+.mc-grid { display: grid; grid-template-columns: repeat(5, 26px); grid-auto-rows: 26px; gap: 6px 10px; align-content: start; }
+.mc-grid4 { grid-template-columns: repeat(4, 26px); }
+.mc-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: #0b1220;
+  box-shadow: inset 0 0 0 1px #29385a;
+  transition: box-shadow var(--tick) ease-out, background var(--tick) ease-out;
+}
+.mc-cell.v-hit:hover { background: #142038; }
+.mc-cell.on { background: #10284a; box-shadow: inset 0 0 0 1px #429ac6; }
+.mc-slot { background: #000; box-shadow: inset 0 0 0 1px #354e73; }
+
+/* ---- premium shop: shelf with a row scrollbar, info panel ---- */
+.mc-shelf { flex: none; height: 100px; padding: 5px 6px 5px 12px; gap: 8px; justify-content: center; align-items: stretch; }
+.mc-shelf .mc-grid { height: 90px; }
+.mc-scrollbar { position: relative; width: 3px; flex: none; border-radius: 2px; background: #182442; }
+.mc-thumb { position: absolute; left: 0; right: 0; border-radius: 2px; background: #637594; transition: top calc(var(--tick) * 2) ease-out; }
+.mc-info { padding: 4px 8px; justify-content: space-around; }
+.mc-cost { justify-content: space-between; gap: 8px; }
+.mc-held { opacity: 0.85; }
+
+/* ---- storage: bag tabs | 4x4 grid + item name ---- */
+.mc-storage { gap: 6px; align-items: stretch; }
+.mc-bags { width: 32px; flex: none; gap: 3px; }
+.mc-bag { flex: 1 1 0; min-height: 0; padding: 0; flex-direction: column; gap: 1px; }
+.mc-panel { align-items: center; justify-content: center; gap: 6px; padding: 6px 4px 4px; }
+.mc-name { height: 15px; width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- map tab: stage in 220 coordinates, centre message, footer label ---- */
+.mc-stage { position: absolute; width: 220px; height: 212px; }
+.mc-map-frame { left: 8px; top: 31px; width: 204px; height: 164px; border-radius: 3px; background: #000; box-shadow: 0 0 0 1px #29385a; }
+.mc-region { width: 20px; height: 20px; border-radius: 50%; transition: box-shadow var(--tick) ease-out; }
+.mc-region.v-hit:hover { box-shadow: 0 0 0 1px var(--glow), 0 0 5px var(--glow); }
+.mc-map-centre { padding: 0 12px 18px; }
+.mc-map-foot { position: absolute; left: 2px; right: 2px; bottom: 0; height: 16px; }

@@ -10,9 +10,11 @@ import { Rng } from './rules';
 import { loadWarehouse, saveWarehouse } from './save';
 import type { GameContext } from './scene';
 import { consume, countOf } from './shopRules';
-import { drawItemCell } from './tabs';
 import { DimensionScreen } from './dimension';
+import { tint } from './mapTab';
 import type { Ui } from './ui';
+import { button, gt, h, menuList, sprite, type VNode } from './view';
+import './css/map-community.css';
 
 const COUPON = [0x1b, 0x1b] as const;
 const COUPON_MAX = 9999;
@@ -34,6 +36,26 @@ export const WAREHOUSE_SIZE = 48;
 type PopupState = { p: Popup; yes?: () => void; ok?: () => void };
 
 export function coupons(fs: FieldScene): number { return countOf(fs.inv, COUPON[0], COUPON[1]); }
+
+/** the 16x16 item icon of (type, sub) from its original sheet */
+function itemIcon(fs: FieldScene, type: number, sub: number): VNode {
+  const r = fs.db.iconRect(fs.db.icon(type, sub));
+  return sprite(r.image, r.sx, r.sy, 16, 16);
+}
+
+/** FUN_00078af4 style 0 digits (c.pxl 5x7 at 167 + 5d, 102, 4 px step) */
+function digits(v: number, cls = ''): VNode {
+  return h('span.mc-num', { cls }, [...String(Math.max(0, Math.trunc(v)))].map((d) => sprite('c', 167 + 5 * +d, 102, 5, 7)));
+}
+
+/** drawItemCell (tabs.ts) as a view: the icon, red-tinted when unusable, and the stack count at the top right */
+function itemCell(fs: FieldScene, it: Item): VNode[] {
+  const r = fs.db.iconRect(it.icon), usable = fs.inv.usable(it, fs.model.level, fs.model.cls);
+  return [
+    sprite(r.image, r.sx, r.sy, 16, 16, usable ? {} : { cls: 'mc-tint', style: tint(r.image, r.sx, r.sy, '255,0,0', 12) }),
+    fs.db.showsCount(it) && digits(it.count, 'mc-qty'),
+  ].filter((k): k is VNode => !!k);
+}
 
 /** save after a grant the way FUN_00020024 does: at once where saving is allowed outside the garden */
 function grantSave(fs: FieldScene): void { if (fs.canSave && fs.gardenMode === 0) fs.autosave(); }
@@ -79,17 +101,16 @@ export class CouponShop {
     } };
   }
 
+  /** FUN_000597d8: five package buttons (coupon icon, name, price) and the footer note 0x1bbd */
   draw(u: Ui): void {
-    const t = this.ctx.assets.text;
-    u.glow(16, this.sel * 32 + 42, 188, 26, this.t);
-    for (let i = 0; i < 5; i++) {
-      u.button(18, 44 + 32 * i, 184, 22, 3, i === this.sel ? 1 : 0);
-      u.hit(18, 44 + 32 * i, 184, 22, () => { if (this.sel === i) return [AVK.OK]; this.sel = i; });
-      u.string(t[0x1bbe + i] ?? '', 38, 47 + 32 * i);
-      u.string('무료', 180, 47 + 32 * i, 'right', { pen: 0xffe0 });       // local grant (originally 1100..33000원)
-    }
-    u.roundFill(8, 195, 204, 16, 0, 1);
-    u.textId(0x1bbd, 110, 197, 'center');
+    const t = this.ctx.assets.text, coupon = itemIcon(this.fs, COUPON[0], COUPON[1]);
+    u.mount('tab', 'coupon', h('div.v-col.v-fill.v-tab', null,
+      h('div.v-col.v-grow.mc-list', null, Array.from({ length: 5 }, (_, i) => button([
+        coupon,
+        gt(t[0x1bbe + i] ?? '', { cls: 'v-grow v-left' }),
+        gt('무료', { pen: 0xffe0, cls: 'mc-price' }),                     // local grant (originally 1100..33000원)
+      ], { sel: i === this.sel, cls: 'mc-row', on: () => { if (this.sel === i) return [AVK.OK]; this.sel = i; } }))),
+      h('div.v-box.v-note', null, gt(t[0x1bbd] ?? ''))));
   }
   drawPopups(): void { this.popup?.p.draw(); }
 }
@@ -142,25 +163,33 @@ class PremiumShop {
     } };
   }
 
+  /**
+   * FUN_0005bf34: 5x3 icon grid scrolled by rows (cursor kept on the middle row), the info panel
+   * (name x quantity, coupon price / held) and the 가방 (#) / 구매 (0) / 창고 (*) buttons.
+   */
   draw(u: Ui): void {
-    const t = this.ctx.assets.text, top = Math.max(0, Math.floor(this.cur / 5) - 2) * 5;
-    u.roundFill(10, 0x1f, 199, 0x62, 0, 1);
-    for (let k = 0; k < 15 && top + k < PREMIUM.length; k++) {
-      const i = top + k, col = k % 5, row = Math.floor(k / 5), [id] = PREMIUM[i];
-      const x = col * 0x24 + 0x16, y = row * 0x20 + 0x22;
-      if (i === this.cur) u.glow(col * 0x24 + 0x14, (row + 1) * 0x20, 0x1e, 0x1e, this.t);
-      const r = this.fs.db.iconRect(this.fs.db.icon(0x1b, id));
-      u.image(r.image, r.sx, r.sy, 16, 16, x + 5, y + 5);
-      u.hit(x, y, 0x1a, 0x1a, () => { if (this.cur === i) return [AVK.K0]; this.cur = i; });
+    const t = this.ctx.assets.text, n = PREMIUM.length, rows = Math.ceil(n / 5);
+    const top = Math.max(0, Math.floor(this.cur / 5) - 2) * 5;
+    const cells = [];
+    for (let k = 0; k < 15 && top + k < n; k++) {
+      const i = top + k, [id, , qty] = PREMIUM[i];
+      cells.push(h(`div.mc-cell${i === this.cur ? '.on.v-sel' : ''}`, { on: () => { if (this.cur === i) return [AVK.K0]; this.cur = i; } },
+        itemIcon(this.fs, 0x1b, id), qty > 1 && digits(qty, 'mc-qty')));
     }
-    const [id, price, qty] = PREMIUM[this.cur];
-    u.roundFill(10, 0x86, 199, 0x32, 0, 1);
-    u.string(qty > 1 ? `${this.name(id)} x${qty}` : this.name(id), 0x0e, 0x8b);
-    u.string(`쿠폰 ${price}장  (보유 ${coupons(this.fs)})`, 0xcd, 0xa2, 'right', { pen: 0xffe0 });
-    u.button(8, 0xbd, 0x3e, 0x16, 3, 0); u.textId(0x19e5, 0x27, 0xc1, 'center'); u.hit(8, 0xbd, 0x3e, 0x16, () => [AVK.POUND]);
-    u.button(0x50, 0xbd, 0x3e, 0x16, 2, 0); u.textId(0x17b, 100, 0xc1, 'center'); u.hit(0x50, 0xbd, 0x3e, 0x16, () => [AVK.K0]);
-    u.button(0x96, 0xbd, 0x3e, 0x16, 3, 0); u.textId(0x19e4, 0xb5, 0xc1, 'center'); u.hit(0x96, 0xbd, 0x3e, 0x16, () => [AVK.STAR]);
-    void t;
+    const [id, price, qty] = PREMIUM[this.cur], held = coupons(this.fs);
+    u.mount('tab', 'premium', h('div.v-col.v-fill.v-tab', null,
+      h('div.v-box.v-row.mc-shelf', null,
+        h('div.mc-grid', null, cells),
+        h('div.mc-scrollbar', null, h('div.mc-thumb', { style: `top:${(top / 5 / rows) * 100}%;height:${(3 / rows) * 100}%` }))),
+      h('div.v-box.v-col.v-grow.mc-info', null,
+        h('div.v-row', { style: 'gap:6px' }, itemIcon(this.fs, 0x1b, id), gt(qty > 1 ? `${this.name(id)} x${qty}` : this.name(id), { cls: 'v-grow v-left' })),
+        h('div.v-row.mc-cost', null,
+          gt(`쿠폰 ${price}장`, { pen: 0xffe0 }),
+          gt(`보유 ${held}`, { pen: held < price ? 0xf800 : 0xffff, cls: 'mc-held' }))),
+      h('div.v-row.mc-buttons', null,
+        button(gt(t[0x19e5] ?? ''), { on: () => [AVK.POUND] }),
+        button(gt(t[0x17b] ?? ''), { sel: true, glow: false, on: () => [AVK.K0] }),
+        button(gt(t[0x19e4] ?? ''), { on: () => [AVK.STAR] }))));
   }
   drawPopups(): void { this.popup?.p.draw(); }
 }
@@ -233,36 +262,35 @@ class Storage {
     grantSave(fs);
   }
 
+  /**
+   * FUN_0002b774 (grid FUN_00058890): the bag tabs (icon + item count; past the owned bags greyed out),
+   * the 4x4 item grid with the selected item's name, and the three buttons of the mode.
+   */
   draw(u: Ui): void {
-    const list = this.list(), n = this.bags();
-    u.roundFill(55, 35, 150, 154, 0, 1);
-    for (let k = 0; k < 16; k++) {
-      const x = (k & 3) * 36 + 63, y = (k >> 2) * 35 + 47, it = list[this.bag * 16 + k];
-      if (this.focus === 1 && k === this.sel) u.glow(x - 2, y - 2, 30, 30, this.t);
-      u.bevel(x, y, 26, 26, 0x354e73, 0);
-      u.hit(x - 4, y - 4, 34, 34, () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; });
-      if (it) drawItemCell(u, this.fs, it, x + 1, y + 1);
-    }
-    if (this.focus === 0) u.glow(6, this.bag * 32 + 30, 34, 34, this.t);
-    for (let i = 0; i < 5; i++) {
-      u.alpha = i === this.bag ? 32 : 16;
-      u.button(8, 32 * (i + 1), 0x1e, 0x1e, 3, i >= n ? 3 : i === this.bag ? 1 : 0);
-      if (i < n) u.hit(6, 32 * (i + 1) - 2, 34, 32, () => { this.focus = 0; this.bag = i; this.sel = 0; });
-      u.image('t', 15, 24, 16, 16, 15, 38 + 32 * i);
-      u.alpha = 32;
-      if (i < n) u.number(Math.max(0, Math.min(16, list.length - 16 * i)), 11, 55 + 32 * i, 0, 0);
-    }
-    const btn = (x: number, id: number, key: number | null, cx: number) => {
-      u.button(x, 0xbd, 0x3e, 0x16, key === null ? 3 : 3, key === null ? 3 : 0);
-      u.textId(id, cx, 0xc1, 'center');
-      if (key !== null) u.hit(x, 0xbd, 0x3e, 0x16, () => [key]);
-    };
-    btn(8, 0x19e3, this.mode === 0 ? AVK.POUND : AVK.STAR, 0x27);                    // 고급상점
-    if (this.mode === 0) btn(0x4f, 0x19e2, null, 0x6e);                              // 골드전송 (server gift: off)
-    else btn(0x4f, 0x19da, AVK.K0, 0x6e);                                            // 창고정리
-    btn(0x96, this.mode === 0 ? 0x19e4 : 0x19e5, this.mode === 0 ? AVK.STAR : AVK.POUND, 0xb5);   // 창고 / 가방
+    const t = this.ctx.assets.text, list = this.list(), n = this.bags();
+    const tabs = Array.from({ length: 5 }, (_, i) => button(
+      [sprite('t', 15, 24, 16, 16), i < n && digits(Math.max(0, Math.min(16, list.length - 16 * i)))], {
+        sel: i === this.bag, glow: this.focus === 0,
+        cls: `mc-bag${i >= n ? ' mc-off' : i === this.bag ? '' : ' mc-faint'}`,
+        on: i < n ? () => { this.focus = 0; this.bag = i; this.sel = 0; } : undefined,
+      }));
+    const cells = Array.from({ length: 16 }, (_, k) => {
+      const it = list[this.bag * 16 + k], on = this.focus === 1 && k === this.sel;
+      return h(`div.mc-cell.mc-slot${on ? '.on.v-sel' : ''}`, { on: () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; } },
+        it && itemCell(this.fs, it));
+    });
+    const btn = (id: number, key: number | null) => button(gt(t[id] ?? ''), { cls: key === null ? 'mc-off' : '', on: key === null ? undefined : () => [key] });
     const it = list[this.bag * 16 + this.sel];
-    if (it && this.focus === 1) u.string(it.name, 130, 175, 'center');
+    u.mount('tab', 'storage', h('div.v-col.v-fill.v-tab', null,
+      h('div.v-row.v-grow.mc-storage', null,
+        h('div.v-col.mc-bags', null, tabs),
+        h('div.v-box.v-col.v-grow.mc-panel', null,
+          h('div.mc-grid.mc-grid4', null, cells),
+          h('div.mc-name', null, it && this.focus === 1 && gt(it.name)))),
+      h('div.v-row.mc-buttons', null,
+        btn(0x19e3, this.mode === 0 ? AVK.POUND : AVK.STAR),                                            // 고급상점
+        this.mode === 0 ? btn(0x19e2, null) : btn(0x19da, AVK.K0),                                      // 골드전송 (server gift: off) / 창고정리
+        btn(this.mode === 0 ? 0x19e4 : 0x19e5, this.mode === 0 ? AVK.STAR : AVK.POUND))));             // 창고 / 가방
   }
   drawPopups(): void { this.popup?.p.draw(); }
 }
@@ -317,18 +345,14 @@ export class CommunityTab {
     else this.screen = new DimensionScreen(this.ctx, this.fs);
   }
 
+  /** FUN_0005ac04: five entries (unusable ones greyed: no save allowed here / 차원 outside the field) and the note */
   draw(u: Ui): void {
     if (this.screen) { this.screen.draw(u); return; }
-    const t = this.ctx.assets.text;
-    u.glow(16, this.sel * 32 + 42, 188, 26, this.t);
-    for (let i = 0; i < 5; i++) {
-      u.button(18, 44 + 32 * i, 184, 22, 3, !this.usable(i) ? 3 : i === this.sel ? 1 : 0);
-      u.hit(18, 44 + 32 * i, 184, 22, () => { if (this.sel === i) return [AVK.OK]; this.sel = i; });
-      u.textId(i === 0 ? 0x1bbc : 0x153 + i, 110, 47 + 32 * i, 'center');
-    }
-    u.roundFill(8, 195, 204, 16, 0, 1);
-    const ok = this.usable(this.sel);
-    u.string(t[!ok ? 0x1a24 : this.sel === 0 ? 0x1bbd : 0x157 + this.sel] ?? '', 110, 197, 'center');
+    const t = this.ctx.assets.text, ok = this.usable(this.sel);
+    u.mount('tab', 'community', menuList(Array.from({ length: 5 }, (_, i) => button(gt(t[i === 0 ? 0x1bbc : 0x153 + i] ?? ''), {
+      sel: i === this.sel, cls: this.usable(i) ? '' : 'mc-off',
+      on: () => { if (this.sel === i) return [AVK.OK]; this.sel = i; },
+    })), gt(t[!ok ? 0x1a24 : this.sel === 0 ? 0x1bbd : 0x157 + this.sel] ?? '')));
   }
   drawOverlay(_u: Ui): void { /* none */ }
   drawPopups(): void { this.screen?.drawPopups(); this.popup?.p.draw(); }

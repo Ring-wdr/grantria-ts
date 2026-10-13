@@ -85,7 +85,17 @@ export class ItemDb {
     };
   }
 
-  /** FUN_00036458 model number (name text 0x7fc + model, description 0xa50 + model). */
+  /**
+   * Description text id (item detail FUN_00032344): equipment 0xa50 + model; gems share one text per
+   * kind, 0xa50 + model(0x10, 0, grade) + sub / 5; types above 0x10 sit 0x18 lower (the gem block has
+   * 6 descriptions for 30 models).
+   */
+  descId(type: number, sub: number, grade: number): number {
+    if (type === 0x10) return 0xa50 + this.model(0x10, 0, grade) + idiv(sub, 5);
+    return 0xa50 + this.model(type, sub, grade) - (type > 0x10 ? 0x18 : 0);
+  }
+
+  /** FUN_00036458 model number (name text 0x7fc + model; descriptions: descId). */
   model(type: number, sub: number, grade: number): number {
     if (type < 0x10) return 21 * type + this.a.d8(0x245ff + sub * 5 + grade);
     if (type === 0x1c) return this.typeBase(0x1c);
@@ -119,6 +129,12 @@ export class ItemDb {
   /** DAT_003b3bef == 2: high-level (second run) tables — levels 89..189 and the second half of the base table */
   tier2 = false;
 
+  /** FUN_000369b0 item level: equipment d+0x24655 (+11 in tier 2), consumables d+0x2466b (all 1), others 1. */
+  itemLevel(type: number, sub: number): number {
+    if (type < 0x10) return this.levelOf(sub);
+    return type === 0x11 ? this.a.d8(0x2466b + sub) : 1;
+  }
+
   /** Item level table d+0x24655 (+11 entries in tier 2). */
   levelOf(sub: number): number { return this.a.d8(0x24655 + (this.tier2 ? 11 : 0) + Math.min(sub, 10)); }
 
@@ -149,6 +165,10 @@ export class ItemDb {
     const text = this.a.text;
     const name = text[0x7fc + this.model(it.type, it.sub, it.grade)] ?? '?';
     const col = `|${GRADE_CODE[Math.min(it.grade, 4)]}`;
+    if (it.type === 0x19) {                                          // text 0x1ab8 "%s%s %s": product name, then the recipe kind
+      const product = text[0x7fc + this.model(it.sub >> 4, it.sub & 15, it.grade)] ?? '?';
+      return `${col}${product} ${name}`;
+    }
     if (it.type >= 0x10 || it.grade === 0 || it.grade >= 3) return `${col}${name}`;
     const pre = (id: number) => text[this.prefixText(id)] ?? '';
     if (it.grade === 1) return `${col}${pre(it.options[rng.rand(2)]?.[0] ?? 0)} ${name}`;
@@ -179,8 +199,8 @@ export class ItemDb {
       it.count = noSockets && grade !== 4 ? 0 : (this.t.options.socket_distribution_rand100000.find(([lim]) => roll < lim)?.[1] ?? 0);
       if (grade >= 1 && grade <= 3) this.rollOptions(it, [2, 3, 4][grade - 1], rng);
     }
-    it.reqLevel = type < 0x10 ? this.levelOf(sub) : 1;
-    it.level = it.reqLevel;
+    it.reqLevel = this.itemLevel(type, sub);                                         // +0xf
+    it.level = type === 0x19 ? this.itemLevel(sub >> 4, sub & 15) : it.reqLevel;    // +0xe: a recipe takes its product's level
     it.icon = this.icon(type, sub);
     it.name = this.makeName(it, rng);
     return it;
@@ -293,6 +313,11 @@ export class Inventory {
     this.equip[slot] = null;
     this.remapQuick();
     return true;
+  }
+
+  /** FUN_00037118: empty a quick slot */
+  clearQuick(slot: number): void {
+    Object.assign(this.quick[slot], { kind: 0, id: 0, cd: 0 });
   }
 
   /** FUN_000379ac */

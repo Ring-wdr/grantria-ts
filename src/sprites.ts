@@ -123,6 +123,11 @@ function blendSetup(mode: number, alpha8: number): BlendSetup | null {
   }
 }
 
+/** Images used by every frame of a cmf (for preloading animated sprites). */
+export function cmfImages(assets: Assets, cmfName: string, cmf: Cmf, zone: number, equip: Equip): (string | null)[] {
+  return cmf.frames.flatMap((fr) => fr.parts.map((p) => clipImage(assets, cmfName, cmf, p.clip, zone, equip)));
+}
+
 export class SpriteLayer {
   readonly group = new THREE.Group();
   private order = 0;
@@ -247,7 +252,7 @@ export class SpriteLayer {
 
   /** Images used by every frame of a cmf (for preloading animated sprites). */
   allImages(cmfName: string, cmf: Cmf, zone: number, equip: Equip): (string | null)[] {
-    return cmf.frames.flatMap((_, i) => this.frameImages(cmfName, cmf, i, zone, equip));
+    return cmfImages(this.assets, cmfName, cmf, zone, equip);
   }
 
   frameImages(cmfName: string, cmf: Cmf, fi: number, zone: number, equip: Equip): (string | null)[] {

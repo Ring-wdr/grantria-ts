@@ -1,0 +1,156 @@
+/* Inventory / equipment tabs, item detail, action list and quick slot overlay (tabs.ts views).
+   Everything sits in the 208x182 TAB_BODY box (or the 220x196 detail window) at the 10 px font. */
+
+/* original sprite with a colour tint over its shape (Ui.image tint): --tint, --tint-a, --mask */
+.v-sprite.v-tint { position: relative; }
+.v-sprite.v-tint::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--tint);
+  opacity: var(--tint-a, 0);
+  -webkit-mask: var(--mask) no-repeat;
+  mask: var(--mask) no-repeat;
+  -webkit-mask-position: inherit;
+  mask-position: inherit;
+}
+
+/* FUN_0003bcf0 item cell: bevelled dark cell, icon centred, count badge bottom right */
+.tb-cell {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: linear-gradient(#05080e, #0d1422);
+  box-shadow: inset 0 0 0 1px #354e73, inset 0 1px 0 1px rgba(99, 117, 148, 0.25);
+  transition: box-shadow var(--tick) ease-out;
+}
+.tb-cell.v-hit:hover { box-shadow: inset 0 0 0 1px #637594, inset 0 1px 0 1px rgba(141, 241, 242, 0.25); }
+.tb-cell.v-sel { box-shadow: inset 0 0 0 1px #429ac6, inset 0 0 6px rgba(66, 154, 198, 0.55); }
+.tb-cell.eq { background: #20252c; }
+.tb-count {
+  position: absolute;
+  right: 1px;
+  bottom: -1px;
+  line-height: 10px;
+  color: #fff;
+  text-shadow: 1px 0 #000, -1px 0 #000, 0 1px #000, 0 -1px #000;
+  pointer-events: none;
+}
+.tb-shade { position: absolute; inset: 1px; border-radius: 3px; pointer-events: none; }
+.tb-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-wide { min-width: 62px; }
+.v-btn.off { opacity: 0.45; filter: saturate(0.4); }
+.tb-arrow { display: flex; align-items: center; padding: 0 2px; }
+.tb-arrow.v-hit:hover { filter: brightness(1.3); }
+
+/* inventory: bag column | name bar, 4x4 grid, gold + button */
+.v-row.tb-inv { gap: 6px; align-items: stretch; }
+.tb-bags { width: 34px; flex: none; justify-content: space-between; padding: 1px 2px; }
+.v-btn.tb-bag { width: 30px; height: 33px; padding: 0; }
+.tb-bag .v-col { gap: 0; line-height: 11px; }
+.tb-bag-n { color: #c8d6ee; letter-spacing: -0.5px; }
+.tb-bag.locked > .v-sprite:first-child { opacity: 0.35; filter: grayscale(1); }
+.tb-lock { position: absolute; right: 3px; bottom: 3px; }
+.v-heading.tb-name { padding: 0 8px; }
+.tb-name > .v-text { max-width: 100%; }
+.v-box.tb-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 26px);
+  justify-content: space-evenly;
+  align-content: space-evenly;
+  padding: 4px 6px;
+  background: linear-gradient(#000, #0a0f19);
+}
+.v-box.tb-gold { flex: 1 1 auto; gap: 4px; min-height: 18px; padding: 0 6px; text-align: right; color: #ffe58a; }
+
+/* item detail (220x196 window) */
+.tb-detail { gap: 4px; padding: 7px; }
+.v-box.tb-detail-head { flex: none; gap: 8px; padding: 2px 6px 2px 2px; min-height: 30px; }
+.tb-enh { color: #ffe58a; flex: none; }
+.tb-sub { gap: 6px; color: #9cb4d6; line-height: 12px; }
+.tb-detail-body { gap: 1px; padding: 6px 10px; text-align: center; align-items: stretch; }
+.tb-detail-foot { flex: none; justify-content: space-between; }
+.v-box.tb-gems {
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  top: 97px;
+  height: 40px;
+  padding: 0 4px;
+  gap: 4px;
+  box-shadow: 0 0 0 1px #429ac6, 0 4px 12px rgba(0, 0, 0, 0.6);
+  animation: tb-rise calc(var(--tick) * 3) ease-out both;
+}
+
+/* item action list (ActionPopup) */
+.tb-actions { gap: 3px; align-items: flex-start; }
+.tb-actions > .v-btn { min-width: 62px; height: 22px; }
+
+/* quick slot register overlay: touch slots, the cursor slot pulsing yellow */
+.tb-qslot { position: relative; width: 31px; height: 31px; flex: none; }
+.tb-qslot > * { position: absolute; }
+.tb-qslot > .v-sprite:first-child { left: 0; top: 0; }
+.tb-qicon { left: 8px; top: 7px; }
+.tb-qskill { left: 4px; top: 3px; }
+.tb-qslot > .dim { opacity: 0.5; }
+.tb-qslot > .tb-count { right: 2px; bottom: auto; top: 3px; }
+.tb-pulse::after { animation: tb-pulse calc(var(--tick) * 32) linear infinite; }
+
+/* equipment: slot columns either side of the character preview, item name, stats */
+.tb-equip { gap: 4px; }
+.tb-slots {
+  flex: none;
+  display: grid;
+  grid-template-columns: 26px 1fr 26px;
+  row-gap: 9px;
+  padding: 3px 33px 0 33px;
+}
+.v-box.tb-stats {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-content: space-evenly;
+  column-gap: 10px;
+  padding: 2px 10px;
+  background: linear-gradient(#171d24, #10151b);
+}
+.tb-stat-label { color: #9cb4d6; }
+
+/* equipment candidate select 0x2F */
+.tb-pick { gap: 4px; }
+.tb-strip { gap: 10px; padding: 3px 5px; }
+.tb-pick-info { gap: 2px; margin: 0 6px; padding: 6px 10px; text-align: center; }
+.tb-pick-info > .v-row:first-child { text-align: left; }
+
+@keyframes tb-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0; }
+}
+@keyframes tb-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tb-pulse::after, .tb-gems { animation: none; }
+  .tb-pulse::after { opacity: 0.3; }
+}
+
+/* item action menu attached to its cell (ActionPopup.anchor): beside the cell, slides in */
+.tb-cell, .shop-cell { position: relative; }
+.tb-anchor { position: absolute; top: -2px; z-index: 6; animation: tb-slide calc(var(--tick) * 3) ease-out both; }
+.tb-anchor.right { left: calc(100% + 6px); --from: 10px; }
+.tb-anchor.left { right: calc(100% + 6px); --from: -10px; }
+.tb-anchor.up { top: auto; bottom: -2px; }
+.tb-anchor .tb-actions { padding: 4px; border-radius: 6px; background: rgba(8, 12, 22, 0.88); box-shadow: 0 0 0 1px #5d7092, 0 4px 10px rgba(0, 0, 0, 0.5); }
+.tb-backdrop { z-index: 5; }
+@keyframes tb-slide { from { opacity: 0; transform: translateX(var(--from)); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .tb-anchor { animation: none; } }
+
+/* recipe detail: material rows (have / need, short in red by the format text) */
+.tb-need { gap: 6px; line-height: 15px; }
+.tb-need .tb-cell { flex: none; }

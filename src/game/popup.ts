@@ -1,19 +1,24 @@
 // Popup (FUN_0005f948 + FUN_0005f4f8) on the 1.3x layer L1 (analysis/features/ui-screens.md §0.6).
 import { VIEW_H as H, VIEW_W as W } from './field';
 import { AVK } from './input';
+import { button, gt, h, type VChild } from './view';
 import type { GameContext } from './scene';
 
 /** Popup (FUN_0005f948 + FUN_0005f4f8) on the 1.3x layer: definition d.dat 0x4009d7 + id*6. */
+let serial = 0;
+
 export class Popup {
+  /** identifies this popup's DOM group, so a new popup plays its opening animation */
+  private readonly serial = ++serial;
   readonly type: number;
   readonly w: number;
   h: number;
   readonly textId: number;
   sel: number;
   private age = 0;
-  /** extra drawing in popup coordinates (type 10 result popups: the item cell) */
-  extra?: (u: import('./ui').Ui, w: number, h: number) => void;
-  /** the extra drawing replaces the body text (popup 0x55 fortune result) */
+  /** view content above the body text, laid out in the popup body (result item cell, fortune result) */
+  content?: () => VChild;
+  /** the content replaces the body text (popup 0x55 fortune result) */
   hideBody = false;
   /** format fills sprintf-style fields of the popup text (e.g. popup 0x29 "%s ... %d") */
   constructor(private ctx: GameContext, readonly id: number, private cls = 0, private format?: (s: string) => string) {
@@ -41,42 +46,30 @@ export class Popup {
     }
     return null;
   }
+  /**
+   * HTML view: the frame grows / fades in (CSS), the body (optional content view, then the text)
+   * is centred and wraps to the popup width; the height follows it (at least the table height h).
+   */
   draw(): void {
-    const u = this.ctx.ui13, { w, h } = this;
+    const u = this.ctx.ui13, { w, h: ph } = this, t = this.ctx.assets.text;
     this.age++;
-    // opening animation: types 1,3,8,15,16 grow over 3 frames, the others appear at once
-    const anim = [1, 3, 8, 15, 16].includes(this.type) ? ([0, 2, 4][this.age] ?? 10) : 10;
-    u.push((W - w) >> 1, (H - h) >> 1);
-    const sw = Math.trunc((anim * w) / 10), sh = Math.trunc((anim * h) / 10);
-    u.popupFrame(((w - sw) >> 1) + 2, ((h - sh) >> 1) + 2, sw - 4, sh - 4);
-    u.hit(-1000, -1000, 3000, 3000, () => []);                 // modal: swallow taps outside the buttons
-    u.alpha = 16;
-    u.button(4, 4, w - 8, 0x10, 0, 0);
-    u.alpha = 32;
-    if (anim === 10) {
-      this.extra?.(u, w, h);
-      const lines = this.body().split('|@');
-      const y0 = this.extra ? 92 : ((h - 0x1c) - lines.length * 15) >> 1;
-      if (this.id === 0) u.textId(0x3e1 + this.cls, 0x69, 0x4b, 'center', { pen: 0xffe0 });
-      if (!this.hideBody) lines.forEach((ln, i) => u.string(ln, w >> 1, y0 + i * 15, 'center'));
-      if (this.yesNo) {
-        const c = w >> 1;
-        u.glow(c + this.sel * 0x4e - 0x48, h - 0x20, 0x42, 0x1a, this.age);
-        u.alpha = this.sel ? 16 : 32;
-        u.button(c - 0x46, h - 0x1e, 0, 0x16, 1, 1, 400);
-        u.hit(c - 0x46, h - 0x1e, 0x3e, 0x16, () => { this.sel = 0; return [AVK.OK]; });
-        u.alpha = this.sel === 0 ? 16 : 32;
-        u.button(c + 8, h - 0x1e, 0, 0x16, 1, 1, 401);
-        u.hit(c + 8, h - 0x1e, 0x3e, 0x16, () => { this.sel = 1; return [AVK.OK]; });
-        u.alpha = 32;
-      } else {
-        const bx = (w - 0x3e) >> 1;
-        u.glow(bx - 2, h - 0x20, 0x42, 0x1a, this.age);
-        u.button(bx, h - 0x1e, 0x196, 0x16, 1, 1, 0x196);
-        u.hit(0, 0, w, h, () => [AVK.OK]);                       // any tap on a message popup confirms
-      }
-    }
-    u.pop();
+    const grow = [1, 3, 8, 15, 16].includes(this.type);
+    const choice = (label: number, i: number) => button(gt(t[label] ?? ''), {
+      sel: this.sel === i, on: () => { this.sel = i; return [AVK.OK]; },
+    });
+    const buttons = this.yesNo
+      ? [choice(400, 0), choice(401, 1)]
+      : [button(gt(t[0x196] ?? ''), { sel: true, on: () => [AVK.OK] })];
+    const body = h('div.v-popup-body', null,
+      this.id === 0 && gt(t[0x3e1 + this.cls] ?? '', { pen: 0xffe0 }),
+      this.content?.(),
+      !this.hideBody && gt(this.body()));
+    const box = h(`div.v-popup.${grow ? 'v-pop-grow' : 'v-pop-fade'}`, {
+      style: `width:${w}px;min-height:${ph}px;max-height:${H - 8}px`,
+      on: () => (this.yesNo ? [] : [AVK.OK]),                          // a tap on a message popup confirms
+    }, h('div.u-btn.s0.v0.v-popup-bar'), body, h('div.v-popup-buttons', null, buttons));
+    // modal: the backdrop swallows taps outside the popup
+    u.view(`popup${this.serial}`, 0, 0, W, H, h('div.v-modal', { on: () => [] }, box));
   }
 }
 

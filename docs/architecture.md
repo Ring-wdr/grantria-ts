@@ -62,3 +62,5 @@ web/
 - 세이브는 Tauri에서 앱 데이터 폴더의 `grantria.json`(plugin-store)에 둔다. 처음 실행할 때 웹뷰 localStorage에 남아 있던 `grantria.*` 값을 한 번 옮긴다.
 - 게임 데이터(`public/assets`, 원본 APK에서 생성)는 지금 프론트엔드 번들에 같이 들어간다. 개인 빌드용이다. 배포용으로는 APK 가져오기로 앱 데이터 폴더에 에셋을 만들고 `AssetSource`를 바꿔 끼워야 한다(`desktop-electron-vs-tauri.md` §4).
 - 권한은 `src-tauri/capabilities/default.json`: 저장소, 열기·저장 대화상자, 대화상자로 고른 파일의 읽기·쓰기만 연다.
+- 배포 CSP는 `tauri.conf.json`에 있다. Tauri는 빌드할 때 `style-src`에 nonce를 넣는데, 그러면 `'unsafe-inline'`이 무시되어 DOM UI의 런타임 스타일시트와 인라인 스타일이 막힌다. 그래서 `dangerousDisableAssetCspModification: ["style-src"]`로 `style-src`만 손대지 않게 했다. 스크립트는 `'self'`만 허용한다.
+- Rust 크레이트(`tauri`, `tauri-plugin-*`)는 npm 패키지와 같은 버전으로 고정한다(`Cargo.toml`의 `=x.y.z`). minor가 어긋나면 `tauri dev`가 버전 불일치 오류를 낸다.

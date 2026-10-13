@@ -128,7 +128,7 @@ export class DataScene implements Scene {
           sel: i === this.cur, cls: this.busy && i === this.cur ? 'sm-busy' : '', on: () => { if (this.cur === i) return [AVK.OK]; this.cur = i; },
         }))),
         h('div.v-box.sm-data-note', null,
-          gt(this.msg || '세이브는 이 브라우저에 저장됩니다. 원본 파일은 같은 이름(save.dat.회원번호)으로 내보내야 원본 앱에서 읽힙니다.'))));
+          gt(this.msg || (platform().name === 'tauri' ? '세이브는 앱 데이터 폴더에 저장됩니다. ' : '세이브는 이 브라우저에 저장됩니다. ') + '원본 파일은 같은 이름(save.dat.회원번호)으로 내보내야 원본 앱에서 읽힙니다.'))));
       u.pop();
       u.closeButton();
     });

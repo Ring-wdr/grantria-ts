@@ -77,3 +77,4 @@ web/
 - 일부 ABI만: `-- --target aarch64` (실기기), `--target x86_64` (에뮬레이터).
 - Android 프로젝트는 `src-tauri/gen/android`(커밋 대상). 가로 고정(`sensorLandscape`), 시스템 바 숨김(`MainActivity.kt`), 릴리스 서명은 `app/keystore.properties`(git 제외: `storeFile`, `storePassword`, `keyAlias`, `keyPassword`).
 - 화면은 2배 이상 정수 배율이 안 나오면(휴대폰 가로) 화면에 맞춰 소수 배율로 늘린다(`web/app.ts` `fit()`). 터치 입력은 원본 touchdata 영역 그대로다.
+- 실기기 확인(2026-10-13, Galaxy SM-S948N, Android 17, 디버그 APK): 가로 전체 화면, 필드·HUD·터치 조작, 사운드, 설정·세이브 유지, 백업 내보내기·가져오기(Android 파일 선택 창) 모두 정상.

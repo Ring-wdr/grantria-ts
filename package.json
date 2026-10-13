@@ -1,7 +1,7 @@
 {
   "name": "grantria-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "assets": "python -I tools/build_web_assets.py",

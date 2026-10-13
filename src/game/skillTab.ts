@@ -9,7 +9,7 @@ import { effectiveSkillLevel, rdiv } from './rules';
 import { cfmt, skillDetail, skillReqLevel } from './skillDetail';
 import type { GameContext } from './scene';
 import type { Ui } from './ui';
-import { button, cSprite, gt, h, sprite, win, type VNode } from './view';
+import { button, cSprite, gt, h, padBadge, sprite, win, type VNode } from './view';
 import './css/skill-quest.css';
 
 const CELLS = [9, 7, 12];
@@ -128,7 +128,9 @@ export class SkillTab {
   private icon(idx: number): [string, number, number] {
     const cls = this.fs.model.cls;
     if (this.sub === 0) return ['sIcon', actionOf(idx) * 24, cls * 24];          // i3 y=72 band = sIcon class row
-    if (this.sub === 1) return idx === 0 ? ['i3', 216, 72] : ['i3', (idx - 1) * 24, 48];
+    // passive 0 = source (216,72): in the original the i3 y=72 band is the class's sIcon row, whose 10th icon
+    // is the class passive (오라소드/자연력/…); our i3.png leaves that band empty, so read sIcon directly
+    if (this.sub === 1) return idx === 0 ? ['sIcon', 216, cls * 24] : ['i3', (idx - 1) * 24, 48];
     return ['i3', 144 + 24 * (idx & 3), 24 * (idx >> 2)];
   }
 
@@ -156,8 +158,10 @@ export class SkillTab {
       h('div.v-row', { style: 'gap:4px' }, this.infoView(), this.pointsView()),
       this.treeView(),
       h('div.v-row.sk-actions', null,
-        button(gt(t[0x1a1f] ?? ''), { sel: true, glow: false, on: () => (this.focus === 1 && this.sel ? [AVK.STAR] : []) }),   // 상세보기 = '*'
-        this.sub === 0 && button(gt(t[0x1a20] ?? ''), { sel: canQuick, glow: false, cls: canQuick ? '' : 'sk-off', on: () => [AVK.POUND] }))));
+        button([gt(t[0x1a1f] ?? ''), padBadge(this.ctx.input, AVK.STAR, 'v-pad-corner')],                                 // 상세보기 = '*'
+          { sel: true, glow: false, on: () => (this.focus === 1 && this.sel ? [AVK.STAR] : []) }),
+        this.sub === 0 && button([gt(t[0x1a20] ?? ''), padBadge(this.ctx.input, AVK.POUND, 'v-pad-corner')],             // 퀵슬롯 = '#'
+          { sel: canQuick, glow: false, cls: canQuick ? '' : 'sk-off', on: () => [AVK.POUND] }))));
     if (this.quick) this.drawQuick(u);
     if (this.detail) u.mount('tab-over', 'skillDetail', this.detailView());
   }

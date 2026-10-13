@@ -29,9 +29,9 @@ npm run dev                           # http://localhost:5173/game.html
 | `python -I tools/grantria_origverify.py DIR MEMBER` | 데이터 관리 화면에서 내보낸 원본 세이브(`save.dat`/`gamedata.dat`/`option.dat`)를 원본 라이브러리의 암·복호화·체크섬 함수로 대조 |
 
 ## 조작
-키보드: 방향키/WASD 이동, Z·Enter·Space = '5'(공격·대화·확인), X = '#', C = '*', 1/2/3/4 = 퀵슬롯 '1'/'3'/'7'/'9', Esc = 메뉴/취소, M = 지도, P = 저장. 터치(포인터)는 원본 touchdata 영역과 화면 버튼을 그대로 씁니다.
+키보드: 방향키/WASD 이동, Z·Enter·Space = '5'(공격·대화·확인), X = '#', C = '*', 1/2/3/4 = 퀵슬롯 '1'/'3'/'7'/'9', Esc = 메뉴/취소, M = 지도, P = 저장, Q/E = 메뉴 이전/다음 탭. 터치(포인터)는 원본 touchdata 영역과 화면 버튼을 그대로 씁니다.
 
-게임패드(PS·Xbox, Web Gamepad API): 아래(✕/A) = 확인, 오른쪽(○/B)·Start = 메뉴/취소, 왼쪽(□/X) = '1', 위(△/Y) = '3', L1/LB = '7', R1/RB = '9', L2/LT = '*', R2/RT = '#', Select(CREATE/VIEW)·터치패드 = 지도, R3 = 저장. 왼쪽 스틱은 터치 가상 스틱과 같은 아날로그 이동입니다. 패드를 쓰면 HUD 버튼 옆에 패드 종류에 맞는 버튼 표시가 나옵니다. 표준 매핑이 아닌 DualShock 4/DualSense/Xbox(xpad)는 vendor/product 표로 맞추며, WebKitGTK처럼 Gamepad API가 없는 환경에서는 동작하지 않습니다.
+게임패드(PS·Xbox, Web Gamepad API): 아래(✕/A) = 확인, 오른쪽(○/B)·Start = 메뉴/취소, 왼쪽(□/X) = '1', 위(△/Y) = '3', L1/LB = '7', R1/RB = '9', L2/LT = '*', R2/RT = '#', Select(CREATE/VIEW)·터치패드 = 지도, R3 = 저장. 왼쪽 스틱은 터치 가상 스틱과 같은 아날로그 이동입니다. 필드에서 D패드는 이동 대신 HUD 버튼을 누릅니다(위 = QUEST, 왼쪽 = SHOP, 오른쪽 = 쿠폰상점, 아래 = 차원의 문 아이콘). 메뉴에서는 L1/R1(LB/RB)이 이전/다음 탭이고(하위 화면에서도 동작, 탭 클릭도 같음), 오른쪽 스틱 상하로 스킬 설명·도움말 같은 긴 글을 스크롤합니다. 패드를 쓰면 HUD 버튼 옆에 패드 종류에 맞는 버튼 표시가 나옵니다. 표준 매핑이 아닌 DualShock 4/DualSense/Xbox(xpad)는 vendor/product 표로 맞추며, WebKitGTK처럼 Gamepad API가 없는 환경에서는 동작하지 않습니다.
 
 UI는 HTML/CSS(`src/game/domUi.ts`, `view.ts`, `ui.css`)로 그리고, 필드와 월드 이펙트만 WebGL로 그립니다. 게임 로직은 20 FPS 틱 그대로이고 UI 애니메이션은 화면 주사율로 돕니다. 글꼴은 Galmuri9(OFL)을 번들합니다.
 

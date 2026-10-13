@@ -5,6 +5,7 @@
 import { cmfImages } from '../sprites';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
+import { padGlyph } from './gamepad';
 import { expNeed } from './rules';
 import type { GameContext } from './scene';
 import { EquipTab, InventoryTab } from './tabs';
@@ -38,7 +39,7 @@ export class GameMenu {
   private option: OptionTab;
   private quest: QuestTab;
   private map: MapTab;
-  readonly community: CommunityTab;
+  community: CommunityTab;
 
   constructor(private ctx: GameContext, private field: FieldScene) {
     this.inventory = new InventoryTab(ctx, field);
@@ -62,22 +63,29 @@ export class GameMenu {
   }
 
   update(input: number[]): MenuResult {
-    let presses = input;
+    // L1 / R1 (TAB_L / TAB_R) page the tabs; the pad also sent their quick-slot keys K7 / K9, dropped here
+    const paging = input.some((k) => k === AVK.TAB_L || k === AVK.TAB_R);
+    let presses = paging ? input.filter((k) => k !== AVK.K7 && k !== AVK.K9) : input;
     this.t++;
     if (!this.inTab) {
       this.f++;
       if (this.f < 12) return null;
       for (const k of presses) {
-        if (k === AVK.LEFT || k === AVK.UP) this.type = (this.type + 7) & 7;
-        else if (k === AVK.RIGHT || k === AVK.DOWN) this.type = (this.type + 1) & 7;
+        if (k === AVK.LEFT || k === AVK.UP || k === AVK.TAB_L) this.type = (this.type + 7) & 7;
+        else if (k === AVK.RIGHT || k === AVK.DOWN || k === AVK.TAB_R) this.type = (this.type + 1) & 7;
         else if (k === AVK.OK) { this.inTab = true; this.page = 0; }
         else if (k === AVK.CLR) return 'close';
       }
       return null;
     }
+    if (paging) {
+      // from anywhere inside a tab, sub screens and popups included: those are dropped
+      for (const k of presses) if (k === AVK.TAB_L || k === AVK.TAB_R) this.goTab((this.type + (k === AVK.TAB_L ? 7 : 1)) & 7);
+      presses = presses.filter((k) => k !== AVK.TAB_L && k !== AVK.TAB_R);
+    }
     const body = this.body;
     if (body) {
-      if (body.busy) { body.update(presses); return null; }
+      if (body.busy) { body.update(presses); this.couponDetour(); return null; }
       // tab bodies consume their keys; the rest falls through to the common tab keys
       const rest: number[] = [];
       for (const k of presses) if (!body.update([k])) rest.push(k);
@@ -107,6 +115,33 @@ export class GameMenu {
     }
     if (this.type !== 5 || !this.inTab) this.map.leaveFloor();
     return null;
+  }
+
+  /** inventory bag expansion short of coupons (popup 0x7D confirmed) -> the coupon shop of the community tab */
+  private couponDetour(): void {
+    if (!this.inventory.toCoupons) return;
+    this.inventory.toCoupons = false;
+    this.type = 7;
+    this.community.open('coupon');
+  }
+
+  /** L1 / R1 or a tab click: go to tab `type` from anywhere; a tab left in a sub screen or popup starts fresh */
+  private goTab(type: number): void {
+    if (type === this.type) return;
+    const ctx = this.ctx, fs = this.field;
+    if (this.body?.busy) {
+      if (this.type === 1) { this.inventory = new InventoryTab(ctx, fs); fs.recompute(); }
+      else if (this.type === 2) this.equipment = new EquipTab(ctx, fs, fs.player.cmf);
+      else if (this.type === 3) this.skill = new SkillTab(ctx, fs);
+      else if (this.type === 4) this.quest = new QuestTab(ctx, fs);
+      else if (this.type === 5) this.map = new MapTab(ctx, fs);
+      else if (this.type === 6) this.option = new OptionTab(ctx, fs);
+      else if (this.type === 7) this.community = new CommunityTab(ctx, fs);
+    }
+    this.titles = null;
+    this.release = null;
+    this.type = type;
+    this.page = 0;
   }
 
   private pages(): number {
@@ -146,14 +181,16 @@ export class GameMenu {
       }));
     }
     const id = tl.page * 5 + tl.sel, owned = fs.story.titles.has(id);
-    const detail = tl.detail && h('div.v-modal', { on: () => [AVK.OK] },
+    // the detail goes to the 'tab-over' slot: inside the list it sat under the (positioned) rows
+    const detail = tl.detail && h('div.v-modal.v-fill', { style: 'background:rgba(0,0,0,0.55)', on: () => [AVK.OK] },
       win('.v-col.v-detail', null,
         gt(name(id), { pen: 0xffe0 }),
         gt(t[0xd37 + id] ?? '', { cls: 'v-grow' }),
         owned && h('div.v-dim-note', null, fs.story.title === id ? '[5] 해제' : '[5] 장착')));
     u.mount('tab', 'titles', menuList([...rows, ...Array.from({ length: 5 - rows.length }, () => h('div.v-menu-gap'))], undefined,
       [h('div.v-row.v-pager', null,
-        h('span.v-page-btn', { on: () => [AVK.LEFT] }, '◀'), `${tl.page + 1}/12`, h('span.v-page-btn', { on: () => [AVK.RIGHT] }, '▶')), detail]));
+        h('span.v-page-btn', { on: () => [AVK.LEFT] }, '◀'), `${tl.page + 1}/12`, h('span.v-page-btn', { on: () => [AVK.RIGHT] }, '▶'))]));
+    if (detail) u.mount('tab-over', 'titleDetail', detail);
   }
 
   /** Character page 0: 2x2 stat buttons, '5' spends a stat point (applied at once here). */
@@ -214,15 +251,17 @@ export class GameMenu {
     const tabs = Array.from({ length: 8 }, (_, i) => {
       const sel = i === this.type;
       return button(sprite('t', i << 4, 0x57, 0x10, 0x10), {
-        sel, cls: 'mf-tab', on: () => { if (this.type !== i) { this.type = i; this.page = 0; } },
+        sel, cls: 'mf-tab', on: () => this.goTab(i),
       });
     });
     const pager = this.type === 0 && h('div.v-row.mf-pager', null,                        // mode 0: page indicator
       h('span.mf-arrow.left', { on: () => [AVK.STAR] }, sprite('t', 0, 0x13, 0xf, 0x13)),
       `${this.page + 1}/${this.pages()}`,
       h('span.mf-arrow.right', { on: () => [AVK.POUND] }, sprite('t', 0, 0x13, 0xf, 0x13, { flip: true })));
+    const inp = this.ctx.input, pad = (b: 'l1' | 'r1') => inp.device === 'pad'
+      && h(`span.u-pad.wide.mf-pad.${b}.${inp.padKind}`, null, padGlyph(inp.padKind, b));     // L1 / R1 page the tabs
     u.view('menuFrame', -24, -12, 294, 234, h('div.mf', { cls: (this.body?.busy || this.titles?.detail || this.release) && 'mf-inert' },
-      h('div.v-row.mf-tabs', null, tabs),
+      h('div.v-row.mf-tabs', null, tabs, pad('l1'), pad('r1')),
       win('.v-col.mf-window', null, slot('tab'), pager, slot('tab-over')),
       button(sprite('c', 0xa4, 0x3a, 0x12, 0x11), { cls: 'mf-close', glow: false, on: () => [AVK.CLR] })));
     u.pop();

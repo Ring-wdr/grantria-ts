@@ -164,16 +164,22 @@ export class DimensionScreen {
   popup: Popup | null = null;
   /** the chosen dungeon once paid for */
   enter: number | null = null;
+  /** popup 0x7D confirmed: the owner opens the coupon shop and comes back here */
+  toCoupons = false;
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
   private recText(i: number): string {
     const t = this.ctx.assets.text, [lo, hi] = DUNGEONS[i].rec;
-    return i >= 6 ? (t[0x1c28] ?? '') : (t[0x1c27] ?? '%d ~ %d').replace('%d', String(lo)).replace('%d', String(hi));
+    // FUN_0007390c: 6..8 sprintf 0x1c28 "적정레벨 : %d" with 200
+    return i >= 6 ? (t[0x1c28] ?? '%d').replace('%d', '200') : (t[0x1c27] ?? '%d ~ %d').replace('%d', String(lo)).replace('%d', String(hi));
   }
 
   update(presses: number[]): 'close' | null {
     this.t++;
-    if (this.popup) { if (this.popup.handle(presses)) this.popup = null; return null; }
+    if (this.popup) {
+      if (this.popup.handle(presses)) { if (this.popup.id === 0x7d) this.toCoupons = true; this.popup = null; }
+      return null;
+    }
     for (const k of presses) {
       if (!this.confirm) {
         if (k === AVK.LEFT) this.cur = (this.cur + 8) % 9;

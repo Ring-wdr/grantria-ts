@@ -11,6 +11,7 @@ import { ShopScreen } from './shop';
 import { Popup } from './popup';
 import { VIEW_H as H, VIEW_W as W } from './field';
 import { AVK } from './input';
+import { HUD } from './keys';
 import { SLOT_COUNT, deleteSlot, loadGamedata, loadSlot, newGame, saveSlot, setLap, type SaveData } from './save';
 import { Story } from './story';
 import type { GameContext, Scene } from './scene';
@@ -382,7 +383,7 @@ class TitleOptionScene implements Scene {
 /** Field play bound to a save slot, with SAVE, a pause popup and the game-over menu (0x1B). */
 /** HUD touch keys: the gate icon (156..188, 2..34) -> community 0x24, SHOP (-7) -> premium shop,
  *  the coupon button -> coupon shop 0x28 (FUN_00047488) */
-export const HUD_COMMUNITY = -30, HUD_SHOP = -7, HUD_COUPON = -31, HUD_QUEST = 10000;
+export const HUD_COMMUNITY = HUD.COMMUNITY, HUD_SHOP = HUD.SHOP, HUD_COUPON = HUD.COUPON, HUD_QUEST = HUD.QUEST;
 
 export class PlayScene implements Scene {
   private overSel = 0;

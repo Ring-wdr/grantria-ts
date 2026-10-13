@@ -13,7 +13,7 @@ import { consume, countOf } from './shopRules';
 import { DimensionScreen } from './dimension';
 import { tint } from './mapTab';
 import type { Ui } from './ui';
-import { button, gt, h, menuList, sprite, type VNode } from './view';
+import { button, gt, h, menuList, padBadge, sprite, type ScrollRef, type VNode } from './view';
 import './css/map-community.css';
 
 const COUPON = [0x1b, 0x1b] as const;
@@ -120,9 +120,12 @@ class PremiumShop {
   private cur = 0;
   private t = 0;
   popup: PopupState | null = null;
-  /** '#' bag view / '*' warehouse requested */
-  request: 'bag' | 'warehouse' | null = null;
+  /** '#' bag view / '*' warehouse requested, or the coupon shop after popup 0x7D */
+  request: 'bag' | 'warehouse' | 'coupon' | null = null;
   private names = new Map<number, string>();
+  private scroll: ScrollRef = { y: 0 };
+  /** controller focus on the button row (0 가방, 1 구매, 2 창고): DOWN from the last grid row, UP back */
+  private btn: number | null = null;
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
   private name(id: number): string {
@@ -133,17 +136,26 @@ class PremiumShop {
   update(presses: number[]): 'close' | null {
     this.t++;
     if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); else if (r === 'ok') p.ok?.(); } return null; }
-    const n = PREMIUM.length;
+    const n = PREMIUM.length, cur0 = this.cur;
     for (const k of presses) {
-      if (k === AVK.LEFT) this.cur = (this.cur + n - 1) % n;
+      if (this.btn !== null && (k === AVK.LEFT || k === AVK.RIGHT || k === AVK.UP || k === AVK.OK)) {
+        if (k === AVK.LEFT) this.btn = (this.btn + 2) % 3;
+        else if (k === AVK.RIGHT) this.btn = (this.btn + 1) % 3;
+        else if (k === AVK.UP) this.btn = null;
+        else if (this.btn === 0) this.request = 'bag';
+        else if (this.btn === 2) this.request = 'warehouse';
+        else this.buy();
+      }
+      else if (k === AVK.LEFT) this.cur = (this.cur + n - 1) % n;
       else if (k === AVK.RIGHT) this.cur = (this.cur + 1) % n;
       else if (k === AVK.UP) this.cur = Math.max(0, this.cur - 5);
-      else if (k === AVK.DOWN) this.cur = Math.min(n - 1, this.cur + 5);
+      else if (k === AVK.DOWN) { if (this.cur + 5 >= Math.ceil(n / 5) * 5) this.btn ??= 1; else this.cur = Math.min(n - 1, this.cur + 5); }
       else if (k === AVK.K0 || k === AVK.OK) this.buy();
       else if (k === AVK.POUND) this.request = 'bag';
       else if (k === AVK.STAR) this.request = 'warehouse';
       else if (k === AVK.CLR) return 'close';
     }
+    if (this.cur !== cur0) this.scroll.y = 0;
     return null;
   }
 
@@ -151,7 +163,7 @@ class PremiumShop {
     const fs = this.fs, [id, price, qty] = PREMIUM[this.cur];
     const capped = id === 8 ? fs.inv.bags >= 2 : STACKED.has(id) && countOf(fs.inv, 0x1b, id) + qty > COUPON_MAX;
     if (capped) { this.popup = { p: new Popup(this.ctx, 0x65) }; return; }
-    if (coupons(fs) < price) { this.popup = { p: new Popup(this.ctx, 0x7d) }; return; }
+    if (coupons(fs) < price) { this.popup = { p: new Popup(this.ctx, 0x7d), ok: () => { this.request = 'coupon'; } }; return; }
     this.popup = { p: new Popup(this.ctx, 0x74), yes: () => {
       if (id === 8) { consume(fs.inv, COUPON[0], COUPON[1], price); fs.inv.setBags(fs.inv.bags + 1); grantSave(fs);
         this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4e9] ?? '') }; return; }
@@ -173,7 +185,7 @@ class PremiumShop {
     const cells = [];
     for (let k = 0; k < 15 && top + k < n; k++) {
       const i = top + k, [id, , qty] = PREMIUM[i];
-      cells.push(h(`div.mc-cell${i === this.cur ? '.on.v-sel' : ''}`, { on: () => { if (this.cur === i) return [AVK.K0]; this.cur = i; } },
+      cells.push(h(`div.mc-cell${i === this.cur ? `.on${this.btn === null ? '.v-sel' : ''}` : ''}`, { on: () => { this.btn = null; if (this.cur === i) return [AVK.K0]; this.cur = i; this.scroll.y = 0; } },
         itemIcon(this.fs, 0x1b, id), qty > 1 && digits(qty, 'mc-qty')));
     }
     const [id, price, qty] = PREMIUM[this.cur], held = coupons(this.fs);
@@ -183,13 +195,16 @@ class PremiumShop {
         h('div.mc-scrollbar', null, h('div.mc-thumb', { style: `top:${(top / 5 / rows) * 100}%;height:${(3 / rows) * 100}%` }))),
       h('div.v-box.v-col.v-grow.mc-info', null,
         h('div.v-row', { style: 'gap:6px' }, itemIcon(this.fs, 0x1b, id), gt(qty > 1 ? `${this.name(id)} x${qty}` : this.name(id), { cls: 'v-grow v-left' })),
+        // the item's own description (the item detail text), so the effect is not guessed from the name
+        h('div.v-grow.v-scroll.mc-desc', { scroll: this.scroll }, gt(t[this.fs.db.descId(0x1b, id, 0)] ?? '', { cls: 'v-left' })),
         h('div.v-row.mc-cost', null,
           gt(`쿠폰 ${price}장`, { pen: 0xffe0 }),
           gt(`보유 ${held}`, { pen: held < price ? 0xf800 : 0xffff, cls: 'mc-held' }))),
-      h('div.v-row.mc-buttons', null,
-        button(gt(t[0x19e5] ?? ''), { on: () => [AVK.POUND] }),
-        button(gt(t[0x17b] ?? ''), { sel: true, glow: false, on: () => [AVK.K0] }),
-        button(gt(t[0x19e4] ?? ''), { on: () => [AVK.STAR] }))));
+      // 가방 '#' / 구매 '0' / 창고 '*': the focused one glows; pad badges show the shortcut triggers
+      h('div.v-row.mc-buttons', null, ([[0x19e5, AVK.POUND], [0x17b, AVK.K0], [0x19e4, AVK.STAR]] as const).map(([id, key], b) =>
+        button([gt(t[id] ?? ''), b !== 1 && padBadge(this.ctx.input, key, 'v-pad-corner')], {
+          sel: b === 1 || this.btn === b, glow: this.btn === b, on: () => [key],
+        })))));
   }
   drawPopups(): void { this.popup?.p.draw(); }
 }
@@ -197,12 +212,14 @@ class PremiumShop {
 /** State 0x29 (FUN_0002b774 / keys FUN_000442f4): the inventory grid FUN_00058890 over the own bag (mode 0)
  *  or the warehouse (mode 1, 3 bags = 48, local instead of the server). Buttons (8, 0xBD) / (0x4F, 0xBD) /
  *  (0x96, 0xBD): mode 0 고급상점 / 골드전송 / 창고, mode 1 고급상점 / 창고정리 / 가방. '#' and '*' as in the
- *  original, '5' moves the item across (창고로 / 내가방으로), '0' sorts the warehouse (창고정리, state 0x0F). */
+ *  original, '5' (or the move button; a tap only selects) moves the item across (창고로 0x198 / 내가방으로 0x185), '0' sorts the warehouse (창고정리, state 0x0F). */
 class Storage {
   mode: 0 | 1;
   private bag = 0;
   private sel = 0;
-  private focus: 0 | 1 = 1;
+  /** 0 bag tabs, 1 grid, 2 button row (controller: DOWN from the grid's last row) */
+  private focus: 0 | 1 | 2 = 1;
+  private btn = 0;
   private t = 0;
   popup: PopupState | null = null;
   request: 'premium' | null = null;
@@ -218,6 +235,13 @@ class Storage {
       if (k === AVK.POUND) { if (this.mode === 1) { this.mode = 0; this.bag = 0; } else this.request = 'premium'; }
       else if (k === AVK.STAR) { if (this.mode === 0) { this.mode = 1; this.bag = 0; } else this.request = 'premium'; }
       else if (k === AVK.K0) { if (this.mode === 1) this.sortWarehouse(); }
+      else if (this.focus === 2) {
+        if (k === AVK.LEFT) this.btn = (this.btn + 2) % 3;
+        else if (k === AVK.RIGHT) this.btn = (this.btn + 1) % 3;
+        else if (k === AVK.UP) this.focus = 1;
+        else if (k === AVK.OK) { const key = this.buttonKeys()[this.btn]; if (key !== null) this.update([key]); }
+        else if (k === AVK.CLR) this.focus = 1;
+      }
       else if (this.focus === 0) {
         if (k === AVK.UP || k === AVK.DOWN) { const n = this.bags(); this.bag = (this.bag + (k === AVK.UP ? n - 1 : 1)) % n; this.sel = 0; }
         else if (k === AVK.OK || k === AVK.RIGHT) this.focus = 1;
@@ -226,12 +250,17 @@ class Storage {
         if (k === AVK.LEFT) { if (this.sel & 3) this.sel--; else this.focus = 0; }
         else if (k === AVK.RIGHT && (this.sel & 3) < 3) this.sel++;
         else if (k === AVK.UP && this.sel >= 4) this.sel -= 4;
-        else if (k === AVK.DOWN && this.sel < 12) this.sel += 4;
+        else if (k === AVK.DOWN) { if (this.sel < 12) this.sel += 4; else { this.focus = 2; this.btn = this.mode === 0 ? 2 : 1; } }
         else if (k === AVK.OK) this.move();
         else if (k === AVK.CLR) this.focus = 0;
       }
     }
     return null;
+  }
+
+  /** keys of the three buttons: 고급상점 / 골드전송 (off) or 창고정리 / 창고 or 가방 */
+  private buttonKeys(): (number | null)[] {
+    return this.mode === 0 ? [AVK.POUND, null, AVK.STAR] : [AVK.STAR, AVK.K0, AVK.POUND];
   }
 
   /** 창고정리 (FUN_0003b3a8(2)): by type, sub, grade */
@@ -276,21 +305,30 @@ class Storage {
       }));
     const cells = Array.from({ length: 16 }, (_, k) => {
       const it = list[this.bag * 16 + k], on = this.focus === 1 && k === this.sel;
-      return h(`div.mc-cell.mc-slot${on ? '.on.v-sel' : ''}`, { on: () => { if (this.focus === 1 && this.sel === k) return [AVK.OK]; this.focus = 1; this.sel = k; } },
+      return h(`div.mc-cell.mc-slot${on ? '.on.v-sel' : ''}`, { on: () => { this.focus = 1; this.sel = k; } },
         it && itemCell(this.fs, it));
     });
-    const btn = (id: number, key: number | null) => button(gt(t[id] ?? ''), { cls: key === null ? 'mc-off' : '', on: key === null ? undefined : () => [key] });
-    const it = list[this.bag * 16 + this.sel];
+    const keys = this.buttonKeys();
+    const btn = (id: number, b: number) => {
+      const key = keys[b], badge = key !== null && key !== AVK.K0 && padBadge(this.ctx.input, key, 'v-pad-corner');
+      return button([gt(t[id] ?? ''), badge], { sel: this.focus === 2 && this.btn === b, cls: key === null ? 'mc-off' : '', on: key === null ? undefined : () => [key] });
+    };
+    const it = this.focus === 1 ? list[this.bag * 16 + this.sel] : undefined;
+    // '5' moves the selected item: 창고로 (0x198) / 내가방으로 (0x185), named on a button with a hint above
+    const move = h('div.v-row.mc-move', null,
+      h('div.mc-name.v-grow', null, it ? gt(it.name) : gt(this.mode === 0 ? '맡길 아이템 선택' : '꺼낼 아이템 선택', { pen: 0x9cd3 })),
+      button(gt(t[this.mode === 0 ? 0x198 : 0x185] ?? ''), { sel: !!it, glow: false, cls: it ? 'mc-move-btn' : 'mc-move-btn mc-off', on: it ? () => [AVK.OK] : undefined }));
     u.mount('tab', 'storage', h('div.v-col.v-fill.v-tab', null,
       h('div.v-row.v-grow.mc-storage', null,
         h('div.v-col.mc-bags', null, tabs),
         h('div.v-box.v-col.v-grow.mc-panel', null,
+          h('div.v-row.mc-where', null, gt(t[this.mode === 0 ? 0x19e5 : 0x19e4] ?? '', { pen: 0xffe0 }), gt(`${list.length}/${this.mode === 0 ? this.fs.inv.cap : WAREHOUSE_SIZE}`)),
           h('div.mc-grid.mc-grid4', null, cells),
-          h('div.mc-name', null, it && this.focus === 1 && gt(it.name)))),
+          move)),
       h('div.v-row.mc-buttons', null,
-        btn(0x19e3, this.mode === 0 ? AVK.POUND : AVK.STAR),                                            // 고급상점
-        this.mode === 0 ? btn(0x19e2, null) : btn(0x19da, AVK.K0),                                      // 골드전송 (server gift: off) / 창고정리
-        btn(this.mode === 0 ? 0x19e4 : 0x19e5, this.mode === 0 ? AVK.STAR : AVK.POUND))));             // 창고 / 가방
+        btn(0x19e3, 0),                                                                    // 고급상점
+        btn(this.mode === 0 ? 0x19e2 : 0x19da, 1),                                         // 골드전송 (server gift: off) / 창고정리
+        btn(this.mode === 0 ? 0x19e4 : 0x19e5, 2))));                                      // 창고 / 가방
   }
   drawPopups(): void { this.popup?.p.draw(); }
 }
@@ -301,6 +339,8 @@ export class CommunityTab {
   private t = 0;
   private popup: PopupState | null = null;
   private screen: CouponShop | PremiumShop | Storage | DimensionScreen | null = null;
+  /** the screen a coupon shop opened by popup 0x7D returns to */
+  private back: PremiumShop | DimensionScreen | null = null;
 
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
@@ -308,6 +348,7 @@ export class CommunityTab {
 
   /** open a screen directly (HUD SHOP / coupon button) */
   open(screen: 'premium' | 'coupon' | 'dimension'): void {
+    this.back = null;
     if (!this.fs.canSave || (screen === 'dimension' && this.fs.gardenMode !== 0)) { this.popup = { p: new Popup(this.ctx, 0x6d) }; return; }
     this.sel = 4;
     this.screen = screen === 'premium' ? new PremiumShop(this.ctx, this.fs) : screen === 'coupon' ? new CouponShop(this.ctx, this.fs) : new DimensionScreen(this.ctx, this.fs);
@@ -320,7 +361,13 @@ export class CommunityTab {
     if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); else if (r === 'ok') p.ok?.(); } return true; }
     const s = this.screen;
     if (s) {
-      if (s.update(presses) === 'close') this.screen = null;
+      if (s.update(presses) === 'close') { this.screen = this.back; this.back = null; }
+      else if ((s instanceof PremiumShop && s.request === 'coupon') || (s instanceof DimensionScreen && s.toCoupons)) {
+        // popup 0x7D "쿠폰 구매 페이지로 이동합니다": the coupon shop, then back here
+        if (s instanceof PremiumShop) s.request = null; else s.toCoupons = false;
+        this.back = s;
+        this.screen = new CouponShop(this.ctx, this.fs);
+      }
       else if (s instanceof PremiumShop && s.request) { const r = s.request; s.request = null; this.screen = new Storage(this.ctx, this.fs, r === 'bag' ? 0 : 1); }
       else if (s instanceof Storage && s.request) { s.request = null; this.screen = new PremiumShop(this.ctx, this.fs); }
       else if (s instanceof DimensionScreen && s.enter !== null) { this.fs.enterDimension(s.enter); this.screen = null; }

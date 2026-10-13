@@ -439,8 +439,16 @@
   grid-template-rows: 36px 196px;
 }
 /* while a tab body is busy (sub screen, detail, picker) only its own controls and the close / back button take taps */
-.ui-view .mf-inert > .mf-tabs .v-hit, .ui-view .mf-inert .mf-arrow { pointer-events: none; }
+/* tabs stay clickable over sub screens (GameMenu.goTab drops them) */
+.ui-view .mf-inert .mf-arrow { pointer-events: none; }
 .mf-tabs { grid-column: 2; grid-row: 1; justify-content: center; gap: 6px; align-items: center; }
+.mf-tabs { position: relative; }
+/* pad shortcut badge on a button's top-right corner (view.ts padBadge) */
+.v-btn:has(> .v-pad-corner) { position: relative; overflow: visible; }
+.v-pad-corner { position: absolute; right: -3px; top: -6px; }
+.mf-pad { position: absolute; top: 50%; transform: translateY(-50%); }
+.mf-pad.l1 { left: -40px; }
+.mf-pad.r1 { right: -40px; }
 .mf-tab { width: 26px; min-height: 26px; height: 26px; padding: 0; flex: none; }
 .mf-tab.v1 { width: 30px; height: 30px; }
 .mf-window { grid-column: 2; grid-row: 2; padding: 4px; gap: 2px; }
@@ -464,7 +472,8 @@
 .v-btn.off { filter: grayscale(1) brightness(0.65); }
 
 /* event SKIP: half-transparent button, label blinking every 8 frames */
-.ev-skip-btn { opacity: 0.5; }
+.ev-skip-btn { opacity: 0.5; overflow: visible; }
+.ev-skip-pad { position: absolute; right: -6px; bottom: -6px; }
 .ev-skip { animation: ev-blink calc(var(--tick) * 8) steps(1) infinite; }
 @keyframes ev-blink { 0% { visibility: hidden; } 50% { visibility: visible; } }
 .fortune-top { justify-content: flex-start; gap: 0; padding: 4px 6px; }

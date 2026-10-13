@@ -86,6 +86,30 @@ export function endDomFrame(): void {
   for (const l of shared?.layers ?? []) l.endFrame();
 }
 
+/** right-stick scroll speed at full tilt, view px per second */
+const PAD_SCROLL_SPEED = 200;
+let padScrollEl: HTMLElement | null = null, padScrollAcc = 0;
+
+/**
+ * Pad right stick (dy -1..1): scroll the open scrolling text (skill detail, help, monster book, item
+ * description …), the last visible .v-scroll that overflows, i.e. the topmost overlay's. Its ScrollRef
+ * follows at once so the next frame's patch does not snap it back.
+ */
+export function padScroll(dy: number, ms: number): void {
+  if (!dy) { padScrollAcc = 0; return; }
+  const els = [...document.querySelectorAll<HTMLElement & { _scroll?: ScrollRef }>('.ui-layer .v-scroll')]
+    .filter((e) => e.scrollHeight > e.clientHeight + 1 && e.getClientRects().length > 0);
+  const el = els[els.length - 1];
+  if (!el) return;
+  if (el !== padScrollEl) { padScrollEl = el; padScrollAcc = 0; }
+  padScrollAcc += (dy * PAD_SCROLL_SPEED * ms) / 1000;
+  const step = Math.trunc(padScrollAcc);
+  if (!step) return;
+  padScrollAcc -= step;
+  el.scrollTop += step;
+  if (el._scroll) el._scroll.y = el.scrollTop;
+}
+
 export class DomUi extends Ui {
   readonly root: HTMLDivElement;
   private nodes = new Map<string, UiNode>();

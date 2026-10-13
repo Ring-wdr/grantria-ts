@@ -164,11 +164,14 @@ export class OptionTab {
           para(0x11d));
       case 9: {                                                    // status effects: the character with each status icon
         const sc = this.statusCmf, cls = this.fs?.model.cls ?? 0, name = `cmf_c${cls}`, cmf = this.ctx.cmfs[name];
-        return h('div.v-row', { style: 'gap:6px;align-items:flex-start' },
-          h('div.v-col.help-status', null, [0, 1, 2, 3].map((k) => h('div.help-sprite.small', null,
+        // the original lines each 4-line entry of 0x11e up with a sprite row 0x34 apart; here each entry
+        // ('|@|@'-separated) sits beside its sprite so the font's line height cannot shift them
+        const entries = (t[0x11e] ?? '').replace(/^\|@/, '').split('|@|@');
+        return h('div.v-col.help-status', null, entries.slice(0, 4).map((e, k) => h('div.v-row', { style: 'gap:6px' },
+          h('div.help-sprite.small', null,
             cmf && cmfFrame(cmf, frame % 4, 22, 40, (c) => clipImage(a, name, cmf, c, 0, DEFAULT_EQUIP)),
-            sc && cmfFrame(sc, 6 * k + (frame % 6), 22, 40, () => 'c')))),
-          h('div.v-grow', null, para(0x11e)));
+            sc && cmfFrame(sc, 6 * k + (frame % 6), 22, 40, () => 'es')),   // FUN_00024a5c: status frames from image 0x2F es
+          gt(e, { cls: 'help-text v-grow' }))));
       }
       case 10:                                                     // resistances: text, then the three icons with their labels
         return [para(0x11f), h('div.v-col.help-resist', null, [0, 1, 2].map((k) =>

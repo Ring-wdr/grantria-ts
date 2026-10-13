@@ -3,6 +3,7 @@
 // animations survive). Layout is real CSS (flex, wrapping); clicks run the node's `on` handler,
 // whose returned keys are fed to the game exactly like a key press or a tap on a hit area.
 import type { Assets, Cmf } from '../assets';
+import { padButtonFor, padGlyph, type PadKind } from './gamepad';
 
 export type KeyAct = () => number[] | void;
 
@@ -40,6 +41,14 @@ export function h(sel: string, props?: VProps | null, ...kids: VChild[]): VNode 
   const [tag, ...classes] = sel.split('.');
   if (props?.cls) classes.push(props.cls);
   return { tag: tag || 'div', cls: classes.join(' '), style: props?.style ?? '', on: props?.on, kids, slot: props?.slot, scroll: props?.scroll };
+}
+
+/** the pad button glyph of a key (u-pad badge) while a pad is the last used device, else nothing */
+export function padBadge(input: { device: string; padKind: PadKind }, key: number, cls = ''): VNode | null {
+  const b = input.device === 'pad' ? padButtonFor(key) : null;
+  if (!b) return null;
+  const g = padGlyph(input.padKind, b);
+  return h(`span.u-pad.${input.padKind}.b-${b}${g.length > 2 ? '.wide' : ''}`, { cls }, g);
 }
 
 /** game text (colour codes, '|@' breaks) in a span; pen is the default RGB565 colour */

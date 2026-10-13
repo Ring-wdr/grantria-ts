@@ -1670,7 +1670,7 @@ export class FieldScene implements Scene {
   /** status icons over poisoned / slowed objects (FUN_000324e4: cmf_status frame 6·i + t % 6) */
   private drawStatus(ox: number, oy: number): void {
     // FUN_000324e4: icon 6i + (that timer % 6) at the foot origin; the stun icon at y − k·h (k by type)
-    const icon = (i: number, timer: number, x: number, y: number) => this.ui.frame('cmf_status', this.statusCmf, 6 * i + (timer % 6), x - ox, y - oy, 'c');
+    const icon = (i: number, timer: number, x: number, y: number) => this.ui.frame('cmf_status', this.statusCmf, 6 * i + (timer % 6), x - ox, y - oy, 'es');
     if (!this.events.active) for (const m of this.monsters) {
       if (!m.alive) continue;
       const timers = [m.slow, m.dark, m.poison, m.stun, m.burn, m.chill];
@@ -1744,8 +1744,8 @@ export class FieldScene implements Scene {
       else this.ui.image('t', 0x80, 0x60, 83, 25, 240 - 41, 160 - 12);
     }
     if (this.run) this.run.draw(this.ui, this.run.node.x - ox, this.run.node.y - oy);
-    if (this.warpT >= 0) this.ui.frame('cmf_status', this.statusCmf, 0x34 + (this.warpT >> 1), player.x - ox, player.y - 90 - oy, 'c');
-    if (this.arriveT >= 0) this.ui.frame('cmf_status', this.statusCmf, 0x34 + (this.arriveT >> 1), player.x - ox, player.y - 90 - oy, 'c');
+    if (this.warpT >= 0) this.ui.frame('cmf_status', this.statusCmf, 0x34 + (this.warpT >> 1), player.x - ox, player.y - 90 - oy, 'es');   // image 0x2F (FUN_00024b80)
+    if (this.arriveT >= 0) this.ui.frame('cmf_status', this.statusCmf, 0x34 + (this.arriveT >> 1), player.x - ox, player.y - 90 - oy, 'es');
     this.ui.end();
     if (this.ctx.options.minimap && !this.talk && !this.dead && this.showButtons)   // FUN_00022228 in state 0x10
       this.minimap?.draw(hud, player.x, player.y, [

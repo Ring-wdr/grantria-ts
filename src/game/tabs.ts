@@ -174,6 +174,8 @@ export class InventoryTab {
   private quick: { cur: number; idx: number } | null = null;
   private confirm: { popup: Popup; idx: number; yes?: () => void } | null = null;
   private message: Popup | null = null;
+  /** popup 0x7D (bag expansion without coupons) confirmed: the menu opens the coupon shop */
+  toCoupons = false;
   /** shop screen opened from the inventory (enhance / decompose / combine) */
   private shop: ShopScreen | null = null;
   /** gem picker in the item detail ('0'): gem inventory indexes and the cursor */
@@ -190,7 +192,10 @@ export class InventoryTab {
     if (this.f < 15) this.f++;
     const inv = this.fs.inv;
     if (this.shop) { if (this.shop.update(presses) === 'close') { this.shop = null; this.fs.recompute(); } return true; }
-    if (this.message) { if (this.message.handle(presses)) this.message = null; return true; }
+    if (this.message) {
+      if (this.message.handle(presses)) { if (this.message.id === 0x7d) this.toCoupons = true; this.message = null; }   // 쿠폰 부족 → 쿠폰 구매
+      return true;
+    }
     if (this.confirm) {
       const r = this.confirm.popup.handle(presses);
       if (r === 'yes') { if (this.confirm.yes) this.confirm.yes(); else { inv.remove(this.confirm.idx); this.fs.recompute(); } }

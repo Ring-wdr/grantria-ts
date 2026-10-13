@@ -53,11 +53,13 @@
 .mc-slot { background: #000; box-shadow: inset 0 0 0 1px #354e73; }
 
 /* ---- premium shop: shelf with a row scrollbar, info panel ---- */
-.mc-shelf { flex: none; height: 100px; padding: 5px 6px 5px 12px; gap: 8px; justify-content: center; align-items: stretch; }
-.mc-shelf .mc-grid { height: 90px; }
+.mc-shelf { flex: none; height: 90px; padding: 2px 6px 2px 12px; gap: 8px; justify-content: center; align-items: stretch; }
+.mc-shelf .mc-grid { height: 86px; row-gap: 4px; }
 .mc-scrollbar { position: relative; width: 3px; flex: none; border-radius: 2px; background: #182442; }
 .mc-thumb { position: absolute; left: 0; right: 0; border-radius: 2px; background: #637594; transition: top calc(var(--tick) * 2) ease-out; }
-.mc-info { padding: 4px 8px; justify-content: space-around; }
+.mc-info { padding: 2px 8px; gap: 0; min-height: 0; }
+.mc-desc { flex: 1 1 0; min-height: 0; color: #c8d0dc; }
+.mc-desc > .v-text { display: block; line-height: 13px; }
 .mc-cost { justify-content: space-between; gap: 8px; }
 .mc-held { opacity: 0.85; }
 
@@ -65,8 +67,12 @@
 .mc-storage { gap: 6px; align-items: stretch; }
 .mc-bags { width: 32px; flex: none; gap: 3px; }
 .mc-bag { flex: 1 1 0; min-height: 0; padding: 0; flex-direction: column; gap: 1px; }
-.mc-panel { align-items: center; justify-content: center; gap: 6px; padding: 6px 4px 4px; }
-.mc-name { height: 15px; width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-panel { align-items: center; justify-content: center; gap: 3px; padding: 3px 4px; }
+.mc-panel > .mc-grid4 { row-gap: 4px; }
+.mc-where { width: 100%; justify-content: space-between; padding: 0 4px; }
+.mc-move { width: 100%; gap: 4px; align-items: center; }
+.mc-move-btn { flex: none; min-height: 18px; height: 18px; padding: 0 6px; }
+.mc-name { height: 15px; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- map tab: stage in 220 coordinates, centre message, footer label ---- */
 .mc-stage { position: absolute; width: 220px; height: 212px; }

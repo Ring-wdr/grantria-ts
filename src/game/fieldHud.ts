@@ -4,6 +4,7 @@
 import type { Cmf } from '../assets';
 import { VIEW_H as H, VIEW_W as W } from './field';
 import { AVK, type Input } from './input';
+import { HUD } from './keys';
 import { padButtonFor, padGlyph } from './gamepad';
 import { expNeed } from './rules';
 import type { DomUi } from './domUi';
@@ -229,7 +230,11 @@ export class FieldHud {
     [AVK.K1, AVK.K3, AVK.K7, AVK.K9, AVK.STAR, AVK.POUND].forEach((k, i) => { const [x, y] = slotCentre(i); hint(k, x + 9, y + 9); });
     hint(AVK.CLR, MENU.x + 9, MENU.y + 9);
     hint(AVK.SAVE, 258 + 44, 6 + 12);
-    hint(AVK.MAP, 4, 47);                                                    // minimap -> map tab
+    hint(AVK.MAP, 4, 47);
+    hint(HUD.QUEST, 194 + 44, 6 + 12);                                       // d-pad on the field (PAD_FIELD)
+    hint(HUD.SHOP, 322 + 44, 6 + 12);
+    hint(HUD.COUPON, W - 0x50 + 0x4c - 8, H - 0x102 + 14);
+    hint(HUD.COMMUNITY, 156 + 24, 2 + 24);                                  // gate icon -> community                                                    // minimap -> map tab
   }
 
   /** Damage numbers (kind 2 style 9, kind 1 red style 6), MISS / CRITICAL from t.pxl, labels. */

@@ -9,7 +9,7 @@ import type { FieldScene } from './fieldScene';
 import { Dialogue, drawCaption } from './dialogue';
 import { AVK } from './input';
 import type { Ui } from './ui';
-import { button, h } from './view';
+import { button, h, padBadge } from './view';
 import type { EvActor } from './actors';
 
 const W = 480, H = 320;
@@ -453,7 +453,7 @@ export class EventRunner {
     if (this.dialogue) this.dialogue.draw(u, this.frame);
     if (this.active && this.clock >= 11 && this.skippable(this.lastCmd) && !this.skipFade) {
       // SKIP: the button at alpha 16 with the label blinking every 8 frames (CSS), centred in the button
-      u.view('evSkip', W - 70, 6, 50, 24, button(h('span.ev-skip', null, this.fs.db.a.text[100] ?? 'SKIP'), {
+      u.view('evSkip', W - 70, 6, 50, 24, button([h('span.ev-skip', null, this.fs.db.a.text[100] ?? 'SKIP'), padBadge(this.fs.ctx.input, AVK.POUND, 'ev-skip-pad')], {
         sel: true, glow: false, cls: 'ev-skip-btn', style: 'width:100%;height:100%', on: () => [AVK.POUND],
       }));
     }

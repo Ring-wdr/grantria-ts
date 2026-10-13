@@ -13,7 +13,7 @@ import { Input } from './input';
 import { newGame } from './save';
 import type { GameContext, Scene } from './scene';
 import { LogoScene, MENU_CMFS, MENU_IMAGES, PlayScene } from './screens';
-import { DomUi, beginDomFrame, endDomFrame, installBlink } from './domUi';
+import { DomUi, beginDomFrame, endDomFrame, installBlink, padScroll } from './domUi';
 import { GameAudio } from './audio';
 import { loadOptions, optionFps } from './options';
 
@@ -72,6 +72,7 @@ function drawScene(): void {
 let acc = 0, last = performance.now();
 function frame(now: number): void {
   ctx.input.pollPads();
+  padScroll(ctx.input.padScrollY, Math.min(100, now - last));
   acc += Math.min(250, now - last);
   last = now;
   let stepped = false;

@@ -2,7 +2,7 @@
 // '2','8','4','6' = up/down/left/right, '5' = action, '1','3','7','9','*','#' = quick slots,
 // -16 = CLR (back/menu), -10 = SAVE, -6 = map. Touch drives a virtual stick like FUN_00042ac8;
 // a gamepad's left stick drives the same stick, its buttons map to keys (gamepad.ts).
-import { gamepadSupported, padKind, PAD_KEYS, readPad, type PadKind } from './gamepad';
+import { gamepadSupported, padKind, padKeysOf, readPad, type PadButton, type PadKind } from './gamepad';
 
 import { AVK } from './keys';
 export { AVK };
@@ -13,7 +13,7 @@ const KEYMAP: Record<string, number> = {
   KeyZ: AVK.OK, Enter: AVK.OK, Space: AVK.OK,
   KeyX: AVK.POUND, KeyC: AVK.STAR,
   Digit1: AVK.K1, Digit2: AVK.K3, Digit3: AVK.K7, Digit4: AVK.K9, Digit0: AVK.K0,
-  Escape: AVK.CLR, KeyM: AVK.MAP, KeyP: AVK.SAVE,
+  Escape: AVK.CLR, KeyM: AVK.MAP, KeyP: AVK.SAVE, KeyQ: AVK.TAB_L, KeyE: AVK.TAB_R,
 };
 
 /** Virtual stick state: angle in degrees (0 = right, 90 = down), speed level 0 or 5..8. */
@@ -55,8 +55,12 @@ export class Input {
   /** kind of the pad used last (PS / Xbox glyphs) */
   padKind: PadKind = 'generic';
   private padKeys = new Set<number>();
+  /** keys of each held pad button, fixed when it was pressed (a d-pad press that opens a menu stays a HUD key) */
+  private padHeld = new Map<PadButton, number[]>();
   private padStickKey = 0;
   private padStick = false;
+  /** right stick vertical axis past its dead zone (-1 up .. 1 down), 0 when centred: scrolls the open text */
+  padScrollY = 0;
 
   constructor(private canvas: HTMLCanvasElement, private viewW: number, private viewH: number) {
     addEventListener('keydown', (e) => {
@@ -102,15 +106,20 @@ export class Input {
     if (!gamepadSupported()) return;
     let pads: (Gamepad | null)[];
     try { pads = navigator.getGamepads(); } catch { return; }      // blocked by a permissions policy
-    const keys = new Set<number>();
-    let lx = 0, ly = 0, kind: PadKind | null = null;
+    const keys = new Set<number>(), now = new Set<PadButton>();
+    let lx = 0, ly = 0, ry = 0, kind: PadKind | null = null;
     for (const p of pads) {
       if (!p || !p.connected) continue;
       const r = readPad(p);
-      for (const b of r.buttons) { const k = PAD_KEYS[b]; if (k !== undefined) keys.add(k); }
+      for (const b of r.buttons) now.add(b);
       if (r.buttons.size || Math.hypot(r.lx, r.ly) > PAD_DEAD) kind = padKind(p.id);
       if (Math.hypot(r.lx, r.ly) > Math.hypot(lx, ly)) { lx = r.lx; ly = r.ly; }
+      if (Math.abs(r.ry) > PAD_DEAD) { kind ??= padKind(p.id); if (Math.abs(r.ry) > Math.abs(ry)) ry = r.ry; }
     }
+    for (const b of now) if (!this.padHeld.has(b)) this.padHeld.set(b, padKeysOf(b, !this.uiMode));
+    for (const b of [...this.padHeld.keys()]) if (!now.has(b)) this.padHeld.delete(b);
+    for (const ks of this.padHeld.values()) for (const k of ks) keys.add(k);
+    this.padScrollY = ry ? Math.sign(ry) * (Math.abs(ry) - PAD_DEAD) / (1 - PAD_DEAD) : 0;
     const mag = Math.hypot(lx, ly);
     // stick direction key with hysteresis on the dominant axis
     const dom = Math.abs(lx) >= Math.abs(ly) ? (lx < 0 ? AVK.LEFT : AVK.RIGHT) : (ly < 0 ? AVK.UP : AVK.DOWN);

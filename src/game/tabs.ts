@@ -1,7 +1,7 @@
 // Inventory tab (0x1E) and equipment tab (0x1F, candidate select 0x2F) on the 1.3x layer,
 // ported from analysis/features/ui-tabs.md §0.4 / §0.5 (C220 coordinates unless noted).
 // Enhance / decompose / combine from the inventory open the shop screens (shop.md §2.9); socket reset
-// and gem attach / detach follow shop.md §2.8. Bag purchase: locked bag -> popup 0x7E (community.ts). Not ported: "가방정리".
+// and gem attach / detach follow shop.md §2.8. Bag purchase: locked bag -> popup 0x7E (community.ts). 가방정리 ('#', FUN_0003b3a8(0)): Inventory.sortBag.
 import type { Cmf } from '../assets';
 import type { FieldScene } from './fieldScene';
 import { AVK } from './input';
@@ -234,6 +234,7 @@ export class InventoryTab {
         // the cursor also reaches the first locked bag (5 at most), where OK asks to buy it (popup 0x7E)
         if (k === AVK.UP || k === AVK.DOWN) { const n = Math.min(5, inv.bags + 4); this.bag = (this.bag + (k === AVK.UP ? n - 1 : 1)) % n; this.sel = 0; this.f = 0; }
         else if (k === AVK.OK) { if (this.bag >= inv.bags + 3) this.askBag(); else this.focus = 1; }
+        else if (k === AVK.POUND) inv.sortBag();                       // 가방정리 (both foci)
         else return false;                                            // common tab keys
       } else {
         const before = this.sel;
@@ -242,6 +243,7 @@ export class InventoryTab {
         else if (k === AVK.UP && this.sel >= 4) this.sel -= 4;
         else if (k === AVK.DOWN) this.sel = Math.min(this.sel + 4, 15);
         else if (k === AVK.OK) { if (inv.items[this.idx]) this.openActions(); }
+        else if (k === AVK.POUND) inv.sortBag();
         else if (k === AVK.CLR) this.focus = 0;
         else return false;
         if (this.sel !== before) this.f = 0;
@@ -385,7 +387,7 @@ export class InventoryTab {
         h('div.v-box.v-grow.tb-grid', null, cells),
         h('div.v-row', { style: 'gap:6px' },
           h('div.v-box.v-row.v-grow.tb-gold', null, sprite('t', 38, 24, 12, 12), h('span.v-grow', null, inv.gold.toLocaleString('en-US'))),
-          button(gt(t[0x1a1d] ?? ''), { cls: 'tb-wide' }))));
+          button([gt(t[0x1a1d] ?? ''), padBadge(this.ctx.input, AVK.POUND, 'v-pad-corner')], { cls: 'tb-wide', on: () => [AVK.POUND] }))));   // 가방정리 '#'
   }
 
   /** locked bag: popup 0x7E (25 coupons, FUN_00047488) */

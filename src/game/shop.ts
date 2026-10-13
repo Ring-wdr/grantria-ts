@@ -17,7 +17,7 @@ import {
 } from './shopRules';
 import { ActionPopup, drawItemDetail } from './tabs';
 import type { Ui } from './ui';
-import { button, gt, h, slot, sprite, win, type KeyAct, type ScrollRef, type VChild, type VNode } from './view';
+import { button, gt, h, padBadge, slot, sprite, win, type KeyAct, type ScrollRef, type VChild, type VNode } from './view';
 
 const IMAGE_BASE = `${import.meta.env.BASE_URL}assets/images/`;
 const YELLOW565 = 0xffe0;
@@ -188,6 +188,7 @@ export class ShopScreen {
       if (this.focus === 0) {
         if (k === AVK.UP || k === AVK.DOWN) { this.bag = (this.bag + (k === AVK.DOWN ? 1 : this.bags - 1)) % this.bags; this.sel = 0; }
         else if (k === AVK.OK) this.focus = 1;
+        else if (k === AVK.POUND && (this.action === 1 || this.action === 2)) this.inv.sortBag();   // 가방정리 FUN_0003b3a8(0)
         else if (k === AVK.CLR) { this.screen = 'menu'; this.c2b.potion = -1; }
       } else {
         if (k === AVK.LEFT && this.sel > 0) this.sel--;
@@ -196,6 +197,7 @@ export class ShopScreen {
         else if (k === AVK.DOWN) this.sel = Math.min(this.sel + 4, 15);
         else if (k === AVK.CLR) { if (this.action === 1 || this.action === 2) this.screen = 'menu'; else this.focus = 0; }
         else if (k === AVK.OK) this.pick();
+        else if (k === AVK.POUND && (this.action === 1 || this.action === 2)) this.inv.sortBag();
       }
     }
   }
@@ -602,7 +604,7 @@ export class ShopScreen {
       h('div.v-row.shop-foot', null,
         h('div.v-box.v-row.shop-gold-box', null, this.gold(inv.gold)),
         h('span.v-grow'),
-        sellMode && this.btn(this.text(0x1a1d))));
+        sellMode && button([gt(this.text(0x1a1d)), padBadge(this.ctx.input, AVK.POUND, 'v-pad-corner')], { cls: 'shop-btn', on: () => [AVK.POUND] })));   // 가방정리 '#'
   }
 
   /** ok / cancel row of 0x2B and 0x2C: ok is variant 3 when unavailable; the glow follows focus */

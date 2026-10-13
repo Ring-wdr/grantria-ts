@@ -148,9 +148,11 @@ export class RankingScene implements Scene {
       h('div.v-grow.v-center.v-row', null, gt(t[0x1d6 + (sl.zone ?? 0)] ?? '')),
       h('div.sm-time', null, playTime(sl.playTicks)))));
     u.view('rank-slots', 0, 24, 219, 3 * 66 - 3, h('div.v-col.v-fill', { style: 'gap:3px' }, cards));
-    // '0' opens the list without registering; the original had no button for it (keypad only)
-    u.view('rank-open', 0, 0, 219, 20, h('div.v-row', { style: 'height:100%;justify-content:flex-end' },
-      button([gt('순위 보기'), padBadge(this.ctx.input, AVK.K3, 'v-pad-corner')], { glow: false, style: 'height:18px;padding:0 8px', on: () => [AVK.K0] })));
+    // header like the list's (sm-head): '0' opens the list without registering — the original had no button
+    // for it (keypad only), so it gets the list's own title 0x19D9 "랭킹 보기" as a side button
+    u.view('rank-open', 0, 0, 219, 21, h('div.v-box.v-row.sm-head.sm-slot-head', null,
+      gt('등록할 슬롯 선택', { pen: 0x9cd3, cls: 'v-grow v-left sm-head-hint' }),
+      button([gt(t[0x19d9] ?? ''), padBadge(this.ctx.input, AVK.K3, 'v-pad-corner')], { sel: true, glow: false, cls: 'sm-head-side', on: () => [AVK.K0] })));
     for (let i = 0; i < 3; i++) {
       const y = 22 + 66 * i, sl = this.slots[i];
       if (!sl) { u.cfont('EMPTY SPACE', 0x56, y + 0x1b, 0); continue; }

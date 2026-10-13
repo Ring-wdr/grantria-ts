@@ -280,6 +280,21 @@ export class Inventory {
     this.remapQuick();
   }
 
+  /**
+   * 가방정리 FUN_0003b3a8(0): items grouped by type (record +0x10, 0..0x1D), and inside a type the
+   * original's exchange sort on sub (+0x11): for i = 1.., for j < i, swap when sub[i] < sub[j]. Item
+   * quick slots then follow their item (or empty) like after any compaction.
+   */
+  sortBag(): void {
+    const groups: Item[][] = Array.from({ length: 0x1e }, () => []), rest: Item[] = [];
+    for (const it of this.items) (groups[it.type] ?? rest).push(it);
+    for (const g of groups) {
+      for (let i = 1; i < g.length; i++) for (let j = 0; j < i; j++) if (g[i].sub < g[j].sub) [g[i], g[j]] = [g[j], g[i]];
+    }
+    this.items = [...groups.flat(), ...rest];
+    this.remapQuick();
+  }
+
   /** FUN_00026698: item quick slots follow their (type, sub, grade 0) item after compaction. */
   remapQuick(): void {
     for (const q of this.quick) {

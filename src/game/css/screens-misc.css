@@ -3,12 +3,17 @@
 
 /* a window frame (FUN_000fb054) laid out as a flex item; corners are c.pxl sprites */
 .ui-view .sm-win { position: relative; }
+/* a panel that fills its view keeps the absolute fill (the rule above made the list / detail collapse) */
+.ui-view .sm-win.v-fill { position: absolute; }
 .sm-panel { padding: 3px 6px 4px; gap: 4px; }
 .sm-panel > .v-pager { height: 16px; }
 .sm-head { flex: none; min-height: 20px; gap: 4px; }
 .sm-head .v-btn { min-height: 20px; }
 .sm-title { text-align: center; color: #ffe; }
 .sm-head-side { width: 62px; flex: none; }
+.sm-head-hint { padding-left: 4px; white-space: nowrap; }
+.sm-slot-head { height: 100%; padding: 0 0 0 4px; overflow: visible; }
+.sm-slot-head > .v-btn { height: 100%; }
 .sm-num { color: #fff; font-variant-numeric: tabular-nums; }
 .sm-kv { gap: 6px; line-height: 15px; }
 .sm-pair { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }

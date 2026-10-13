@@ -59,7 +59,7 @@ export class Input implements InputState {
   private taps: { x: number; y: number }[] = [];
   private zoneKeys = new Map<number, number>();
   /** the device used last (on-screen hints follow it) */
-  device: InputDevice = 'keyboard';
+  device: InputDevice = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'touch' : 'keyboard';   // a phone starts as touch
   /** kind of the pad used last (PS / Xbox glyphs) */
   padKind: PadKind = 'generic';
   private padKeys = new Set<number>();

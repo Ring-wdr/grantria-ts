@@ -1,7 +1,8 @@
 // Sound (engine.md §5, GrantriaSound + PlayBGM FUN_0001afb0 / PlaySFX FUN_0001af90):
 // n < 19 = BGM sN.ogg, looping at gain 0.5, not restarted when already playing;
 // n >= 19 = SFX sN.ogg (48 -> s53) at gain 0.8 on a single stream (a new one stops the previous).
-// Browsers start audio only after a user gesture (the context resumes on the first input); hidden pages are muted.
+// Browsers start audio only after a user gesture (the context resumes on the first input); in the background
+// (platform lifecycle: hidden page, minimised window, app switched away) everything is muted.
 import { platform } from '../core/platform';
 
 export class GameAudio {
@@ -42,9 +43,7 @@ export class GameAudio {
     };
     addEventListener('keydown', unlock);
     addEventListener('pointerdown', unlock);
-    document.addEventListener('visibilitychange', () => this.setPaused(document.hidden));
-    // the Android shell also reports onPause / onResume, in case the webview keeps the page visible
-    (window as unknown as { __grantriaPause?: (p: boolean) => void }).__grantriaPause = (p) => this.setPaused(p);
+    platform().lifecycle.onPause((p) => this.setPaused(p));
   }
 
   /** background: suspend the whole audio graph (BGM and SFX); foreground: resume it */

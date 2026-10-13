@@ -1,5 +1,10 @@
 // Browser platform: localStorage, file input / download, fetch from the Vite base, navigator.vibrate.
-import { MemoryStore, type AssetSource, type FilePort, type KeyValueStore, type Platform } from '../core/platform';
+// The webview pieces other hosts reuse (asset fetch, pad rumble, page lifecycle, the HTML prompt) are exported
+// from here; a host imports them from this file only, not from the rest of src/web.
+import { MemoryStore, type AssetSource, type FilePort, type HostLifecycle, type KeyValueStore, type Platform } from '../core/platform';
+import { promptDialog } from './render/promptDialog';
+
+export { promptDialog };
 
 /** localStorage, or memory when it is blocked (private mode, disabled site data) */
 function webStorage(): KeyValueStore {
@@ -62,6 +67,11 @@ export function webAssetSource(base = `${import.meta.env.BASE_URL}assets/`): Ass
 /** phone vibration and the rumble motor of every connected gamepad */
 export function webVibrate(ms: number): void {
   try { navigator.vibrate?.(ms); } catch { /* not allowed (no user gesture yet, or blocked) */ }
+  padRumble(ms);
+}
+
+/** the rumble motor of every connected gamepad */
+export function padRumble(ms: number): void {
   let pads: (Gamepad | null)[] = [];
   try { pads = navigator.getGamepads?.() ?? []; } catch { return; }
   for (const gp of pads) {
@@ -70,14 +80,38 @@ export function webVibrate(ms: number): void {
   }
 }
 
+/** Pause listeners fed by the page visibility. A host adds its own sources through setPaused (a minimised
+ *  window, Android onPause); listeners hear each change once whichever source reported it. */
+export class PageLifecycle implements HostLifecycle {
+  private listeners: ((paused: boolean) => void)[] = [];
+  private paused = false;
+  /** the game's back handler, for a host that has a back key */
+  back: (() => boolean) | null = null;
+  constructor() {
+    document.addEventListener('visibilitychange', () => this.setPaused(document.hidden));
+  }
+  onPause(listener: (paused: boolean) => void): void { this.listeners.push(listener); }
+  setBackHandler(handler: () => boolean): void { this.back = handler; }
+  setPaused(paused: boolean): void {
+    if (paused === this.paused) return;
+    this.paused = paused;
+    for (const l of this.listeners) l(paused);
+  }
+}
+
 export function createWebPlatform(): Platform {
+  const coarse = matchMedia('(pointer: coarse)');
   return {
     name: 'web',
     storage: webStorage(),
+    saveLocation: '세이브는 이 브라우저에 저장됩니다.',
     files: webFiles,
     assets: webAssetSource(),
     now: () => performance.now(),
     vibrate: webVibrate,
     prompt: async (message, initial) => window.prompt(message, initial),
+    lifecycle: new PageLifecycle(),                     // a browser has no back key of its own to take over
+    touchFirst: () => coarse.matches,
+    onTouchFirstChange: (listener) => coarse.addEventListener('change', listener),
   };
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-touch-first"
+description = "Enables the touch_first command without any pre-configured scope."
+commands.allow = ["touch_first"]
+
+[[permission]]
+identifier = "deny-touch-first"
+description = "Denies the touch_first command without any pre-configured scope."
+commands.deny = ["touch_first"]

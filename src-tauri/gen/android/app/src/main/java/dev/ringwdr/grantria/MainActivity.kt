@@ -1,23 +1,19 @@
 package dev.ringwdr.grantria
 
 import android.os.Bundle
+import android.view.InputDevice
+import android.view.KeyEvent
 import android.webkit.WebView
-import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
-import androidx.appcompat.app.AlertDialog
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
-// Landscape (manifest) and full screen like the original: the system bars stay hidden and come back only
-// for a moment on a swipe from the edge. Sound plays without a first tap and stops in the background;
-// the back button asks the game first (src/web/app.ts __grantriaBack) and offers to quit on the title.
+// Window only: landscape (manifest) and full screen like the original, the system bars hidden and back only
+// for a moment on a swipe from the edge, sound without a first tap. Everything the page talks to goes through
+// Tauri: the back key is the app plugin's 'back-button' event, onPause / onResume reach the page as the
+// 'host-pause' event (src-tauri/src/lib.rs), vibration and file names are NativePlugin.kt.
 class MainActivity : TauriActivity() {
-  private var web: WebView? = null
-
-  // the back button is ours, not the webview's history
-  override val handleBackNavigation: Boolean = false
-
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
@@ -25,33 +21,15 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onWebViewCreate(webView: WebView) {
-    web = webView
     webView.settings.mediaPlaybackRequiresUserGesture = false
-    onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-      override fun handleOnBackPressed() {
-        webView.evaluateJavascript("window.__grantriaBack ? window.__grantriaBack() : 'exit'") { r ->
-          if (r == "\"exit\"") confirmExit()
-        }
-      }
-    })
   }
 
-  private fun confirmExit() {
-    AlertDialog.Builder(this)
-      .setMessage("게임을 종료하시겠습니까?")
-      .setPositiveButton("예") { _, _ -> finishAndRemoveTask() }
-      .setNegativeButton("아니오", null)
-      .show()
-  }
-
-  override fun onPause() {
-    web?.evaluateJavascript("window.__grantriaPause && window.__grantriaPause(true)", null)
-    super.onPause()
-  }
-
-  override fun onResume() {
-    super.onResume()
-    web?.evaluateJavascript("window.__grantriaPause && window.__grantriaPause(false)", null)
+  // A pad's B button the webview leaves unhandled comes back as a fallback BACK key. The game already reads
+  // B through the Gamepad API, so passing it on would cancel twice.
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (event.keyCode == KeyEvent.KEYCODE_BACK && (event.flags and KeyEvent.FLAG_FALLBACK) != 0 &&
+      (event.isFromSource(InputDevice.SOURCE_GAMEPAD) || event.isFromSource(InputDevice.SOURCE_JOYSTICK))) return true
+    return super.dispatchKeyEvent(event)
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {

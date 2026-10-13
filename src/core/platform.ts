@@ -32,9 +32,19 @@ export interface AssetSource {
   url(path: string): string;
 }
 
+/** Host lifecycle: background / foreground and the system back key. */
+export interface HostLifecycle {
+  /** true when the game goes to the background (hidden page, minimised window, app switched away), false when it is back */
+  onPause(listener: (paused: boolean) => void): void;
+  /** system back key (Android): the handler returns true when the game used it, false to let the host quit */
+  setBackHandler(handler: () => boolean): void;
+}
+
 export interface Platform {
   readonly name: string;
   storage: KeyValueStore;
+  /** where the saves live, one sentence for the data screen */
+  readonly saveLocation: string;
   files: FilePort;
   assets: AssetSource;
   /** monotonic milliseconds */
@@ -43,6 +53,11 @@ export interface Platform {
   vibrate(ms: number): void;
   /** one-line text input; null when cancelled */
   prompt(message: string, initial: string): Promise<string | null>;
+  lifecycle: HostLifecycle;
+  /** touch-first device (phone, tablet): input starts as touch, the field controls move to the screen edges */
+  touchFirst(): boolean;
+  /** touchFirst() changed (browser device emulation, a tablet docked to a keyboard) */
+  onTouchFirstChange(listener: () => void): void;
 }
 
 /** In-memory store (headless runs, or a host whose storage is blocked). */
@@ -57,6 +72,7 @@ export class MemoryStore implements KeyValueStore {
 const headless: Platform = {
   name: 'headless',
   storage: new MemoryStore(),
+  saveLocation: '',
   files: { save: async () => {}, open: async () => [] },
   assets: {
     bytes: () => Promise.reject(new Error('no asset source')),
@@ -66,6 +82,9 @@ const headless: Platform = {
   now: () => Date.now(),
   vibrate: () => {},
   prompt: async () => null,
+  lifecycle: { onPause: () => {}, setBackHandler: () => {} },
+  touchFirst: () => false,
+  onTouchFirstChange: () => {},
 };
 
 let current: Platform = headless;

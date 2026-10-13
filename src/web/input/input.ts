@@ -7,6 +7,7 @@ import { gamepadSupported, padKind, padKeysOf, readPad, type PadButton, type Pad
 import { AVK } from '../../core/keys';
 import type { InputState, Stick } from '../../core/input';
 import { KEYMAP, RESERVED_KB } from './bindings';
+import { platform } from '../../core/platform';
 export { AVK };
 
 /** Virtual stick state: angle in degrees (0 = right, 90 = down), speed level 0 or 5..8. */
@@ -47,7 +48,7 @@ export class Input implements InputState {
   private taps: { x: number; y: number }[] = [];
   private zoneKeys = new Map<number, number>();
   /** the device used last (on-screen hints follow it) */
-  device: InputDevice = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'touch' : 'keyboard';   // a phone starts as touch
+  device: InputDevice = platform().touchFirst() ? 'touch' : 'keyboard';   // a phone starts as touch
   /** kind of the pad used last (PS / Xbox glyphs) */
   padKind: PadKind = 'generic';
   private padKeys = new Set<number>();

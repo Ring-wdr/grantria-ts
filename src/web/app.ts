@@ -20,6 +20,7 @@ import { DomUi, beginDomFrame, endDomFrame, installBlink, padScroll } from './re
 import { GameAudio } from './audio';
 import { loadOptions, optionFps } from '../core/save/options';
 import { loadBindings } from './input/bindings';
+import { platform } from '../core/platform';
 
 let tickMs = 50;
 
@@ -123,13 +124,12 @@ canvas.addEventListener('pointermove', (e) => {
   *  keep the pixels even; below 2x (a phone in landscape) the stage is fitted to the screen instead.
   *  On a touch-first screen wider than 3:2 the frame spans the window and the field controls move into the
   *  side margins (Input.edge), so the stick and the buttons sit under the thumbs at the screen edges. */
-const touchFirst = matchMedia('(pointer: coarse)');
 function fit(): void {
   const reserve = debug.offsetParent ? 32 : 0;                   // the debug line above the stage, when shown
   const fitS = Math.min(innerWidth / VIEW_W, (innerHeight - reserve) / VIEW_H);
   const s = Math.floor(fitS) >= 2 ? Math.floor(fitS) : fitS;
   const side = Math.max(0, Math.floor((innerWidth / s - VIEW_W) / 2));
-  const edge = touchFirst.matches && side >= 16 ? side : 0;
+  const edge = platform().touchFirst() && side >= 16 ? side : 0;
   ctx.input.edge = edge;
   stage.classList.toggle('edge', edge > 0);
   stage.style.transform = `scale(${s})`;
@@ -137,7 +137,7 @@ function fit(): void {
   stage.parentElement!.style.width = `${(VIEW_W + 2 * edge) * s}px`;
   stage.parentElement!.style.height = `${VIEW_H * s}px`;
 }
-touchFirst.addEventListener('change', fit);
+platform().onTouchFirstChange(fit);
 addEventListener('resize', fit);
 fit();
 
@@ -147,12 +147,12 @@ if (quickMap !== null) {
   save.map = Number(quickMap);
   await PlayScene.start(ctx, 2, save);     // slot 3, not written until SAVE is pressed
 }
-// Android back button (MainActivity.kt asks this first): on the logo / title the shell asks to quit,
-// anywhere else it is the cancel / menu key like Esc
-(window as unknown as { __grantriaBack?: () => string }).__grantriaBack = () => {
-  if (scene instanceof LogoScene || scene instanceof TitleScene) return 'exit';
+// system back key (Android): on the logo / title the host offers to quit, anywhere else it is the
+// cancel / menu key like Esc
+platform().lifecycle.setBackHandler(() => {
+  if (scene instanceof LogoScene || scene instanceof TitleScene) return false;
   ctx.input.inject([AVK.CLR], 'touch');
-  return 'handled';
-};
+  return true;
+});
 requestAnimationFrame(frame);
 Object.assign(window, { game: { ctx, scene: () => scene } });

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-saves-write"
+description = "Enables the saves_write command without any pre-configured scope."
+commands.allow = ["saves_write"]
+
+[[permission]]
+identifier = "deny-saves-write"
+description = "Denies the saves_write command without any pre-configured scope."
+commands.deny = ["saves_write"]

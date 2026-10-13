@@ -748,7 +748,7 @@ export class FieldScene implements Scene {
 
   /** FUN_0001dd48 / FUN_0002cdc8: the class guide marker for this map and the first main quest (mode 0 only) */
   private updateGuide(): void {
-    const g = this.gardenMode !== 0 ? null : pickGuide(this.model.cls, this.field.mapId, (m) => this.story.maps.has(m),
+    const g = this.gardenMode !== 0 ? null : pickGuide(this.ctx.assets.tables.guideMarkers, this.model.cls, this.field.mapId, (m) => this.story.maps.has(m),
       this.story.active.map((a) => a.q), (q) => this.sdb.mainQuest(q));
     if (g !== 'keep') this.guide = g;
   }

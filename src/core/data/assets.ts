@@ -97,6 +97,8 @@ export interface Tables {
   actionMult: number[][];
   fontClass: number[];
   blinkColors: number[][];
+  /** class guide arrows (core/rules/guide.ts), from libGrantria.so .rodata; absent in older asset builds */
+  guideMarkers?: { c0: number[][]; c1: number[][]; c2: number[][] };
 }
 
 /** Player action record (d.dat action tables, combat.md §1.2). */

@@ -117,7 +117,21 @@ def player_actions(d):
     return {'playerActions': actions, 'actionMult': mult}
 
 
-def build_tables(assets, out):
+# class guide arrows (FUN_0001788c / 17980 / 17a78): per-map rows [map, (x, y, variant) x quest column] in
+# the native library's .rodata (s16, file offset = address - 0x10000); src/core/rules/guide.ts
+GUIDE_TABLES = (('c0', 0xfffec, 0x30c, 13), ('c1', 0x1002f8, 0x280, 16), ('c2', 0x100578, 0x270, 13))
+
+
+def guide_markers(so):
+    lib = open(so, 'rb').read()
+    out = {}
+    for name, addr, size, stride in GUIDE_TABLES:
+        v = struct.unpack('<%dh' % (size // 2), lib[addr - 0x10000:addr - 0x10000 + size])
+        out[name] = [list(v[i:i + stride]) for i in range(0, len(v), stride)]
+    return out
+
+
+def build_tables(assets, out, so):
     d = gg.load_ddat(assets)
     tables = {
         'sharedClips': list(d[gg.DDAT_SHARED_CLIPS:gg.DDAT_SHARED_CLIPS + 80]),
@@ -134,6 +148,7 @@ def build_tables(assets, out):
         # font: ASCII byte -> glyph class (d+0x22482, s8) and '|q' blink colours (d+0x22d27, 11 x (b1, b2))
         'fontClass': [b - 256 if b > 127 else b for b in d[0x22482:0x22482 + 128]],
         'blinkColors': [list(d[0x22d27 + i * 2:0x22d27 + i * 2 + 2]) for i in range(11)],
+        'guideMarkers': guide_markers(so),
     }
     dump(os.path.join(out, 'tables.json'), tables)
 
@@ -156,7 +171,7 @@ def main():
     print('cmf', build_cmf(assets, out))
     print('maps', build_maps(assets, out))
     print('text', build_text(assets, out))
-    build_tables(assets, out)
+    build_tables(assets, out, so)
     # item rule tables extracted by tools/grantria_items.py (catalog is recomputed from d.dat at runtime)
     items_src = os.path.join(work, 'items')
     os.makedirs(os.path.join(out, 'items'), exist_ok=True)

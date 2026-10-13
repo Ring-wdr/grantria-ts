@@ -12,7 +12,8 @@ use tauri::Manager;
 #[cfg(target_os = "android")]
 struct Android<R: Runtime>(tauri::plugin::PluginHandle<R>);
 
-/// option 진동 (500 ms hits). Desktop has no motor of its own; the pad rumble is the webview's Gamepad API.
+/// option 진동 (500 ms hits). Android: the phone's vibrator. Desktop has no motor of its own: the webview's
+/// Gamepad API rumbles XInput pads, and on Windows a DualSense, which the webview cannot drive, gets it here.
 #[tauri::command]
 async fn vibrate<R: Runtime>(app: AppHandle<R>, ms: u32) -> Result<(), String> {
     #[cfg(target_os = "android")]
@@ -21,6 +22,8 @@ async fn vibrate<R: Runtime>(app: AppHandle<R>, ms: u32) -> Result<(), String> {
         struct Args { ms: u32 }
         app.state::<Android<R>>().0.run_mobile_plugin::<()>("vibrate", Args { ms }).map_err(|e| e.to_string())?;
     }
+    #[cfg(windows)]
+    crate::rumble::rumble(ms);
     #[cfg(not(target_os = "android"))]
     let _ = (app, ms);
     Ok(())

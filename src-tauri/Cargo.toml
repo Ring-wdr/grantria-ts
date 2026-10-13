@@ -20,6 +20,10 @@ tauri-plugin-fs = "=2.6.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# DualSense rumble on Windows (src/rumble.rs): the system HID API, no C library to build
+[target.'cfg(windows)'.dependencies]
+hidapi = { version = "2.6", default-features = false, features = ["windows-native"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

@@ -8,6 +8,8 @@
 // The Android back key is Tauri's own (app plugin 'back-button' event, src/tauri/platform.ts).
 mod native;
 mod saves;
+#[cfg(windows)]
+mod rumble;
 
 use tauri::{Emitter, WindowEvent};
 

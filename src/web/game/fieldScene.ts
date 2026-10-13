@@ -305,6 +305,7 @@ export class FieldScene implements Scene {
     s.player.onEvent = (ev) => s.actionEvent(ev);
     s.player.onPickup = () => s.doPickup();
     ctx.input.zones = FIELD_ZONES;
+    ctx.input.confirmZones = FIELD_ZONES.filter((z) => z.key === AVK.OK);
     // FUN_0004618c: with no opening bit (0 / 10 / 0x14) — a new game or a hardcore conversion — the class's first map
     const fresh = !s.story.isDone(0) && !s.story.isDone(10) && !s.story.isDone(0x14);
     if (fresh) await s.enterMap(OPENING_MAP[save.cls]);
@@ -2069,6 +2070,7 @@ export class FieldScene implements Scene {
       this.drawBalloons(originX);
       this.ui.end();
       this.events.drawOverlay(hud);
+      if (this.ctx.input.confirm) this.hud.confirmControls();
       this.drawPopup();
       return;
     }
@@ -2125,7 +2127,8 @@ export class FieldScene implements Scene {
       }),
       target: this.targetView(),
       hits: this.events.active ? undefined : this.hits,
-    }, this.cam.x - originX - sx, this.cam.y - sy, this.showButtons && !this.dead && !this.talk);
+    }, this.cam.x - originX - sx, this.cam.y - sy, this.showButtons && !this.dead && !this.talk && !this.ctx.input.confirm);
+    if (this.ctx.input.confirm) this.hud.confirmControls();
     if (this.flash) { hud.alpha = Math.min(32, this.flash * 4); hud.fill(0, 0, VIEW_W, VIEW_H, 0xffffff); hud.alpha = 32; }
     if (this.talk) { hud.hit(0, 0, VIEW_W, VIEW_H, () => [AVK.OK]); this.talk.d.draw(hud, this.tick); }
     this.drawPopup();

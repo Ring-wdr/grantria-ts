@@ -283,6 +283,17 @@ export class FieldHud {
     if (inp.device !== 'touch') this.padHints();
   }
 
+  /** touch confirm mode (Input.confirm): the attack button becomes 확인 (OK) and the stick keeps only ◀ ▶ (yes / no) */
+  confirmControls(): void {
+    const u = this.ui, inp = this.input, e = inp.edge;
+    u.alpha = 32;
+    const cx = STICK.x - e, cy = STICK.y;
+    u.el('t-stick', cx - 30, cy - 30, 60, 60);
+    ([[-43, 270], [43, 90]] as const).forEach(([dx, rot]) =>
+      u.el('t-arrow', cx + dx - 10, cy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` } }));
+    u.el(`t-circle t-attack t-confirm${inp.isHeld(AVK.OK) ? ' on' : ''}`, ATTACK.x + e - 29, ATTACK.y - 29, 58, 58, { html: ICONS.check });
+  }
+
   /** the pad glyph or keyboard key on each touch button it presses (follows the device used last) */
   private padHints(): void {
     const u = this.ui;

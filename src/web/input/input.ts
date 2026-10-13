@@ -34,6 +34,10 @@ export class Input implements InputState {
   /** touch-first screens wider than 3:2: the stick moves left and the right cluster right by this many
    *  virtual pixels, into the side margins, so the thumbs stay at the screen edges (app.ts fit()) */
   edge = 0;
+  /** touch confirm mode (PlayScene: dialogue, event or popup on the field): the OK zones stay live in UI mode
+   *  and a tap beside the stick centre sends LEFT / RIGHT (yes / no), so the thumbs keep their places */
+  confirm = false;
+  confirmZones: { x: number; y: number; w: number; h: number; key: number; edge?: 1 }[] = [];
   /** UI mode (menus, popups, dialogue): pointer downs become taps instead of zones / stick */
   uiMode = false;
   /** field play with nothing open (PlayScene sets it every tick, a scene change clears it): the pad's d-pad
@@ -86,7 +90,7 @@ export class Input implements InputState {
     // taps on interactive DOM UI elements are theirs (DomUi), only the canvas and the empty frame count here
     const surface = canvas.closest<HTMLElement>('#frame') ?? canvas;
     const own = (e: PointerEvent) => e.target === canvas || e.target === surface || e.target === canvas.parentElement;
-    surface.addEventListener('pointerdown', (e) => { if (own(e)) this.pointer(e, 'down'); });
+    surface.addEventListener('pointerdown', (e) => { if (own(e) || (this.confirm && this.confirmAt(this.toView(e)))) this.pointer(e, 'down'); });
     surface.addEventListener('pointermove', (e) => this.pointer(e, 'move'));
     surface.addEventListener('pointerup', (e) => this.pointer(e, 'up'));
     surface.addEventListener('pointercancel', (e) => this.pointer(e, 'up'));
@@ -174,6 +178,16 @@ export class Input implements InputState {
   private pointer(e: PointerEvent, kind: 'down' | 'move' | 'up'): void {
     const p = this.toView(e);
     if (kind === 'down') this.device = e.pointerType === 'mouse' ? 'keyboard' : 'touch';
+    if (kind === 'down' && this.confirm) {
+      const c = this.confirmAt(p);
+      if (c === 'ok') {
+        this.zoneKeys.set(e.pointerId, AVK.OK);
+        this.down(AVK.OK, `p${e.pointerId}`);
+        this.surface.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (c) { this.presses.push(c === 'left' ? AVK.LEFT : AVK.RIGHT); return; }
+    }
     if (kind === 'down' && this.uiMode) { this.taps.push(p); return; }
     if (kind === 'down') {
       const touch = e.pointerType !== 'mouse';
@@ -208,6 +222,15 @@ export class Input implements InputState {
     const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
     const key = level === 0 ? 0 : Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? AVK.LEFT : AVK.RIGHT) : (dy < 0 ? AVK.UP : AVK.DOWN);
     Object.assign(this.stick, { active: level > 0, angle, level, key, dx, dy });
+  }
+
+  /** confirm mode: 'ok' on an OK zone, 'left' / 'right' beside the stick centre (within 50 px), else null */
+  private confirmAt(p: { x: number; y: number }): 'ok' | 'left' | 'right' | null {
+    const z = this.confirmZones.find((r) => { const x = r.x + (r.edge ?? 0) * this.edge; return p.x >= x && p.x < x + r.w && p.y >= r.y && p.y < r.y + r.h; });
+    if (z) return 'ok';
+    const dx = p.x - (this.center.x - this.edge), dy = p.y - this.center.y;
+    if (Math.hypot(dx, dy) > 50 || Math.abs(dx) < 8) return null;
+    return dx < 0 ? 'left' : 'right';
   }
 
   /** Keys produced by clicking an HTML view element: pressed this tick, not held. */

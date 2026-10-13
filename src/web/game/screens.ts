@@ -441,6 +441,9 @@ export class PlayScene implements Scene {
     const f = this.field;
     this.ctx.input.uiMode = !!(this.field.ending || this.overShop || this.overPopup || this.menu || this.shop || this.pause || this.notice || this.askSave || f.popup || f.busyTalking || f.dead);
     this.ctx.input.padField = !this.ctx.input.uiMode;
+    // touch: dialogue / event / popup on the field keeps a confirm button under the right thumb (fieldHud confirmControls)
+    this.ctx.input.confirm = this.ctx.input.device === 'touch' && !this.menu && !this.shop && !this.overShop && !this.pause && !f.ending
+      && !f.warpList && !!(f.busyTalking || f.popup || this.notice || this.askSave || this.overPopup);
     for (const t of this.ctx.input.takeTaps()) {
       const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? this.ctx.hud.tapAt(t.x, t.y);
       if (keys) presses = [...presses, ...keys];

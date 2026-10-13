@@ -1,7 +1,7 @@
 // Sound (engine.md §5, GrantriaSound + PlayBGM FUN_0001afb0 / PlaySFX FUN_0001af90):
 // n < 19 = BGM sN.ogg, looping at gain 0.5, not restarted when already playing;
 // n >= 19 = SFX sN.ogg (48 -> s53) at gain 0.8 on a single stream (a new one stops the previous).
-// Browsers start audio only after a user gesture, so the context is created on the first input.
+// Browsers start audio only after a user gesture (the context resumes on the first input); hidden pages are muted.
 import { platform } from '../core/platform';
 
 export class GameAudio {
@@ -15,8 +15,11 @@ export class GameAudio {
   enabled = true;
   private wanted = -1;
 
+  /** the page is hidden (minimised window, app in the background): everything stays silent until it is back */
+  private paused = false;
+
   constructor() {
-    const unlock = () => {
+    const create = () => {
       if (this.ctx) return;
       try {
         this.ctx = new AudioContext();
@@ -26,11 +29,29 @@ export class GameAudio {
         this.sfxGain = this.ctx.createGain();
         this.sfxGain.gain.value = 0.8;
         this.sfxGain.connect(this.ctx.destination);
+        if (this.paused) void this.ctx.suspend();
         if (this.wanted >= 0) { const n = this.wanted; this.bgm.n = -1; this.playBgm(n); }
       } catch { this.ctx = null; }
     };
+    // Hosts that allow autoplay (the Tauri shells, see tauri.conf.json / MainActivity.kt) start sound at once;
+    // a browser keeps the context suspended until the first key or tap, which resumes it.
+    create();
+    const unlock = () => {
+      create();
+      if (this.ctx?.state === 'suspended' && !this.paused) void this.ctx.resume();
+    };
     addEventListener('keydown', unlock);
     addEventListener('pointerdown', unlock);
+    document.addEventListener('visibilitychange', () => this.setPaused(document.hidden));
+    // the Android shell also reports onPause / onResume, in case the webview keeps the page visible
+    (window as unknown as { __grantriaPause?: (p: boolean) => void }).__grantriaPause = (p) => this.setPaused(p);
+  }
+
+  /** background: suspend the whole audio graph (BGM and SFX); foreground: resume it */
+  setPaused(p: boolean): void {
+    this.paused = p;
+    if (!this.ctx) return;
+    void (p ? this.ctx.suspend() : this.ctx.resume()).catch(() => {});
   }
 
   private load(n: number): Promise<AudioBuffer | null> {

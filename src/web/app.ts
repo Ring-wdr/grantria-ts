@@ -14,13 +14,16 @@ import { VIEW_H, VIEW_W } from './render/field';
 import { Input } from './input/input';
 import { newGame } from '../core/save/save';
 import type { GameContext, Scene } from './game/scene';
-import { LogoScene, MENU_CMFS, MENU_IMAGES, PlayScene } from './game/screens';
+import { LogoScene, MENU_CMFS, MENU_IMAGES, PlayScene, TitleScene } from './game/screens';
+import { AVK } from '../core/keys';
 import { DomUi, beginDomFrame, endDomFrame, installBlink, padScroll } from './render/domUi';
 import { GameAudio } from './audio';
 import { loadOptions, optionFps } from '../core/save/options';
+import { loadBindings } from './input/bindings';
 
 let tickMs = 50;
 
+loadBindings();                                                  // key / pad bindings from the platform store
 const stage = document.getElementById('stage')!;
 const canvas = document.getElementById('screen') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLCanvasElement;
@@ -144,5 +147,12 @@ if (quickMap !== null) {
   save.map = Number(quickMap);
   await PlayScene.start(ctx, 2, save);     // slot 3, not written until SAVE is pressed
 }
+// Android back button (MainActivity.kt asks this first): on the logo / title the shell asks to quit,
+// anywhere else it is the cancel / menu key like Esc
+(window as unknown as { __grantriaBack?: () => string }).__grantriaBack = () => {
+  if (scene instanceof LogoScene || scene instanceof TitleScene) return 'exit';
+  ctx.input.inject([AVK.CLR], 'touch');
+  return 'handled';
+};
 requestAnimationFrame(frame);
 Object.assign(window, { game: { ctx, scene: () => scene } });

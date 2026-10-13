@@ -10,6 +10,7 @@ import type { Ui } from '../render/ui';
 import { button, cmfFrame, cSprite, gt, h, menuList, sprite, type ScrollRef, type VChild, type VNode } from '../render/view';
 import { clipImage, DEFAULT_EQUIP } from '../render/sprites';
 import type { Cmf } from '../../core/data/assets';
+import { KeyMapPanel } from './keyMap';
 
 const GREY565 = 0x632c;          // 0x666666
 
@@ -26,6 +27,8 @@ export class OptionTab {
   private book = -1;
   private bookDetail = false;
   private scroll: ScrollRef = { y: 0 };
+  /** 키 설정 sub panel (keyboard / pad only) */
+  private keys: KeyMapPanel | null = null;
 
   /** cmf_status for the status-effect help page (loaded on first use) */
   private statusCmf: Cmf | null = null;
@@ -36,6 +39,9 @@ export class OptionTab {
 
   get busy(): boolean { return this.setting || this.help >= 0 || this.book >= 0; }
 
+  /** settings rows: the five options, plus 키 설정 unless the player is on touch */
+  private get settingRows(): number { return this.ctx.input.device === 'touch' ? 5 : 6; }
+
   /** open the settings screen directly (title state 0x0C) */
   openSettings(): this { this.setting = true; this.cur = 0; return this; }
   /** open the help pages directly (title state 0x0D) */
@@ -43,6 +49,7 @@ export class OptionTab {
 
   update(presses: number[]): boolean {
     this.t++;
+    if (this.keys) { if (!this.keys.update(presses)) this.keys = null; return true; }
     for (const k of presses) {
       if (this.help >= 0) { this.helpKey(k); continue; }
       if (this.book >= 0) { this.bookKey(k); continue; }
@@ -82,9 +89,12 @@ export class OptionTab {
   }
 
   private settingKey(k: number): void {
-    const o = this.ctx.options;
-    if (k === AVK.UP) this.cur = (this.cur + 4) % 5;
-    else if (k === AVK.DOWN) this.cur = (this.cur + 1) % 5;
+    const o = this.ctx.options, n0 = this.settingRows;
+    if (this.cur >= n0) this.cur = 0;
+    if (k === AVK.UP) this.cur = (this.cur + n0 - 1) % n0;
+    else if (k === AVK.DOWN) this.cur = (this.cur + 1) % n0;
+    else if (this.cur === 5 && (k === AVK.OK || k === AVK.RIGHT)) this.keys = new KeyMapPanel(this.ctx);
+    else if (this.cur === 5 && k === AVK.LEFT) { /* nothing to cycle */ }
     else if (k === AVK.LEFT || k === AVK.RIGHT || k === AVK.OK) {
       const key = OPTION_KEYS[this.cur], n = OPTION_COUNTS[this.cur];
       o[key] = (o[key] + (k === AVK.LEFT ? n - 1 : 1)) % n;
@@ -97,7 +107,7 @@ export class OptionTab {
   }
 
   draw(u: Ui): void {
-    const view = this.help >= 0 ? this.helpView() : this.book >= 0 ? (this.bookDetail ? this.bookDetailView() : this.bookView())
+    const view = this.keys ? this.keys.view() : this.help >= 0 ? this.helpView() : this.book >= 0 ? (this.bookDetail ? this.bookDetailView() : this.bookView())
       : this.setting ? this.settingView() : this.mainView();
     u.mount('tab', 'option', view);
   }
@@ -124,6 +134,9 @@ export class OptionTab {
           h('div.v-row.v-grow.v-center', { style: 'gap:14px' }, values),
           h('span.v-opt-arrow', { on: () => { this.cur = i; return [AVK.RIGHT]; } }, cur && cSprite(a, -9))));
     });
+    if (this.settingRows > 5) rows.push(h(`div.v-row.v-opt-set${this.cur === 5 ? '.cur' : ''}`, { on: () => { if (this.cur === 5) return [AVK.OK]; this.cur = 5; } },
+      gt('키 설정', { cls: 'v-opt-label' }),
+      h('div.v-row.v-grow.v-center', null, h('span.v-opt-value.on', null, '키보드 / 패드 ▶'))));
     return h('div.v-col.v-fill.v-tab', { style: 'gap:3px' },
       h('div.v-box.v-heading', null, gt(t[0xdf] ?? '')),
       h('div.v-box.v-col.v-grow', { style: 'padding:6px 8px;justify-content:space-around' }, rows));

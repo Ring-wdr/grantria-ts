@@ -1,10 +1,11 @@
 // On-screen key hints for the device in use: the pad's button glyph (PS / Xbox / generic), the keyboard key
 // bound to the same virtual key, or nothing on touch. The game asks for AVK keys (core/keys.ts); which physical
-// key or button produces one is the host's binding (input.ts KEYMAP, gamepad.ts PAD_KEYS), so the labels come
+// key or button produces one is the host's binding (bindings.ts, editable in 환경설정 → 키 설정), so the labels come
 // from those tables and cannot drift from the real bindings.
 import { AVK } from '../../core/keys';
 import { padButtonFor, padGlyph, type PadKind } from './gamepad';
-import { KEY_LABELS, type InputDevice } from './input';
+import { kbOf, keyLabel } from './bindings';
+import type { InputDevice } from './input';
 
 export interface KeyHint {
   glyph: string;
@@ -20,7 +21,7 @@ export function keyHint(input: { device: InputDevice | string; padKind: PadKind 
     return { glyph: g, cls: `${input.padKind} b-${b}${g.length > 2 ? ' wide' : ''}` };
   }
   if (input.device === 'keyboard') {
-    const g = KEY_LABELS[key];
+    const code = kbOf(key), g = code && keyLabel(code);
     return g ? { glyph: g, cls: `kb${g.length > 2 ? ' wide' : ''}` } : null;
   }
   return null;

@@ -6,24 +6,8 @@ import { gamepadSupported, padKind, padKeysOf, readPad, type PadButton, type Pad
 
 import { AVK } from '../../core/keys';
 import type { InputState, Stick } from '../../core/input';
+import { KEYMAP, RESERVED_KB } from './bindings';
 export { AVK };
-
-const KEYMAP: Record<string, number> = {
-  ArrowUp: AVK.UP, ArrowDown: AVK.DOWN, ArrowLeft: AVK.LEFT, ArrowRight: AVK.RIGHT,
-  KeyW: AVK.UP, KeyS: AVK.DOWN, KeyA: AVK.LEFT, KeyD: AVK.RIGHT,
-  KeyZ: AVK.OK, Enter: AVK.OK, Space: AVK.OK,
-  KeyX: AVK.POUND, KeyC: AVK.STAR,
-  Digit1: AVK.K1, Digit2: AVK.K3, Digit3: AVK.K7, Digit4: AVK.K9, Digit0: AVK.K0,
-  Escape: AVK.CLR, KeyM: AVK.MAP, KeyP: AVK.SAVE, KeyQ: AVK.TAB_L, KeyE: AVK.TAB_R,
-};
-
-/** what the key bound to each AVK is called on the keyboard: the first KEYMAP entry wins (arrows, Z, X, C, 1..4, Esc, M, P, Q, E) */
-export const KEY_LABELS: Record<number, string> = {};
-for (const [code, k] of Object.entries(KEYMAP)) {
-  if (k in KEY_LABELS) continue;
-  KEY_LABELS[k] = ({ ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc', Enter: 'Enter', Space: 'Space' } as Record<string, string>)[code]
-    ?? code.replace(/^(Key|Digit)/, '');
-}
 
 /** Virtual stick state: angle in degrees (0 = right, 90 = down), speed level 0 or 5..8. */
 export type { Stick };
@@ -46,7 +30,7 @@ export class Input implements InputState {
   private center = { x: 83, y: 246 };
   /** touch zones -> virtual key for the current screen (touchdata.dat), checked before the stick;
    *  edge: 1 = the zone belongs to the right control cluster and moves out by `edge` (see below) */
-  zones: { x: number; y: number; w: number; h: number; key: number; edge?: 1 }[] = [];
+  zones: { x: number; y: number; w: number; h: number; key: number; edge?: 1; mouseOnly?: true }[] = [];
   /** touch-first screens wider than 3:2: the stick moves left and the right cluster right by this many
    *  virtual pixels, into the side margins, so the thumbs stay at the screen edges (app.ts fit()) */
   edge = 0;
@@ -70,6 +54,8 @@ export class Input implements InputState {
   /** right stick vertical axis past its dead zone (-1 up .. 1 down), 0 when centred: scrolls the open text */
   padScrollY = 0;
 
+  /** key settings (game/keyMap.ts): the next raw key or pad button goes here instead of the game */
+  capture: ((c: { kb: string } | { pad: PadButton } | { cancel: true }) => void) | null = null;
   private canvas: HTMLCanvasElement;
   private surface: HTMLElement;
   private viewW: number;
@@ -77,6 +63,14 @@ export class Input implements InputState {
   constructor(canvas: HTMLCanvasElement, viewW: number, viewH: number) {
     this.canvas = canvas; this.viewW = viewW; this.viewH = viewH;
     addEventListener('keydown', (e) => {
+      if (this.capture && !e.repeat) {
+        e.preventDefault();
+        const c = this.capture;
+        this.capture = null;
+        this.device = 'keyboard';
+        c(RESERVED_KB.has(e.code) ? { cancel: true } : { kb: e.code });
+        return;
+      }
       const k = KEYMAP[e.code];
       if (k === undefined) return;
       e.preventDefault();
@@ -135,6 +129,16 @@ export class Input implements InputState {
       if (Math.hypot(r.lx, r.ly) > Math.hypot(lx, ly)) { lx = r.lx; ly = r.ly; }
       if (Math.abs(r.ry) > PAD_DEAD) { kind ??= padKind(p.id); if (Math.abs(r.ry) > Math.abs(ry)) ry = r.ry; }
     }
+    if (this.capture) {                                              // key settings: the first new button is taken
+      const b = [...now].find((x) => !this.padHeld.has(x));
+      if (b) {
+        const c = this.capture;
+        this.capture = null;
+        this.padHeld.set(b, []);                                      // swallowed until released
+        this.device = 'pad';
+        c({ pad: b });
+      }
+    }
     for (const b of now) if (!this.padHeld.has(b)) this.padHeld.set(b, padKeysOf(b, this.padField));
     for (const b of [...this.padHeld.keys()]) if (!now.has(b)) this.padHeld.delete(b);
     for (const ks of this.padHeld.values()) for (const k of ks) keys.add(k);
@@ -172,7 +176,8 @@ export class Input implements InputState {
     if (kind === 'down') this.device = e.pointerType === 'mouse' ? 'keyboard' : 'touch';
     if (kind === 'down' && this.uiMode) { this.taps.push(p); return; }
     if (kind === 'down') {
-      const z = this.zones.find((r) => { const x = r.x + (r.edge ?? 0) * this.edge; return p.x >= x && p.x < x + r.w && p.y >= r.y && p.y < r.y + r.h; });
+      const touch = e.pointerType !== 'mouse';
+      const z = this.zones.find((r) => { if (r.mouseOnly && touch) return false; const x = r.x + (r.edge ?? 0) * this.edge; return p.x >= x && p.x < x + r.w && p.y >= r.y && p.y < r.y + r.h; });
       if (z) {
         this.zoneKeys.set(e.pointerId, z.key);
         this.down(z.key, `p${e.pointerId}`);

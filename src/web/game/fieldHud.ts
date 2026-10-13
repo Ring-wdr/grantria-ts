@@ -38,14 +38,14 @@ export type SlotView =
   | { icon: { image: string; sx: number; sy: number }; count: number; cd: number; maxCd: number };
 
 /** Touch zones of the field screen (touchdata.dat state 0x10, game-flow-ui.md §5.2). */
-export const FIELD_ZONES: { x: number; y: number; w: number; h: number; key: number; edge?: 1 }[] = [
+export const FIELD_ZONES: { x: number; y: number; w: number; h: number; key: number; edge?: 1; mouseOnly?: true }[] = [
   { x: 0, y: 0, w: 40, h: 40, key: AVK.CLR },
   { x: 194, y: 0, w: 56, h: 32, key: 10000 },                        // QUEST -> quest tab (key 10000 lights it, FUN_0004b128 idx 12)
   { x: 255, y: 0, w: 60, h: 32, key: AVK.SAVE },
   { x: 156, y: 2, w: 32, h: 32, key: -30 },
   { x: 0, y: 75, w: 80, h: 70, key: AVK.MAP },                     // minimap -> map tab                         // gate icon -> community menu
   { x: 322, y: 0, w: 52, h: 32, key: -7 },                          // SHOP -> premium shop
-  { x: 410, y: 55, w: 76, h: 30, key: -31 },                        // coupon shop button
+  { x: 410, y: 55, w: 76, h: 30, key: -31, mouseOnly: true },       // coupon shop button (not drawn on touch)
   { x: 427, y: 104, w: 50, h: 50, key: AVK.CLR, edge: 1 },
   { x: 361, y: 157, w: 50, h: 50, key: AVK.STAR, edge: 1 },
   { x: 427, y: 157, w: 50, h: 50, key: AVK.POUND, edge: 1 },
@@ -241,15 +241,18 @@ export class FieldHud {
       [AVK.K9]: 7, [AVK.STAR]: 8, [AVK.POUND]: 9, [-7]: 10, [AVK.SAVE]: 11, [10000]: 12 } as Record<number, number>)[held] ?? 0xff;
     const on = (b: boolean) => (b ? ' on' : '');
     u.alpha = 32;
-    // virtual stick: ring, four chevrons, a knob that follows the finger / pad stick (radius 22)
-    const e = inp.edge;                                                // edge layout: stick left, right cluster right
+    // virtual stick: ring, four chevrons, a knob that follows the finger (radius 22); touch only, keyboard and
+    // pads have their own directions
+    const e = inp.edge, touch = inp.device === 'touch';                // edge layout: stick left, right cluster right
     const cx = STICK.x - e, cy = STICK.y;
-    u.el(`t-stick${on(inp.stick.active)}`, cx - 30, cy - 30, 60, 60);
-    ([[0, -42, 0], [-43, 0, 270], [0, 42, 180], [43, 0, 90]] as const).forEach(([dx, dy, rot], i) =>
-      u.el(`t-arrow${on(idx === i)}`, cx + dx - 10, cy + dy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` } }));
-    const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 ? 22 / d : 1;
-    u.el(`t-knob${on(idx < 4)}`, cx - 15, cy - 15, 30, 30,
-      { vars: { '--kx': `${Math.round(inp.stick.dx * k)}px`, '--ky': `${Math.round(inp.stick.dy * k)}px` } });
+    if (touch) {
+      u.el(`t-stick${on(inp.stick.active)}`, cx - 30, cy - 30, 60, 60);
+      ([[0, -42, 0], [-43, 0, 270], [0, 42, 180], [43, 0, 90]] as const).forEach(([dx, dy, rot], i) =>
+        u.el(`t-arrow${on(idx === i)}`, cx + dx - 10, cy + dy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` } }));
+      const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 ? 22 / d : 1;
+      u.el(`t-knob${on(idx < 4)}`, cx - 15, cy - 15, 30, 30,
+        { vars: { '--kx': `${Math.round(inp.stick.dx * k)}px`, '--ky': `${Math.round(inp.stick.dy * k)}px` } });
+    }
     // attack
     u.el(`t-circle t-attack${on(inp.isHeld(AVK.OK))}`, ATTACK.x + e - 29, ATTACK.y - 29, 58, 58, { html: ICONS.sword });
     // quick slots 1, 3, 7, 9, *, #: the skill / item icon stays the game's art inside a CSS ring
@@ -275,7 +278,8 @@ export class FieldHud {
     // QUEST / SAVE / SHOP (the original swaps the QUEST/SHOP highlight) and the coupon shop
     for (const [lit, icon, label, x] of [[12, 'quest', 'QUEST', 194], [11, 'save', 'SAVE', 258], [10, 'shop', 'SHOP', 322]] as const)
       u.el(`t-pill${on(idx === lit)}`, x, 6, 52, 20, { html: `${ICONS[icon]}<span>${label}</span>` });
-    u.el('t-pill t-coupon', W - 0x50, H - 0x102, 0x4c, 22, { html: `${ICONS.coupon}<span>${escapeHtml(u.textOf(0x1a08))}</span>` });
+    // the coupon shop button is left out on touch (still in the community menu); keyboard / pad / mouse keep it
+    if (!touch) u.el('t-pill t-coupon', W - 0x50, H - 0x102, 0x4c, 22, { html: `${ICONS.coupon}<span>${escapeHtml(u.textOf(0x1a08))}</span>` });
     if (inp.device !== 'touch') this.padHints();
   }
 

@@ -65,9 +65,15 @@ const ctx: GameContext = {
     this.audio.setEnabled(this.options.volume !== 0);
     tickMs = 1000 / optionFps(this.options);
     document.documentElement.style.setProperty('--tick', `${tickMs}ms`);
+    fit();
   },
   input: new Input(canvas, VIEW_W, VIEW_H),
-  go(s) { scene = s; ctx.input.padField = false; ctx.input.confirm = false; },
+  go(s) {
+    const old = scene;
+    scene = s;
+    if (old !== s) old?.dispose?.();
+    ctx.input.padField = false; ctx.input.confirm = false;
+  },
 };
 ctx.applyOptions();
 scene = new LogoScene(ctx);
@@ -113,7 +119,7 @@ if (import.meta.env.DEV) {
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType !== 'mouse') return;
   const r = canvas.getBoundingClientRect();
-  const x = ((e.clientX - r.left) * VIEW_W) / r.width, y = ((e.clientY - r.top) * VIEW_H) / r.height;
+  const pad = compositor.pad, x = ((e.clientX - r.left) * (VIEW_W + 2 * pad)) / r.width - pad, y = ((e.clientY - r.top) * VIEW_H) / r.height;
   const h = ui13.hitAt(x, y) ?? ui.hitAt(x, y) ?? hud.hitAt(x, y);
   const button = h ? h.w < VIEW_W || h.h < VIEW_H
     : ctx.input.zones.some((z) => x >= z.x && x < z.x + z.w && y >= z.y && y < z.y + z.h);
@@ -123,18 +129,31 @@ canvas.addEventListener('pointermove', (e) => {
 /** scale of the whole stage (canvas and UI layers together, so CSS blend modes reach the field): whole numbers
   *  keep the pixels even; below 2x (a phone in landscape) the stage is fitted to the screen instead.
   *  On a touch-first screen wider than 3:2 the frame spans the window and the field controls move into the
-  *  side margins (Input.edge), so the stick and the buttons sit under the thumbs at the screen edges. */
+  *  side margins (Input.edge), so the stick and the buttons sit under the thumbs at the screen edges.
+  *  Fullscreen (option, touch-first only): always fitted, and the field is drawn into the side margins too
+  *  (compositor.pad); the menus and popups stay in the 480x320 middle. */
 function fit(): void {
+  const touch = platform().touchFirst(), full = touch && ctx.options.fullscreen === 1;
   const reserve = debug.offsetParent ? 32 : 0;                   // the debug line above the stage, when shown
   const fitS = Math.min(innerWidth / VIEW_W, (innerHeight - reserve) / VIEW_H);
-  const s = Math.floor(fitS) >= 2 ? Math.floor(fitS) : fitS;
+  const s = !full && Math.floor(fitS) >= 2 ? Math.floor(fitS) : fitS;
   const side = Math.max(0, Math.floor((innerWidth / s - VIEW_W) / 2));
-  const edge = platform().touchFirst() && side >= 16 ? side : 0;
+  const edge = touch && side >= 16 ? side : 0;
+  const pad = full ? Math.max(0, Math.ceil((innerWidth / s - VIEW_W) / 2)) : 0;
+  if (pad !== compositor.pad || canvas.width !== VIEW_W + 2 * pad) {
+    compositor.setPad(pad);
+    renderer.setSize(VIEW_W + 2 * pad, VIEW_H, false);
+    canvas.style.left = `${-pad}px`;
+    canvas.style.width = `${VIEW_W + 2 * pad}px`;
+  }
+  ctx.input.pad = pad;
+  hud.bleed = pad;
   ctx.input.edge = edge;
-  stage.classList.toggle('edge', edge > 0);
+  const margin = Math.max(edge, pad);                            // the frame spans the window when either reaches out
+  stage.classList.toggle('edge', margin > 0);
   stage.style.transform = `scale(${s})`;
-  stage.style.marginLeft = `${edge * s}px`;
-  stage.parentElement!.style.width = `${(VIEW_W + 2 * edge) * s}px`;
+  stage.style.marginLeft = `${margin * s}px`;
+  stage.parentElement!.style.width = `${Math.min(innerWidth, (VIEW_W + 2 * margin) * s)}px`;
   stage.parentElement!.style.height = `${VIEW_H * s}px`;
 }
 platform().onTouchFirstChange(fit);

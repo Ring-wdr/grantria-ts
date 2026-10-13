@@ -140,6 +140,10 @@ export class FieldHud {
     u.alpha = 32;
   }
 
+  /** arrive on mapId without the slide: FUN_0002d640 (차원의 문 entry) loads the floor without setting
+   *  DAT_003b3be8 = 0xdf, so the floor name just stands at its resting place */
+  noSlideOn(mapId: number): void { this.lastMap = mapId; this.slide = 32; }
+
   /** buttons = false while the game-over screen redraws the field (FUN_0003357c) */
   draw(s: HudState, camX: number, camY: number, buttons = true): void {
     const u = this.ui;

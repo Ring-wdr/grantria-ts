@@ -2,6 +2,7 @@
 // needs the destination color get a fresh snapshot of everything drawn before them.
 import * as THREE from 'three';
 import { dstUniforms } from './sprites';
+import { VIEW_H, VIEW_W } from '../../core/render';
 
 export function createTarget(w: number, h: number): THREE.WebGLRenderTarget {
   const rt = new THREE.WebGLRenderTarget(w, h, { magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter, depthBuffer: false });
@@ -10,7 +11,12 @@ export function createTarget(w: number, h: number): THREE.WebGLRenderTarget {
 }
 
 export class Compositor {
-  private rt = createTarget(1, 1);
+  /** fullscreen bleed (app.ts fit()): the internal target is VIEW_W + 2 * pad wide; the field fills it, every
+   *  VIEW_W-wide pass (UI) lands in the middle, so screen coordinates stay those of the original 480x320 */
+  pad = 0;
+  /** the target changed size since the menu backdrop was frozen */
+  backdropStale = false;
+  private rt = createTarget(VIEW_W, VIEW_H);
   private snapshot: THREE.FramebufferTexture | null = null;
   private present = new THREE.Scene();
   private presentCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -58,8 +64,18 @@ export class Compositor {
     this.blurScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blurMat));
   }
 
+  /** width of the internal target */
+  get width(): number { return VIEW_W + 2 * this.pad; }
+
+  setPad(pad: number): void {
+    if (pad === this.pad) return;
+    this.pad = pad;
+    this.backdropStale = true;
+  }
+
   /** Darken and blur what has been drawn so far into the backdrop target (once, when the menu opens). */
   freezeBackdrop(): void {
+    this.backdropStale = false;
     const { width: w, height: h } = this.rt;
     if (this.backdrop.width !== w || this.backdrop.height !== h) this.backdrop.setSize(w, h);
     this.blurMat.uniforms.src.value = this.rt.texture;
@@ -123,16 +139,18 @@ export class Compositor {
 
   /**
    * Draw group's meshes (in renderOrder) through camera into target (default: the internal
-   * w x h target). clear = false draws over the existing content (UI passes). Returns the
-   * number of render passes.
+   * target, the w x h view centred in it when it is wider: see pad). clear = false draws over the
+   * existing content (UI passes). Returns the number of render passes.
    */
   draw(group: THREE.Group, camera: THREE.Camera, w: number, h: number, target?: THREE.WebGLRenderTarget, clear = true): number {
     const r = this.renderer;
     if (!target) {
-      if (this.rt.width !== w || this.rt.height !== h) this.rt.setSize(w, h);
+      if (this.rt.width !== this.width || this.rt.height !== VIEW_H) this.rt.setSize(this.width, VIEW_H);
       target = this.rt;
+      target.viewport.set((target.width - w) >> 1, 0, w, h);
     }
-    this.useSnapshot(w, h);
+    // the snapshot covers the whole target: dst-reading blends sample it at gl_FragCoord
+    this.useSnapshot(target.width, target.height);
     const meshes = (group.children as THREE.Mesh[]).slice().sort((a, b) => a.renderOrder - b.renderOrder);
     const parent = group.parent;
     this.scene.add(group);
@@ -164,13 +182,14 @@ export class Compositor {
     r.autoClear = auto;
     if (parent) parent.add(group);
     else this.scene.remove(group);
+    target.viewport.set(0, 0, target.width, target.height);
     r.setRenderTarget(null);
     return passes;
   }
 
   /** Clear the internal target to black (a full-screen DOM menu covers the field). */
-  clear(w = this.rt.width, h = this.rt.height): void {
-    if (this.rt.width !== w || this.rt.height !== h) this.rt.setSize(w, h);
+  clear(): void {
+    if (this.rt.width !== this.width || this.rt.height !== VIEW_H) this.rt.setSize(this.width, VIEW_H);
     this.renderer.setRenderTarget(this.rt);
     this.renderer.setClearColor(0x000000, 1);
     this.renderer.clear();

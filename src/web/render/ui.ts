@@ -449,6 +449,12 @@ export class GlUi extends Ui {
     this.compositor.draw(this.layer.group, this.cam, VIEW_W, VIEW_H, undefined, true);
   }
 
+  dispose(): void {
+    this.layer.clear();
+    this.text.dispose();
+    this.white.dispose();
+  }
+
   end(): void {
     this.compositor.draw(this.layer.group, this.cam, VIEW_W, VIEW_H, undefined, false);
   }

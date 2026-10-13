@@ -36,6 +36,9 @@ export interface Drawable {
   hideClips?: number[];
   /** whole-frame scale around the origin (+0x8c, FUN_00030cec) */
   scale?: number;
+  /** actor shadow (FUN_00032800): shadow.pxl (120, 0) 36x20 multiplied at (x - 18, y - 10) just before the
+   *  sprite, in its depth slot; unscaled, unmirrored, without the sprite's tint or fade */
+  shadow?: boolean;
   /** draw a plain image rect at (x, y) instead of a cmf frame (ground items) */
   img?: { name: string; sx: number; sy: number; w: number; h: number; blend?: number };
 }

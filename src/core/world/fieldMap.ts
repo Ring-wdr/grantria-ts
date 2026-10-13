@@ -16,6 +16,8 @@ export class FieldMap {
   protected ccmf!: Cmf;
   /** objMid plus the portal markers (FUN_00018e6c marker kinds) */
   protected midStatic: MapObject[] = [];
+  /** animation of each midStatic entry (FUN_00018e6c record +6 / +8): length (0 = still) and counter */
+  private midAnim: { len: number; cnt: number }[] = [];
   private walk = new Uint8Array(0);
   /** walk layers 0..3 (layer 0 = walk) */
   private layers: Uint8Array[] = [];
@@ -60,8 +62,24 @@ export class FieldMap {
       });
     }
 
+    // the portal markers are 8-frame loops (the bob is in cmf_oc frames 112..143) starting at FUN_000f8490(3)
+    this.midAnim = this.midStatic.map((_, i) => i < m.objMid.length ? { len: 0, cnt: 0 } : { len: 8, cnt: Math.floor(Math.random() * 3) });
+
     this.walk = buildWalk(m, (id) => { const [, c, f] = this.objCmf(id); return [c, f]; });
     this.layers = buildWalkLayers(m, this.walk);
+  }
+
+  /** FUN_00063640, once per field frame: step the object animation counters */
+  animateObjects(): void {
+    for (const a of this.midAnim) if (a.len) { const c = a.cnt++; if (c % a.len === a.len - 1) a.cnt = 0; }
+  }
+
+  /** frame offset of midStatic[i] this frame (FUN_00032800: counter % length) */
+  protected midOffset(i: number): number { const a = this.midAnim[i]; return a?.len ? a.cnt % a.len : 0; }
+
+  /** kind-0 portal markers (FUN_00025fe0: objMid entries with id 0xff90) for the minimap */
+  kind0Markers(): { x: number; y: number }[] {
+    return this.midStatic.filter((o) => o.obj === -112).map(({ x, y }) => ({ x, y }));
   }
 
   /** Walk layer 0 (file bits + stamped object boxes): 1 = passable; outside the map is blocked. */

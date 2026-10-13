@@ -68,6 +68,10 @@ export function newRun(a: { d16(o: number): number }, d: number): DimRun {
     pool: 0, entry: Date.now(), equips: 0, kills: 0, cleared: false, clearT: 0 };
 }
 
+/** 0..n-1 from the high part of a draw: the original LCG (FUN_000f8490) alternates its low bit on calls in the
+ *  same millisecond, so rand(n) back to back in one loop repeats a pattern (one monster type per floor) */
+function pick(rng: Rng, n: number): number { return Math.floor(rng.rand(n * 1024) / 1024); }
+
 /** floor records: 3x3-walkable cells away from portals (3 cells) and arrival points (8 cells); floor 10 = the boss alone */
 export function generateFloor(run: DimRun, f: number, field: Field, arrivals: [number, number][], rng: Rng): DimRecord[] {
   const W = field.map.header.width, H = field.map.header.height, cfg = DUNGEONS[run.d];
@@ -91,8 +95,8 @@ export function generateFloor(run: DimRun, f: number, field: Field, arrivals: [n
   }
   const n = Math.min(MAX_PER_FLOOR, Math.max(4, Math.round(walk * cfg.density)), cells.length), out: DimRecord[] = [];
   for (let i = 0; i < n; i++) {
-    const k = rng.rand(cells.length), [cx, cy] = cells.splice(k, 1)[0];
-    out.push({ type: cfg.pool[rng.rand(cfg.pool.length)], x: cx * 16 + 8, y: cy * 16 + 8 });
+    const k = pick(rng, cells.length), [cx, cy] = cells.splice(k, 1)[0];
+    out.push({ type: cfg.pool[pick(rng, cfg.pool.length)], x: cx * 16 + 8, y: cy * 16 + 8 });
   }
   return out;
 }

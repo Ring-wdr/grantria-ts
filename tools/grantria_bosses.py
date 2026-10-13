@@ -484,6 +484,24 @@ def normal_wander(d, assets):
     return out
 
 
+def normal_box_overrides(be, d, assets):
+    """FUN_000231e4 type cases for normal monsters (behaviour 1): e.g. type 0x18 frames 24/25 put the
+    attack box at y -139, which the cmf's signed byte cannot hold (it stores 117)."""
+    out = {}
+    for t in range(3, 43):
+        row = type_row(d, t)
+        if t in BOSSES or row['behaviour'] != 1:
+            continue
+        p = os.path.join(assets, 'cmf_c%d.dat' % row['cmf'])
+        if not os.path.isfile(p):
+            continue
+        ov = box_overrides(be, t, gg.parse_cmf(load(p)), [0])
+        if ov:
+            out[str(t)] = ov
+            print('type %2d normal overrides %d (frames %s)' % (t, len(ov), [o['frame'] for o in ov]))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--assets', default='apk/assets')
@@ -539,6 +557,8 @@ def main():
         print('type %2d %-8s recs %2d overrides %s' % (t, NAMES[t], len(recs),
                                                       len(b.get('box_overrides', [])) if not a.no_emu else '-'))
     res['normal_wander'] = normal_wander(d, a.assets)
+    if not a.no_emu:
+        res['normal_box_overrides'] = normal_box_overrides(be, d, a.assets)
     os.makedirs(a.out, exist_ok=True)
     p = os.path.join(a.out, 'bosses.json')
     with open(p, 'w', encoding='utf-8') as f:

@@ -36,4 +36,6 @@ export interface Scene {
   /** render into the compositor target and the overlay */
   draw(): void;
   debugLine?(): string;
+  /** the scene was replaced (GameContext.go): free its GPU resources */
+  dispose?(): void;
 }

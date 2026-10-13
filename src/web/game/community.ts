@@ -36,6 +36,8 @@ const PREMIUM: [number, number, number][] = [
 const POINT_PACKS = new Set([0x2f, 0x31, 0x32]);
 /** ids whose stack is capped at 9999 (FUN_00054cb8 cap check) */
 const STACKED = new Set([0, 2, 3, 4, 5, 6, 7, 0xb, 0xc, 0x15, 0x16, 0x17, 0x1b, 0x1c]);
+/** premium grid row pitch: 26 px cells + 4 px row gap (.mc-shelf .mc-grid) */
+const PREMIUM_ROW = 30;
 export const BAG_PRICE = 25;
 export const WAREHOUSE_SIZE = 48;
 
@@ -146,6 +148,8 @@ class PremiumShop {
   request: 'bag' | 'warehouse' | 'coupon' | null = null;
   private names = new Map<number, string>();
   private scroll: ScrollRef = { y: 0 };
+  /** the icon grid scrolls natively (touch / wheel); keys move it so the cursor sits on the bottom row of three */
+  private gridScroll: ScrollRef = { y: 0 };
   /** controller focus on the button row (0 가방, 1 구매, 2 창고): DOWN from the last grid row, UP back */
   private btn: number | null = null;
   constructor(private ctx: GameContext, private fs: FieldScene) {}
@@ -177,7 +181,10 @@ class PremiumShop {
       else if (k === AVK.STAR) this.request = 'warehouse';
       else if (k === AVK.CLR) return 'close';
     }
-    if (this.cur !== cur0) this.scroll.y = 0;
+    if (this.cur !== cur0) {
+      this.scroll.y = 0;
+      this.gridScroll.y = Math.max(0, Math.floor(this.cur / 5) - 2) * PREMIUM_ROW;   // FUN_0005bf34 top row
+    }
     return null;
   }
 
@@ -217,18 +224,20 @@ class PremiumShop {
    */
   draw(u: Ui): void {
     const t = this.ctx.assets.text, n = PREMIUM.length, rows = Math.ceil(n / 5);
-    const top = Math.max(0, Math.floor(this.cur / 5) - 2) * 5;
+    // every row is laid out and the grid scrolls (3 rows visible), so touch reaches the rows below the third
+    const total = rows * PREMIUM_ROW - (PREMIUM_ROW - 26), view = 3 * PREMIUM_ROW - (PREMIUM_ROW - 26);
+    const thumbTop = Math.min(1, this.gridScroll.y / total), thumbH = Math.min(1, view / total);
     const cells = [];
-    for (let k = 0; k < 15 && top + k < n; k++) {
-      const i = top + k, [id, , qty] = PREMIUM[i];
+    for (let i = 0; i < n; i++) {
+      const [id, , qty] = PREMIUM[i];
       cells.push(h(`div.mc-cell${i === this.cur ? `.on${this.btn === null ? '.v-sel' : ''}` : ''}`, { on: () => { this.btn = null; if (this.cur === i) return [AVK.K0]; this.cur = i; this.scroll.y = 0; } },
         itemIcon(this.fs, 0x1b, id), qty > 1 && digits(qty, 'mc-qty')));
     }
     const [id, price, qty] = PREMIUM[this.cur], held = coupons(this.fs);
     u.mount('tab', 'premium', h('div.v-col.v-fill.v-tab', null,
       h('div.v-box.v-row.mc-shelf', null,
-        h('div.mc-grid', null, cells),
-        h('div.mc-scrollbar', null, h('div.mc-thumb', { style: `top:${(top / 5 / rows) * 100}%;height:${(3 / rows) * 100}%` }))),
+        h('div.mc-grid.v-scroll.mc-scroll-grid', { scroll: this.gridScroll }, cells),
+        h('div.mc-scrollbar', null, h('div.mc-thumb', { style: `top:${thumbTop * 100}%;height:${thumbH * 100}%` }))),
       h('div.v-box.v-col.v-grow.mc-info', null,
         h('div.v-row', { style: 'gap:6px' }, itemIcon(this.fs, 0x1b, id), gt(qty > 1 ? `${this.name(id)} x${qty}` : this.name(id), { cls: 'v-grow v-left' })),
         // the item's own description (the item detail text), so the effect is not guessed from the name

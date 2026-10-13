@@ -64,6 +64,11 @@ export class TextRenderer {
 
   constructor(private assets: WebAssets) {}
 
+  dispose(): void {
+    for (const v of this.cache.values()) v.texture.dispose();
+    this.cache.clear();
+  }
+
   async init(): Promise<void> {
     const bmp = await createImageBitmap(new Blob([(await platform().assets.bytes('images/f.png')).slice()]));
     const c = new OffscreenCanvas(bmp.width, bmp.height);

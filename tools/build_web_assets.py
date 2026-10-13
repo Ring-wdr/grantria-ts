@@ -177,10 +177,13 @@ def main():
     os.makedirs(os.path.join(out, 'items'), exist_ok=True)
     for name in ('options', 'sets', 'gems', 'consumables', 'drops', 'starting', 'misc'):
         shutil.copyfile(os.path.join(items_src, name + '.json'), os.path.join(out, 'items', name + '.json'))
-    # boss box overrides (FUN_000231e4 results from tools/grantria_bosses.py), keyed type -> frame
+    # box overrides (FUN_000231e4 results from tools/grantria_bosses.py), keyed type -> frame: the bosses and
+    # the normal monsters with a type case (12, 24, 27, 31, 37, 40, 41)
     bosses = json.load(open(os.path.join(work, 'bosses', 'bosses.json'), encoding='utf-8'))
-    boxes = {t: {str(o['frame']): {k: o[k] for k in ('attack', 'mirrored_attack', 'body', 'mirror', 'by_action') if k in o}
-                 for o in b.get('box_overrides', [])} for t, b in bosses['bosses'].items()}
+    pick = lambda ovs: {str(o['frame']): {k: o[k] for k in ('attack', 'mirrored_attack', 'body', 'mirror', 'by_action') if k in o}
+                        for o in ovs}  # noqa: E731
+    boxes = {t: pick(b.get('box_overrides', [])) for t, b in bosses['bosses'].items()}
+    boxes.update({t: pick(ovs) for t, ovs in bosses.get('normal_box_overrides', {}).items()})
     dump(os.path.join(out, 'boss_boxes.json'), boxes)
     # sounds: res/raw/sN.ogg (BGM 0..18, SFX 19..47 and 53, engine.md §5)
     raw = os.path.join(os.path.dirname(assets), 'res', 'raw')

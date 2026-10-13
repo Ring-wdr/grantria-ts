@@ -4,7 +4,9 @@
 // a body box can be hit (35 part A, 39 main body), and only role 0 gives the reward. Monster shots ignore walls;
 // the scale-2 shots (32 falling fire, 42 shards) are drawn and boxed at twice the size (FUN_00030cec).
 import type { Cmf } from '../data/assets';
-import { FACING, Monster, frameBox, overlaps, type Dir, type MonsterWorld } from './monster';
+import { FACING, Monster, overlaps, overrideBox, type Dir, type MonsterWorld } from './monster';
+
+export { overrideBox };
 import type { Drawable } from '../render';
 import type { Rect } from './player';
 import { rdiv } from '../rules/rules';
@@ -47,18 +49,6 @@ export class BossGlobals {
 
 /** Effects a boss asks the scene for this tick. */
 export interface BossFx { shake?: number; flash?: number; slowPlayer?: number; summon?: { x: number; y: number }; shots?: MonsterShot[]; }
-
-/** Box of a frame with the FUN_000231e4 override table (frame -> box, by action), else the cmf box. */
-export function overrideBox(boxes: Record<string, BoxOverride>, cmf: Cmf, frame: number, action: number,
-  which: 'body' | 'attack', x: number, y: number, dir: number, lastH: number): Rect | null {
-  const o0 = boxes[String(frame)];
-  const o = o0?.by_action?.[String(action)] ?? o0?.by_action?.['0'] ?? o0;
-  if (!o || !o.attack) return frameBox(cmf, frame, which, x, y, dir);
-  const flag = o.mirror.startsWith('dir') ? dir & 1 : o.mirror.startsWith('lastH') ? lastH : 0;
-  const bx = which === 'attack' ? (flag ? o.mirrored_attack : o.attack) : o.body;
-  if (!bx || bx[2] <= 0 || bx[3] <= 0) return null;
-  return [x + bx[0], y + bx[1], x + bx[0] + bx[2], y + bx[1] + bx[3]];
-}
 
 export interface ShotOpts {
   frame: number; life: number; vx?: number; vy?: number;

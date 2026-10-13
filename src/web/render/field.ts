@@ -52,6 +52,14 @@ export class Field extends FieldMap {
     this.mapCam.bottom = this.height;
     this.mapCam.updateProjectionMatrix();
     this.compositor.draw(U.group, this.mapCam, this.width, this.height, this.mapTarget);
+    U.clear();                                        // the tile quads live on in mapTarget: free their buffers now
+  }
+
+  /** Free the GPU side (the scene is being replaced: leaving the dimension reloads the save into a new one). */
+  dispose(): void {
+    this.under.clear();
+    this.view.clear();
+    this.mapTarget.dispose();
   }
 
   /** Load plain images drawn through Drawable.img (shadow, icons). */
@@ -62,9 +70,9 @@ export class Field extends FieldMap {
     await this.view.preload(this.view.allImages(cmfName, cmf, this.zone, equip));
   }
 
-  private drawObj(L: SpriteLayer, o: MapObject): void {
+  private drawObj(L: SpriteLayer, o: MapObject, off = 0): void {
     const [n, c, f] = this.objCmf(o.obj);
-    L.frame(n, c, f, o.x, o.y, this.zone, DEFAULT_EQUIP);
+    L.frame(n, c, f + off, o.x, o.y, this.zone, DEFAULT_EQUIP);
   }
 
   /** Render the view with its top-left corner at world (camX, camY) into the compositor target
@@ -78,25 +86,28 @@ export class Field extends FieldMap {
       ...entities.map((e): DepthItem => ({
         key: e.depth ?? (e.cmf ? actorDepth(e.y, e.cmf, e.frame) : e.y), kind: 0,
         draw: () => {
+          if (e.shadow) { V.fx = null; V.quad('shadow', 120, 0, 36, 20, e.x - 18, e.y - 10, 0, 0, 1, 14); }   // multiply
           V.fx = e.fx ?? null;
           if (e.img) V.quad(e.img.name, e.img.sx, e.img.sy, e.img.w, e.img.h, e.x, e.y, 0, 0, 1, e.img.blend ?? 0);
           else if (e.cmf) V.frame(e.cmfName, e.cmf, e.frame, e.x, e.y, this.zone, e.equip ?? DEFAULT_EQUIP, e.mirror, e.hideClips, e.scale);
           V.fx = null;
         },
       })),
-      ...this.midStatic.map((o): DepthItem => {
+      ...this.midStatic.map((o, i): DepthItem => {
         const [, c, f] = this.objCmf(o.obj);
-        return { key: objDepth(o, c, f), kind: 1, draw: () => this.drawObj(V, o) };
+        return { key: objDepth(o, c, f), kind: 1, draw: () => this.drawObj(V, o, this.midOffset(i)) };
       }),
     ];
     for (const it of depthSort(items)) it.draw();
     beforeTop?.(V);                                   // FUN_00024b80 warp / banner, FUN_000250e8 aura: under objTop
     for (const o of this.map.objTop) this.drawObj(V, o);
-    this.viewCam.left = camX;
-    this.viewCam.right = camX + VIEW_W;
+    // fullscreen: the view reaches pad pixels past both sides of the 480-wide window at camX
+    const pad = this.compositor.pad;
+    this.viewCam.left = camX - pad;
+    this.viewCam.right = camX + VIEW_W + pad;
     this.viewCam.top = camY;
     this.viewCam.bottom = camY + VIEW_H;
     this.viewCam.updateProjectionMatrix();
-    this.passes = this.compositor.draw(V.group, this.viewCam, VIEW_W, VIEW_H);
+    this.passes = this.compositor.draw(V.group, this.viewCam, VIEW_W + 2 * pad, VIEW_H);
   }
 }

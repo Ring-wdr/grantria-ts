@@ -28,6 +28,18 @@ export function frameBox(cmf: Cmf, frame: number, which: 'body' | 'attack', x: n
   return [x + bx, y + b[1], x + bx + b[2], y + b[1] + b[3]];
 }
 
+/** Box of a frame with the FUN_000231e4 override table (frame -> box, by action), else the cmf box. */
+export function overrideBox(boxes: Record<string, BoxOverride>, cmf: Cmf, frame: number, action: number,
+  which: 'body' | 'attack', x: number, y: number, dir: number, lastH: number): Rect | null {
+  const o0 = boxes[String(frame)];
+  const o = o0?.by_action?.[String(action)] ?? o0?.by_action?.['0'] ?? o0;
+  if (!o || !o.attack) return frameBox(cmf, frame, which, x, y, dir);
+  const flag = o.mirror.startsWith('dir') ? dir & 1 : o.mirror.startsWith('lastH') ? lastH : 0;
+  const bx = which === 'attack' ? (flag ? o.mirrored_attack : o.attack) : o.body;
+  if (!bx || bx[2] <= 0 || bx[3] <= 0) return null;
+  return [x + bx[0], y + bx[1], x + bx[0] + bx[2], y + bx[1] + bx[3]];
+}
+
 /** What a monster needs from the scene each tick. */
 export interface MonsterWorld {
   field: Field;
@@ -103,7 +115,7 @@ export class Monster {
   readonly range: number;
   /** +0x76 action (boss pattern; the damage multiplier key) */
   action = 0;
-  /** FUN_000231e4 box overrides (bosses) */
+  /** FUN_000231e4 box overrides: the bosses and the normal types with a case (12, 24, 27, 31, 37, 40, 41) */
   boxes: Record<string, BoxOverride> = {};
   /** this tick's horizontal move (shots that follow their owner) */
   lastVx = 0;
@@ -138,14 +150,14 @@ export class Monster {
 
   body(): Rect | null {
     if (this.stun > 0 && this.stunBody) return this.stunBody;
-    return frameBox(this.cmf, this.frame, 'body', this.x, this.y, this.dir);
+    return overrideBox(this.boxes, this.cmf, this.frame, this.action, 'body', this.x, this.y, this.dir, this.lastH);
   }
 
   /** Attack box on this tick's frame while attacking (frames without a box deal no damage). */
   attackBox(): Rect | null {
     if (this.stun > 0) return this.alive ? this.stunAttack : null;   // an attack frame frozen by the stun keeps hitting (FUN_0006fd44)
     if (!this.alive || this.state !== 1 || this.phase !== 2) return null;
-    return frameBox(this.cmf, this.frame, 'attack', this.x, this.y, this.dir);
+    return overrideBox(this.boxes, this.cmf, this.frame, this.action, 'attack', this.x, this.y, this.dir, this.lastH);
   }
 
   setDir(d: Dir): void {

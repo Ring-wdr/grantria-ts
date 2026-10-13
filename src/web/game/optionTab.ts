@@ -11,6 +11,7 @@ import { button, cmfFrame, cSprite, gt, h, menuList, sprite, type ScrollRef, typ
 import { clipImage, DEFAULT_EQUIP } from '../render/sprites';
 import type { Cmf } from '../../core/data/assets';
 import { KeyMapPanel } from './keyMap';
+import { platform } from '../../core/platform';
 
 const GREY565 = 0x632c;          // 0x666666
 
@@ -39,8 +40,14 @@ export class OptionTab {
 
   get busy(): boolean { return this.setting || this.help >= 0 || this.book >= 0; }
 
-  /** settings rows: the five options, plus 키 설정 unless the player is on touch */
-  private get settingRows(): number { return this.ctx.input.device === 'touch' ? 5 : 6; }
+  /** extra settings rows after the five options: 풀스크린 on a touch-first screen, 키 설정 unless the player is on touch */
+  private get extraRows(): ('full' | 'keys')[] {
+    const r: ('full' | 'keys')[] = [];
+    if (platform().touchFirst()) r.push('full');
+    if (this.ctx.input.device !== 'touch') r.push('keys');
+    return r;
+  }
+  private get settingRows(): number { return 5 + this.extraRows.length; }
 
   /** open the settings screen directly (title state 0x0C) */
   openSettings(): this { this.setting = true; this.cur = 0; return this; }
@@ -93,8 +100,15 @@ export class OptionTab {
     if (this.cur >= n0) this.cur = 0;
     if (k === AVK.UP) this.cur = (this.cur + n0 - 1) % n0;
     else if (k === AVK.DOWN) this.cur = (this.cur + 1) % n0;
-    else if (this.cur === 5 && (k === AVK.OK || k === AVK.RIGHT)) this.keys = new KeyMapPanel(this.ctx);
-    else if (this.cur === 5 && k === AVK.LEFT) { /* nothing to cycle */ }
+    else if (this.cur >= 5 && this.extraRows[this.cur - 5] === 'keys') {
+      if (k === AVK.OK || k === AVK.RIGHT) this.keys = new KeyMapPanel(this.ctx);
+      else if (k === AVK.CLR) { saveOptions(o); this.setting = false; }
+    }
+    else if (this.cur >= 5 && (k === AVK.LEFT || k === AVK.RIGHT || k === AVK.OK)) {   // 풀스크린 on / off
+      o.fullscreen ^= 1;
+      this.ctx.applyOptions();
+      vibrate(o.vibration);
+    }
     else if (k === AVK.LEFT || k === AVK.RIGHT || k === AVK.OK) {
       const key = OPTION_KEYS[this.cur], n = OPTION_COUNTS[this.cur];
       o[key] = (o[key] + (k === AVK.LEFT ? n - 1 : 1)) % n;
@@ -134,9 +148,23 @@ export class OptionTab {
           h('div.v-row.v-grow.v-center', { style: 'gap:14px' }, values),
           h('span.v-opt-arrow', { on: () => { this.cur = i; return [AVK.RIGHT]; } }, cur && cSprite(a, -9))));
     });
-    if (this.settingRows > 5) rows.push(h(`div.v-row.v-opt-set${this.cur === 5 ? '.cur' : ''}`, { on: () => { if (this.cur === 5) return [AVK.OK]; this.cur = 5; } },
-      gt('키 설정', { cls: 'v-opt-label' }),
-      h('div.v-row.v-grow.v-center', null, h('span.v-opt-value.on', null, '키보드 / 패드 ▶'))));
+    this.extraRows.forEach((kind, j) => {
+      const i = 5 + j, cur = this.cur === i;
+      if (kind === 'keys') {
+        rows.push(h(`div.v-row.v-opt-set${cur ? '.cur' : ''}`, { on: () => { if (this.cur === i) return [AVK.OK]; this.cur = i; } },
+          gt('키 설정', { cls: 'v-opt-label' }),
+          h('div.v-row.v-grow.v-center', null, h('span.v-opt-value.on', null, '키보드 / 패드 ▶'))));
+        return;
+      }
+      // 풀스크린: the same on / off values (0x1b / 0x1c) as the original rows
+      rows.push(h(`div.v-row.v-opt-set${cur ? '.cur' : ''}`, { on: () => { this.cur = i; } },
+        gt('풀스크린', { cls: 'v-opt-label' }),
+        h('div.v-row.v-grow.v-center', { style: 'gap:10px' },
+          h('span.v-opt-arrow', { on: () => { this.cur = i; return [AVK.LEFT]; } }, cur && cSprite(a, 9)),
+          h('div.v-row.v-grow.v-center', { style: 'gap:14px' }, [0, 1].map((k) =>
+            h(`span.v-opt-value${o.fullscreen === k ? '.on' : ''}`, { on: () => { this.cur = i; if (o.fullscreen !== k) return [AVK.RIGHT]; } }, t[0x1b + k] ?? ''))),
+          h('span.v-opt-arrow', { on: () => { this.cur = i; return [AVK.RIGHT]; } }, cur && cSprite(a, -9)))));
+    });
     return h('div.v-col.v-fill.v-tab', { style: 'gap:3px' },
       h('div.v-box.v-heading', null, gt(t[0xdf] ?? '')),
       h('div.v-box.v-col.v-grow', { style: 'padding:6px 8px;justify-content:space-around' }, rows));

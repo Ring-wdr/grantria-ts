@@ -35,6 +35,8 @@ export class Input implements InputState {
   /** touch-first screens wider than 3:2: the stick moves left and the right cluster right by this many
    *  virtual pixels, into the side margins, so the thumbs stay at the screen edges (app.ts fit()) */
   edge = 0;
+  /** fullscreen bleed: the canvas reaches `pad` virtual pixels past both sides of the 480-wide view (app.ts fit()) */
+  pad = 0;
   /** touch confirm mode (PlayScene: dialogue, event or popup on the field): the OK zones stay live in UI mode
    *  and a tap beside the stick centre sends LEFT / RIGHT (yes / no), so the thumbs keep their places */
   confirm = false;
@@ -173,7 +175,7 @@ export class Input implements InputState {
   /** Convert a pointer event to virtual-screen pixels. */
   private toView(e: PointerEvent): { x: number; y: number } {
     const r = this.canvas.getBoundingClientRect();
-    return { x: (e.clientX - r.left) * this.viewW / r.width, y: (e.clientY - r.top) * this.viewH / r.height };
+    return { x: (e.clientX - r.left) * (this.viewW + 2 * this.pad) / r.width - this.pad, y: (e.clientY - r.top) * this.viewH / r.height };
   }
 
   private pointer(e: PointerEvent, kind: 'down' | 'move' | 'up'): void {

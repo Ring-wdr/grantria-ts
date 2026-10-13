@@ -33,6 +33,8 @@ export class Minimap {
     });
   }
 
+  dispose(): void { this.tex.dispose(); }
+
   /** §4.1: layer 0 = file walk bits, layer 1 = cell and its linear 4-neighbours walkable; then two scans, portal markers */
   build(map: GameMap, markers: { x: number; y: number }[]): void {
     const W = map.header.width, H = map.header.height, BW = 2 * W, BH = 2 * H;

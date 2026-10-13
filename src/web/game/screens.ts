@@ -564,7 +564,7 @@ export class PlayScene implements Scene {
     this.ctx.hud.grey = greyUniform.grey.value;
     this.field.showButtons = !this.menu && !this.shop && !this.pause && !this.notice && !this.askSave;
     if (!this.menu) { this.field.draw(); this.backdropFor = null; }
-    else if (this.backdropFor !== this.menu) { this.field.draw(); this.ctx.compositor.freezeBackdrop(); this.backdropFor = this.menu; }
+    else if (this.backdropFor !== this.menu || this.ctx.compositor.backdropStale) { this.field.draw(); this.ctx.compositor.freezeBackdrop(); this.backdropFor = this.menu; }
     else this.ctx.compositor.drawBackdrop();                         // the blurred field is frozen while the menu is open
     if (this.menu) this.ctx.hud.hold();                              // the HUD stays under the menu, darkened and blurred by CSS
     setGrey(0);
@@ -620,6 +620,8 @@ export class PlayScene implements Scene {
   debugLine(): string {
     return `슬롯 ${this.slot + 1} · ${this.field.debugLine()}`;
   }
+
+  dispose(): void { this.field.dispose(); }
 }
 
 class LoadingScene implements Scene {

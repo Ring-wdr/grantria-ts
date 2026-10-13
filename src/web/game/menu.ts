@@ -31,6 +31,10 @@ export class GameMenu {
   private t = 0;
   /** selected ring icon / tab (g_Menu.type) */
   private type = 0;
+  /** keyboard / pad ring turn (DAT_003b3beb): 1 = LEFT (the tab before comes to the top), -1 = RIGHT; 0 = still.
+   *  spinT counts its frames: 1..3 turn 10° each, 4 commits the new type (FUN_0005929c, g_Menu.frame 12..15) */
+  private spin = 0;
+  private spinT = 0;
   /** inside a tab screen (states 0x1D + type) */
   private inTab = false;
   private page = 0;
@@ -85,9 +89,16 @@ export class GameMenu {
     if (!this.inTab) {
       this.f++;
       if (this.f < 12) return null;
+      if (this.spin) {                                                 // keys wait for the turn (FUN_00057668: only at frame 12)
+        if (++this.spinT >= 4) { this.type = (this.type + 8 - this.spin) & 7; this.spin = 0; }
+        return presses.includes(AVK.CLR) ? 'close' : null;
+      }
+      // keyboard / pad: the ring turns so the chosen tab sits at the top; touch: the ring stays and the cursor moves
+      const turn = this.ctx.input.device !== 'touch';
       for (const k of presses) {
-        if (k === AVK.LEFT || k === AVK.UP || k === AVK.TAB_L) this.type = (this.type + 7) & 7;
-        else if (k === AVK.RIGHT || k === AVK.DOWN || k === AVK.TAB_R) this.type = (this.type + 1) & 7;
+        const d = k === AVK.LEFT || k === AVK.UP || k === AVK.TAB_L ? 1 : k === AVK.RIGHT || k === AVK.DOWN || k === AVK.TAB_R ? -1 : 0;
+        if (d && turn) { this.spin = d; this.spinT = 1; break; }
+        if (d) this.type = (this.type + 8 - d) & 7;
         else if (k === AVK.OK) { this.inTab = true; this.page = 0; }
         else if (k === AVK.CLR) return 'close';
       }
@@ -282,9 +293,13 @@ export class GameMenu {
     u.pushCenter220();
     const k = Math.min(this.f + 2, 8);
     const a = (k >> 1) << 3;
-    let ang = 0x154 - 0x14 * k;
-    for (let i = 0; i < 8; i++) {
-      const sel = i === this.type;
+    // keyboard / pad (DAT_003b3b48 == 0): slot i holds tab type + i, so the selected tab is the top one, and a turn
+    // offsets the angle by 10° a frame; touch: slot i is tab i and the selected one glows where it is
+    const turn = this.ctx.input.device !== 'touch';
+    let ang = 0x154 - 0x14 * k - this.spin * 10 * this.spinT;
+    for (let s = 0; s < 8; s++) {
+      const i = turn ? (s + this.type) & 7 : s;
+      const sel = turn ? s === 0 && !this.spin : i === this.type;
       const sin = Math.round(Math.sin((ang * Math.PI) / 180) * 1024), cos = Math.round(Math.cos((ang * Math.PI) / 180) * 1024);
       const dx = Math.trunc((sin * 10) / 1024) * k, dy = Math.trunc((cos * 10) / 1024) * k;
       if (sel) {
@@ -295,7 +310,7 @@ export class GameMenu {
         u.alpha = Math.min(a, 0x14);
         u.button(dx + 0x67, dy + 0x58, 0x1e, 0x1e, 3, 0);
       }
-      if (k === 8) u.hit(dx + 0x63, dy + 0x54, 0x26, 0x26, () => { if (this.type === i) return [AVK.OK]; this.type = i; });
+      if (k === 8) u.hit(dx + 0x63, dy + 0x54, 0x26, 0x26, () => { if (this.spin) return; if (this.type === i) return [AVK.OK]; this.type = i; });
       u.image('t', i << 4, 0x57, 0x10, 0x10, dx + 0x6e, dy + 0x5f);
       ang -= 0x2d;
     }

@@ -129,6 +129,8 @@ export class DomUi extends Ui {
   /** hold(): keep the last drawn elements this frame if nothing is drawn (the HUD under a menu) */
   private held = false;
   private drew = false;
+  /** fullscreen bleed of an unclipped layer (the HUD): a fill over the whole view also covers the side margins */
+  bleed = 0;
 
   constructor(assets: WebAssets, private compositor: Compositor, parent: HTMLElement, name: string, zoom = 1) {
     super(assets, zoom);
@@ -166,7 +168,13 @@ export class DomUi extends Ui {
   override view(id: string, x: number, y: number, w: number, h: number, root: VNode): void {
     const node = this.node('view', () => {
       const d = DomUi.div('ui-view')();
+      // a click counts only when its press started in this view: a HUD shortcut acts on the press and opens a
+      // screen under the finger, and the click of the same tap must not land on that screen's buttons
+      let pressed = false;
+      d.addEventListener('pointerdown', () => { pressed = true; });
       d.addEventListener('click', (e) => {
+        if (!pressed) return;
+        pressed = false;
         let el = e.target as HTMLElement | null;
         while (el && el !== d) {
           const act = (el as HTMLElement & { _on?: KeyAct })._on;
@@ -295,7 +303,7 @@ export class DomUi extends Ui {
     this.parents = [this.root];
   }
 
-  endClear(): void { this.compositor.clear(VIEW_W, VIEW_H); }
+  endClear(): void { this.compositor.clear(); }
   end(): void { /* the DOM is the output */ }
 
   /** Get (or create) the next element of a kind and put it at the current paint position. */
@@ -399,6 +407,7 @@ export class DomUi extends Ui {
 
   fill(x: number, y: number, w: number, h: number, rgb = 0): void {
     if (w <= 0 || h <= 0) return;
+    if (this.bleed && x + this.ox <= 0 && y + this.oy <= 0 && x + this.ox + w >= VIEW_W && y + this.oy + h >= VIEW_H) { x -= this.bleed; w += 2 * this.bleed; }
     const node = this.node('fill', DomUi.div('u-fill'));
     DomUi.set(node, `left:${px(x + this.ox)};top:${px(y + this.oy)};width:${w}px;height:${h}px;background:${css(rgb)};${this.opacity()}`);
   }

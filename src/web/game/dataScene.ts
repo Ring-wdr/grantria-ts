@@ -25,9 +25,9 @@ export async function importOriginal(files: { name: string; bytes: Uint8Array }[
     else if (kind === 'save') { save = xtea(f.bytes, false); member = memberFromName(f.name); }
     else if (kind === 'option') {
       const o = parseOption(xtea(f.bytes, false)), cur = loadOptions();
-      saveOptions({ volume: o.volume & 1, vibration: o.vibration & 1, speed: Math.min(2, o.speed), minimap: o.minimap & 1, effects: o.effects & 1 });
+      saveOptions({ volume: o.volume & 1, vibration: o.vibration & 1, speed: Math.min(2, o.speed), minimap: o.minimap & 1, effects: o.effects & 1, fullscreen: cur.fullscreen });
       try { platform().storage.set('grantria.option.raw', o.raw); } catch { /* storage unavailable */ }
-      void cur; optionDone = true;
+      optionDone = true;
     }
   }
   const log: string[] = [];

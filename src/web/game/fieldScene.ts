@@ -52,6 +52,8 @@ const SHOW_1F = [0x74, 0x76, 0x77, 0x7a];
 const OPENING = [0, 10, 0x14];
 /** FUN_0004618c: the map an opening starts on (검사 10, 마법사 0x2f, 격투가 0x62); the event places the player */
 const OPENING_MAP = [10, 0x2f, 0x62];
+/** FUN_00032800 32218: every actor in slots 0..40 gets a shadow except type 0x13 */
+const NO_SHADOW = 0x13;
 
 export class FieldScene implements Scene {
   readonly field: Field;
@@ -462,6 +464,23 @@ export class FieldScene implements Scene {
     return best;
   }
 
+  /** keep the view inside the map; with the fullscreen bleed (compositor.pad) the wider view too, and a map
+   *  narrower than that wider view is centred (narrower than 480: originX in draw() centres it) */
+  private clampCamX(x: number): number {
+    const W = this.field.width, pad = this.ctx.compositor.pad;
+    if (W >= VIEW_W + 2 * pad) return Math.max(pad, Math.min(x, W - VIEW_W - pad));
+    return W >= VIEW_W ? (W - VIEW_W) >> 1 : 0;
+  }
+
+  /** free the GPU side of this play: map target and buffers, the WebGL UI layer, the minimap texture.
+   *  Without it every dimension exit (a reload into a new scene) left thousands of buffers behind until
+   *  the WebGL context ran out and the field went white. */
+  dispose(): void {
+    this.field.dispose();
+    this.ui.dispose();
+    this.minimap?.dispose();
+  }
+
   /** Camera step (locomotion.md §6), run before entities move so it trails by a tick. */
   private updateCamera(): void {
     const { field, player, cam } = this;
@@ -469,7 +488,7 @@ export class FieldScene implements Scene {
     const lx = 2 * Math.abs(player.vx), ly = 2 * Math.abs(player.vy);
     const cx = Math.max(224 - lx, Math.min(W - 224 + lx, player.x));
     cam.x += (cx - cam.x - 240 + 8 + (player.dir === 0 ? -lx : lx)) >> 2;
-    cam.x = Math.max(0, Math.min(cam.x, W - VIEW_W));
+    cam.x = this.clampCamX(cam.x);
     const cy = Math.max(213, Math.min(H - 106, player.y));
     cam.y += Math.trunc((cy - cam.y - 213 + (player.dir === 2 ? -ly : ly)) / 3);
     cam.y = Math.max(0, Math.min(cam.y, H - VIEW_H));
@@ -514,6 +533,7 @@ export class FieldScene implements Scene {
         this.cmfCache.set(ac.actor, cmf);
         if (ac.actor < FIRST_NPC && typeRec[1] === 1) {
           const m = new Monster(ac.actor, name, cmf, ac.x, ac.y, level, typeRec, this.hard);
+          m.boxes = this.bossBoxes[String(ac.actor)] ?? {};               // FUN_000231e4 type cases (e.g. 24's up attack)
           if (dimActors) this.dimMonster(m, ac);
           this.monsters.push(m);
         }
@@ -546,7 +566,7 @@ export class FieldScene implements Scene {
     }
     await field.preloadSprite('cmf_oc', field.oc);
     this.minimap ??= new Minimap(ctx.assets);
-    this.minimap.build(field.map, this.portalMarkers().filter((d) => d.frame >= 112 && d.frame < 120).map((d) => ({ x: d.x, y: d.y })));   // kind-0 markers only
+    this.minimap.build(field.map, field.kind0Markers());
     this.run = null;
     this.gatherFx = [];
     this.useFxs = [];
@@ -759,10 +779,10 @@ export class FieldScene implements Scene {
   eventCamera(): void {
     const ev = this.events, t = ev.camCell ?? (ev.camTarget ? [ev.camTarget.x, ev.camTarget.y] : null);
     if (!t) return;
-    const W = this.field.width, H = this.field.height;
+    const H = this.field.height;
     this.cam.x += (t[0] - 240 + 8 - this.cam.x) >> 2;
     this.cam.y += Math.trunc((t[1] - 213 + 53 - this.cam.y) / 4);
-    this.cam.x = Math.max(0, Math.min(this.cam.x, W - VIEW_W));
+    this.cam.x = this.clampCamX(this.cam.x);
     this.cam.y = Math.max(0, Math.min(this.cam.y, H - VIEW_H));
   }
   snapCamera(): void { for (let i = 0; i < 20; i++) this.eventCamera(); }
@@ -947,20 +967,6 @@ export class FieldScene implements Scene {
     u.pop();
     u.closeButton();
     u.end();
-  }
-
-  /** portal markers (FUN_00018e6c): oc 112/120/128/136 by d8(0x26f11 + target), 8-frame loop */
-  private portalMarkers(): Drawable[] {
-    const out: Drawable[] = [];
-    for (const pt of this.field.map.portals) {
-      if (!pt.rects.length) continue;
-      const a = pt.rects[0], b = pt.rects[pt.rects.length - 1];
-      const kind = this.db.a.d8(0x26f11 + pt.target);
-      if (kind > 3) continue;
-      const x = a.cx0 * 16 + (((b.cx1 + 1) * 16 - a.cx0 * 16) >> 1) - 5, y = a.cy0 * 16 - 20 + (((b.cy1 + 1) * 16 - a.cy0 * 16) >> 1);
-      out.push({ cmfName: 'cmf_oc', cmf: this.field.oc, frame: [112, 120, 128, 136][kind] + ((this.tick >> 1) % 8), x, y, depth: y });
-    }
-    return out;
   }
 
   /** lit warp stone (oc 36) over the static grey one once registered */
@@ -1177,6 +1183,7 @@ export class FieldScene implements Scene {
     this.closeMenu = true;
     const [map, x, y] = dungeonStart(this.db.a, d);
     this.pendingWarp = { map, x, y };
+    this.hud.noSlideOn(map);                                       // no entry effect: the map just appears
   }
 
   /** floor records of the run (generated on the first visit), as map actors of the alive ones */
@@ -1834,6 +1841,7 @@ export class FieldScene implements Scene {
   update(presses: number[]): void {
     this.tick++;
     if (this.busy || this.dead) return;
+    this.field.animateObjects();                                      // FUN_00034e24 -> FUN_00063640
     if (this.popup) {
       const r = this.popup.p.handle(presses);
       if (this.popup.onCancel && presses.includes(AVK.CLR)) { const c = this.popup.onCancel; this.popup = null; c(); return; }
@@ -2015,14 +2023,14 @@ export class FieldScene implements Scene {
       const d = a.drawable();
       if (!d) continue;
       if (this.partHide === 0x22c && a.id === 0x2c) d.hideClips = [0x11, 0x02];
+      d.shadow = a.id !== NO_SHADOW;
       ents.push(d);
     }
     for (const g of this.gimmicks) ents.push(...g.drawables(field.oc));
     for (const n of this.nodes) ents.push(...n.drawables(field, this.statusCmf, this.tick, this.run));
-    ents.push(...this.portalMarkers());
     { const sd = this.stoneDrawable(); if (sd) ents.push(sd); }
     // events hide normal monsters (except 0x66 / 0x56 / 0x4f / 0x50); bosses stay as part of the scene
-    for (const m of this.monsters.slice().reverse()) { if (ev && !m.isBoss && !this.events.keepsMonsters) continue; const d = m.drawable(); if (d) ents.push(d); }
+    for (const m of this.monsters.slice().reverse()) { if (ev && !m.isBoss && !this.events.keepsMonsters) continue; const d = m.drawable(); if (d) { d.shadow = m.type !== NO_SHADOW; ents.push(d); } }
     for (const it of this.eventItems) {                            // FUN_0002f184 id 200: the icon at (x-6, y-6), no sparkle
       const r = this.db.iconRect(this.db.icon(it.cat, it.sub));
       ents.push({ cmfName: '', frame: 0, x: it.x - 6, y: it.y - 6, depth: it.y, img: { name: r.image, sx: r.sx, sy: r.sy, w: 16, h: 16 } });
@@ -2035,7 +2043,7 @@ export class FieldScene implements Scene {
     if (vitals.tint && !(vitals.invuln & 2)) pd.fx = { tint: [255, 0, 0], amount: Math.max(0, vitals.tint * 4 - 8) };
     else if (this.poison > 0 && (this.poison >> 2) & 1) pd.fx = { tint: [0, 0x66, 0], amount: 24 };
     if (this.warpT > 9) pd.fx = { ...pd.fx, alpha: Math.max(0, (13 - this.warpT) * 6) };
-    if (this.lead) { const d = this.lead.drawable(); if (d) ents.push(d); } else ents.push(pd);
+    if (this.lead) { const d = this.lead.drawable(); if (d) { d.shadow = this.lead.id !== NO_SHADOW; ents.push(d); } } else { pd.shadow = true; ents.push(pd); }
     const originX = field.width < VIEW_W ? (VIEW_W - field.width) >> 1 : 0;
     const [sx, sy0] = this.shake[0] ?? [0, 0];
     const sy = sy0 + this.events.shakeY;
@@ -2054,7 +2062,7 @@ export class FieldScene implements Scene {
         if (t < 6) V.quad('t', 0x80, 0x60 + t, 83, 4, camX + 240 - 41, camY + 160 - 12 + t);
         else {
           V.quad('t', 0x80, 0x60, 83, 25, camX + 240 - 41, camY + 160 - 12);
-          if (t & 1) V.zoom(camX, camY, VIEW_W, VIEW_H, 0x116);         // FUN_0007ac0c: ×278/256 pulse on odd steps
+          if (t & 1) { const p = this.ctx.compositor.pad; V.zoom(camX - p, camY, VIEW_W + 2 * p, VIEW_H, 0x116); }         // FUN_0007ac0c: ×278/256 pulse on odd steps
         }
       }
       const af = this.buffs.auraFrame();

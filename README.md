@@ -74,9 +74,9 @@ src/tauri/      Tauri 호스트 플랫폼. 네이티브 쪽과는 Tauri(invoke·
 src-tauri/      Tauri 2 셸 (Rust: 세이브 명령, 인라인 플러그인 native), Android 프로젝트(gen/android)
 tests/          node --test 단위 테스트 (계층 경계와 셸 전역·스크립트 평가 금지도 검사)
 tools/          APK 에셋 → 웹 에셋 변환, 규칙 표 추출(에뮬레이터)
-docs/           설계 문서 (구조: architecture.md, 데스크톱 배포 비교, 문제 기록: troubleshooting.md, UI/UX 현대화 검토: ux-modernization.md)
+docs/           설계 문서 (구조: architecture.md, 데스크톱 배포 비교, 문제 기록: troubleshooting.md, UI/UX 현대화 검토: ux-modernization.md, 버전별 변경: release-notes.md)
 ```
 소스 주석의 `analysis/features/*.md`, `FUN_xxxxxxxx` 표기는 이 포트를 만들 때 쓴 분석 노트(이 저장소에 없음)와 원본 함수 주소를 가리킵니다.
 
 ## 배포
-웹 서비스로 배포하지 않습니다. 같은 코드를 Tauri로 묶어 Windows 설치 파일과 Android APK를 만듭니다(구조와 빌드: [docs/architecture.md](docs/architecture.md), 검토: [docs/desktop-electron-vs-tauri.md](docs/desktop-electron-vs-tauri.md)). 빌드 결과물에는 직접 만든 게임 에셋이 들어가므로 개인용으로만 쓰세요.
+웹 서비스로 배포하지 않습니다. 같은 코드를 Tauri로 묶어 Windows 설치 파일과 Android APK를 만듭니다(구조와 빌드: [docs/architecture.md](docs/architecture.md), 검토: [docs/desktop-electron-vs-tauri.md](docs/desktop-electron-vs-tauri.md)). 빌드 결과물에는 직접 만든 게임 에셋이 들어가므로 개인용으로만 쓰세요. 버전별 변경 사항은 [docs/release-notes.md](docs/release-notes.md)에 있습니다.

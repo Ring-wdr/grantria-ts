@@ -73,3 +73,17 @@ test('option.dat round trip and checksum', () => {
   assert.deepEqual([back.volume, back.vibration, back.speed, back.effects, back.minimap], [0, 1, 0, 1, 0]);
   assert.deepEqual([...b.subarray(0x3c, 0x41)], [0, 1, 0, 0, 1]);    // working copy: volume, vibration, speed, minimap, effects
 });
+
+test('more than the original 80 bag slots export as 2 bags, the rest left out', async () => {
+  const { origOverflow } = await import('../src/core/save/origfile.ts');
+  const item = (sub: number) => ({ type: 0x12, sub, grade: 0, base: 0, icon: 0, count: 1, enh: 0, level: 1, reqLevel: 1, aux: 0,
+    sockets: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff], options: [] as [number, number][], name: 'x' });
+  const items = Array.from({ length: 90 }, (_, i) => item(i % 20));
+  const save = { version: 1 as const, cls: 0 as const, level: 1, exp: 0, gold: 0, stats: [1, 1, 1, 1], statPoints: 0, map: 10, x: 0, y: 0,
+    dir: 0 as const, hp: 1, mp: 1, playTicks: 1, savedAt: 0,
+    inv: { items, equip: [null, null, null, null, null, null], quick: [{ kind: 2, id: 85, cd: 0, maxCd: 0, itemType: 0x12, itemSub: 5 }], gold: 0, bags: 9 } };
+  assert.equal(origOverflow(save as never), 10);
+  const back = parseSlot(buildSlot(save as never, 1n), null, 0)!;
+  assert.deepEqual([back.inv!.bags, back.inv!.items.length], [2, 80]);
+  assert.equal(back.inv!.quick[0].kind, 0);                             // its item was past slot 80
+});

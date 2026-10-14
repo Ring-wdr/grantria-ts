@@ -11,7 +11,11 @@ export type KeyAct = () => number[] | void;
 
 /** scroll position of a scrolling element, owned by the game state: keys move y, the browser clamps it
  *  (and wheel / touch scrolling write it back) */
-export interface ScrollRef { y: number }
+export interface ScrollRef {
+  y: number;
+  /** child index to bring into view when it changes (a key moved the cursor); touch scrolling stays free otherwise */
+  follow?: number;
+}
 
 export interface VNode {
   /** named mount point: views mounted with Ui.mount(slot, ...) become its children */

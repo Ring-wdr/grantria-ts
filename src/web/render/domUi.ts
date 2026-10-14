@@ -288,10 +288,22 @@ export class DomUi extends Ui {
   }
 
   /** drive scrollTop from the game's ScrollRef; the browser clamps it, user scrolling writes it back */
-  private static syncScroll(el: HTMLElement & { _scroll?: ScrollRef }, ref: ScrollRef): void {
+  private static syncScroll(el: HTMLElement & { _scroll?: ScrollRef; _followed?: number }, ref: ScrollRef): void {
     if (el._scroll !== ref) {
       el._scroll = ref;
+      el._followed = undefined;
       el.onscroll = () => { if (el._scroll) el._scroll.y = el.scrollTop; };
+    }
+    if (ref.follow !== undefined && ref.follow !== el._followed) {   // the cursor child moved: scroll just enough to show it
+      const first = el.children[0] as HTMLElement | undefined, c = el.children[ref.follow] as HTMLElement | undefined;
+      if (first && c) {
+        // positions from the first child; the scroller's padding (room for the selection glow) shows on both sides
+        const pad = parseFloat(getComputedStyle(el).paddingTop) || 0;
+        const top = c.offsetTop - first.offsetTop, bottom = top + c.offsetHeight + 2 * pad;
+        if (top < ref.y) ref.y = top;
+        else if (bottom > ref.y + el.clientHeight) ref.y = bottom - el.clientHeight;
+        el._followed = ref.follow;
+      }
     }
     if (Math.abs(el.scrollTop - ref.y) >= 1) el.scrollTop = ref.y;
     ref.y = el.scrollTop;

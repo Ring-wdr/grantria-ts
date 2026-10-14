@@ -234,15 +234,21 @@ export type LogKind = 'got' | 'gotN' | 'gold' | 'full' | 'text';
  *  (천상의 곡괭이 / 마법 해체기 / 대장장이의 모루 / 오토루팅) */
 export const UNLOCK_1B = [1, 9, 10, 13] as const;
 
+/** bags that can be bought: the original sells 2 (48 / 64 / 80 slots); here 17 (not in the original), 20 bags of
+ *  16 = 320 slots in all. The save keeps one item list and the count bought, so only the cap changes */
+export const BAG_MAX = 17;
+/** bags shown in every bag column: the 3 free ones and every one that can be bought */
+export const BAG_COUNT = BAG_MAX + 3;
+
 export class Inventory {
   items: Item[] = [];                       // compacted list, length <= cap
   equip: (Item | null)[] = [null, null, null, null, null, null];
   quick: QuickSlot[] = Array.from({ length: 6 }, () => ({ kind: 0, id: 0, cd: 0, maxCd: 0, itemType: 0, itemSub: 0 }));
   gold = 0;
   cap = 48;
-  /** purchased bags +0x327C (0..2): capacity (bags + 3) * 16 = 48 / 64 / 80 */
+  /** purchased bags +0x327C (0..BAG_MAX, the original 0..2): capacity (bags + 3) * 16 = 48 / 64 / 80 … 320 */
   bags = 0;
-  setBags(n: number): void { this.bags = Math.max(0, Math.min(2, n)); this.cap = (this.bags + 3) * 16; }
+  setBags(n: number): void { this.bags = Math.max(0, Math.min(BAG_MAX, n)); this.cap = (this.bags + 3) * 16; }
   /** permanent unlock bits +0x32a5 (UNLOCK_1B index) */
   unlocks = 0;
   /** an unlock item (0x1b sub 1 / 9 / 10 / 13) is owned (FUN_0007b240 on +0x32a5) */

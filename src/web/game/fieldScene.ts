@@ -24,6 +24,7 @@ import { fxScale, optionFps } from '../../core/save/options';
 import { EventRunner } from './events';
 import { Popup } from './popup';
 import { deepestAbyss, extraPaid, itemKinds, markExtraPaid, records, recordAbyss, recordBoss, recordItem } from '../../core/rules/records';
+import { dropMul, killMul } from '../../core/rules/dev';
 import { extraCheck, extraKey, type ExtraChallenge } from '../../core/rules/extraChallenges';
 import { attend, fortunePrize, GOLDEN_EGG } from '../../core/rules/attendance';
 import { untrackKey } from './questTab';
@@ -168,7 +169,7 @@ export class FieldScene implements Scene {
   dim: DimRun | null = null;
   /** set when the run ends: the play scene reloads the slot (the save made before entering) */
   reloadRequest = false;
-  /** the open game menu should close (entering the dimension from the community menu) */
+  /** the open game menu should close (entering the dimension from the community menu, a return stone used from the bag) */
   closeMenu = false;
   /** runtime mapType DAT_003b3aae: the header value, 0 after load on maps < 0x165 (FUN_00017838), 2 from DANGER_ON */
   mapType = 0;
@@ -1315,17 +1316,24 @@ export class FieldScene implements Scene {
   private grantDimKill(m: Monster, extra = 0): void {
     const run = this.dim!, f = (this.field.mapId - run.first) & 0xff, boss = m.type === run.boss;
     if (m.dimIdx >= 0 && run.alive[f]) run.alive[f][m.dimIdx] = false;
-    run.kills++;
-    this.achieve({ k: 'kill', type: m.type, garden: false });
-    let exp = killExp(this.rng, m.level, this.model.level, m.typeRec[4], 0, false);
-    if (this.mapType >= 2) exp *= 10;
-    exp = rdiv(exp * (100 + (this.stats.D[19] ?? 0) / 10), 100);
-    if (run.depth) exp = rdiv(exp * (100 + 10 * run.depth), 100);     // 심연 (not in the original): +10 % per depth
+    let exp = 0;
+    for (let i = 0, n = killMul(); i < n; i++) {                       // 개발자 모드: ×N = N kills (grantKill)
+      run.kills++;
+      this.achieve({ k: 'kill', type: m.type, garden: false });
+      let e = killExp(this.rng, m.level, this.model.level, m.typeRec[4], 0, false);
+      if (this.mapType >= 2) e *= 10;
+      e = rdiv(e * (100 + (this.stats.D[19] ?? 0) / 10), 100);
+      if (run.depth) e = rdiv(e * (100 + 10 * run.depth), 100);       // 심연 (not in the original): +10 % per depth
+      exp += e;
+    }
     this.hud.label(`+${exp * 2} EXP`, m.x, m.y - 40);
     run.pool += exp * 2;
     this.grantExp(exp * 2);
-    const drops = rollDimDrops(this.rng, this.db, m, boss, this.stats.goldPct, this.db.tier2);
-    if (extra) drops.push(...rollDimDrops(this.rng, this.db, m, false, this.stats.goldPct, this.db.tier2));
+    const drops: GroundItem[] = [];
+    for (let i = 0, n = dropMul(); i < n; i++) {
+      drops.push(...rollDimDrops(this.rng, this.db, m, boss, this.stats.goldPct, this.db.tier2));
+      if (i === 0 ? extra : secondDrop(this.rng)) drops.push(...rollDimDrops(this.rng, this.db, m, false, this.stats.goldPct, this.db.tier2));
+    }
     for (const g of drops) if (this.ground.length < 25) this.ground.push(g);
     if (boss) {
       run.clearT = 200;
@@ -1443,32 +1451,45 @@ export class FieldScene implements Scene {
     this.ctx.audio.playSfx(0x2b);
     const extra = secondDrop(this.rng) ? 1 : 0;                       // track 9 행운의 동전 (account.md §2.4)
     if (this.gardenMode === 2 && this.dim) { this.grantDimKill(m, extra); return; }
-    let exp = killExp(this.rng, m.level, model.level, m.typeRec[4], 0, this.hard);
-    const mt = this.mapType;
-    if (mt >= 2) exp *= 10;                                            // FUN_0006ca90: special maps ×10
-    else if (mt === 0 && this.dayPh === 2) exp = rdiv(exp * 130, 100);  // night ×1.3
-    if (this.lap >= 4) exp = rdiv(exp * 150, 100);                    // 3회차 (not in the original): ×1.5
+    // 개발자 모드 (core/rules/dev.ts): exp ×N is N kills, each rolled and counted like one; drops ×N is N drop rolls
+    const kills = killMul(), mt = this.mapType;
+    let exp = 0;
+    for (let i = 0; i < kills; i++) {
+      let e = killExp(this.rng, m.level, model.level, m.typeRec[4], 0, this.hard);
+      if (mt >= 2) e *= 10;                                            // FUN_0006ca90: special maps ×10
+      else if (mt === 0 && this.dayPh === 2) e = rdiv(e * 130, 100);   // night ×1.3
+      if (this.lap >= 4) e = rdiv(e * 150, 100);                      // 3회차 (not in the original): ×1.5
+      exp += e;
+    }
     hud.label(`+${exp} EXP`, m.x, m.y - 40);
     // drops: 1, a second one with the account trait 9 chance (extra), objects 116..140
     const who = { cls: model.cls, luck: this.stats.luck, goldPct: this.stats.goldPct, hard: this.hard, pLevel: model.level, cap10: this.field.map.header.zone === 13 };
-    const drops = m.isBoss
-      ? (m.type === 38 && this.gardenMode === 0 ? [] : rollBossDrops(this.rng, this.db, m, who))   // FUN_00037fe4 (Epsilon drops nothing on normal maps)
-      : [rollDrop(this.rng, this.db, m, who), ...(extra ? [rollDrop(this.rng, this.db, { ...m, type: m.type, level: m.level, x: m.x + this.rng.rand(10) - 10, y: m.y }, who)] : [])]
-        .filter((g): g is GroundItem => !!g);
+    const drops: GroundItem[] = [];
+    for (let i = 0, n = dropMul(); i < n; i++) {
+      if (m.isBoss) {
+        if (!(m.type === 38 && this.gardenMode === 0)) drops.push(...rollBossDrops(this.rng, this.db, m, who));   // FUN_00037fe4 (Epsilon drops nothing on normal maps)
+        continue;
+      }
+      const x2 = i === 0 ? extra : secondDrop(this.rng) ? 1 : 0;
+      drops.push(...[rollDrop(this.rng, this.db, m, who), ...(x2 ? [rollDrop(this.rng, this.db, { ...m, type: m.type, level: m.level, x: m.x + this.rng.rand(10) - 10, y: m.y }, who)] : [])]
+        .filter((g): g is GroundItem => !!g));
+    }
     for (const g of drops) {
       if (!g.item && this.dayPh === 2) g.gold = rdiv(g.gold * 130, 100);   // night gold ×1.3 (FUN_0003b9c8)
       if (this.ground.length < 25) this.ground.push(g);
     }
-    this.achieve({ k: 'kill', type: m.type, garden: this.gardenMode === 1 });
     this.killedHere = true;
-    if (this.gardenMode !== 2 && !this.sandbox) {
-      this.quests.onKill(m.type);
-      this.story.recordKill(m.type, this.field.map.header.zone);
-    }
-    if (m.isBoss) {                                                    // 보스 기록 (not in the original)
-      const clean = m.firstHit >= 0 && this.lastHurt < m.firstHit;
-      recordBoss(m.type, m.firstHit >= 0 ? this.tick - m.firstHit : -1, clean,
-        this.gardenMode === 0 && this.field.map.header.mapType === 2 && this.field.mapId < 0x165 ? this.field.mapId : -1);
+    for (let i = 0; i < kills; i++) {
+      this.achieve({ k: 'kill', type: m.type, garden: this.gardenMode === 1 });
+      if (this.gardenMode !== 2 && !this.sandbox) {
+        this.quests.onKill(m.type);
+        this.story.recordKill(m.type, this.field.map.header.zone);
+      }
+      if (m.isBoss) {                                                  // 보스 기록 (not in the original)
+        const clean = m.firstHit >= 0 && this.lastHurt < m.firstHit;
+        recordBoss(m.type, m.firstHit >= 0 ? this.tick - m.firstHit : -1, clean,
+          this.gardenMode === 0 && this.field.map.header.mapType === 2 && this.field.mapId < 0x165 ? this.field.mapId : -1);
+      }
     }
     this.grantExp(exp);
     if (m.isBoss) {                                  // FUN_00061bb0: the boss event 200 frames later
@@ -1710,6 +1731,7 @@ export class FieldScene implements Scene {
     if (this.vitals.hp * 10 <= this.stats.maxHp) this.achieve({ k: 'lowHpReturn' });
     this.warpT = 0;
     this.vitals.invuln = 10;
+    this.closeMenu = true;                                             // used from the inventory: every menu closes for the warp
     return this.consume(idx);
   }
 

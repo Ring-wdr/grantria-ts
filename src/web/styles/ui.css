@@ -386,6 +386,9 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 }
 .v-scroll::-webkit-scrollbar { width: 3px; }
 .v-scroll::-webkit-scrollbar-thumb { background: #5d7092; border-radius: 2px; }
+/* bag columns (up to 20 bags, 5 in view): scroll without a bar, the cut-off next bag shows there is more */
+.ui-view .v-scroll.v-bagcol { scrollbar-width: none; }
+.v-scroll.v-bagcol::-webkit-scrollbar { display: none; }
 .v-left { text-align: left; }
 .v-rule { height: 1px; background: #9ecad7; margin: 4px 0; flex: none; }
 .v-kv { gap: 8px; line-height: 16px; }
@@ -396,6 +399,8 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 /* settings rows: label | ◀ values ▶ */
 .v-opt-set { min-height: 22px; border-radius: 4px; padding: 0 2px; transition: background var(--tick) ease-out; }
 .v-opt-set.cur { background: rgba(141, 241, 242, 0.12); }
+/* more than 7 settings rows (풀스크린 + 키 설정 + 개발자 모드): shorter rows so all fit without scrolling */
+.v-opt-dense > .v-opt-set { min-height: 16px; }
 .v-opt-label { width: 56px; flex: none; text-align: center; }
 .v-opt-value { color: #666; letter-spacing: 1px; padding: 1px 4px; border-radius: 3px; transition: color var(--tick), background var(--tick); }
 .v-opt-value.on { color: #fff; background: rgba(66, 154, 198, 0.45); }

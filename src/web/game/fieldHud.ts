@@ -60,7 +60,7 @@ export const FIELD_ZONES: { x: number; y: number; w: number; h: number; key: num
   { x: 156, y: 2, w: 32, h: 32, key: -30 },
   { x: 0, y: 75, w: 80, h: 70, key: AVK.MAP },                     // minimap -> map tab                         // gate icon -> community menu
   { x: 322, y: 0, w: 52, h: 32, key: -7 },                          // SHOP -> premium shop
-  { x: 410, y: 55, w: 76, h: 30, key: AVK.LOG, mouseOnly: true },   // 대사 로그 (not drawn on touch; was the coupon shop button)
+  { x: 410, y: 55, w: 76, h: 30, key: AVK.LOG, edge: 1 },          // 대사 로그 (was the coupon shop button, which touch did not show)
   { x: 427, y: 104, w: 50, h: 50, key: AVK.CLR, edge: 1 },
   { x: 361, y: 157, w: 50, h: 50, key: AVK.STAR, edge: 1 },
   { x: 427, y: 157, w: 50, h: 50, key: AVK.POUND, edge: 1 },
@@ -338,9 +338,9 @@ export class FieldHud {
     // QUEST / SAVE / SHOP (the original swaps the QUEST/SHOP highlight) and 대사 로그 (not in the original)
     for (const [lit, icon, label, x] of [[12, 'quest', 'QUEST', 194], [11, 'save', 'SAVE', 258], [10, 'shop', 'SHOP', 322]] as const)
       u.el(`t-pill${on(idx === lit)}`, x, 6, 52, 20, { html: `${ICONS[icon]}<span>${label}</span>` });
-    // 대사 로그 where the coupon shop button was (the shop stays in the community menu); keyboard / pad / mouse only,
-    // touch opens the log from the dialogue box
-    if (!touch) u.el(`t-pill${on(idx === 14)}`, W - 0x50, H - 0x102, 0x4c, 22, { html: `${ICONS.log}<span>대사 로그</span>` });
+    // 대사 로그 where the coupon shop button was (the shop stays in the community menu), on every device; it moves out
+    // with the right cluster on a wide touch screen
+    u.el(`t-pill${on(idx === 14)}`, W - 0x50 + e, H - 0x102, 0x4c, 22, { html: `${ICONS.log}<span>대사 로그</span>` });
     if (inp.device !== 'touch') this.padHints();
   }
 
@@ -370,7 +370,7 @@ export class FieldHud {
     hint(AVK.MAP, 4, 47);
     hint(HUD.QUEST, 194 + 44, 6 + 12);                                       // d-pad on the field (PAD_FIELD)
     hint(HUD.SHOP, 322 + 44, 6 + 12);
-    hint(AVK.LOG, W - 0x50 + 0x4c - 8, H - 0x102 + 14);
+    hint(AVK.LOG, W - 0x50 + e + 0x4c - 8, H - 0x102 + 14);
     hint(HUD.COMMUNITY, 156 + 24, 2 + 24);                                  // gate icon -> community                                                    // minimap -> map tab
   }
 

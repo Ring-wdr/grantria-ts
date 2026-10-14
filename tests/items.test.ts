@@ -50,3 +50,35 @@ test('item levels follow FUN_000369b0 (consumables read d+0x2466b)', { skip }, (
   assert.equal(db.create(0x18, 0, 0, rng).reqLevel, 1);                    // other types: 1
   assert.equal(db.itemLevel(0, 4), ddat[0x24655 + 4]);                     // equipment: d+0x24655
 });
+
+test('bags: up to BAG_MAX bought, 20 bags of 16 in all', async () => {
+  const { Inventory, BAG_MAX, BAG_COUNT } = await import('../src/core/rules/items.ts');
+  const inv = new Inventory(db);
+  inv.setBags(99);
+  assert.deepEqual([inv.bags, inv.cap, BAG_COUNT], [BAG_MAX, 320, 20]);
+  inv.setBags(-1);
+  assert.deepEqual([inv.bags, inv.cap], [0, 48]);
+});
+
+test('일괄 분해 takes the picks from the back and keeps the bag room check', { skip }, async () => {
+  const { Inventory } = await import('../src/core/rules/items.ts');
+  const { decomposeMany } = await import('../src/core/rules/shopRules.ts');
+  const { bulkSellPick } = await import('../src/core/rules/bulkSell.ts');
+  let seed = 7;
+  const rng = { rand: (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return n > 0 ? seed % n : 0; } } as never;
+  const inv = new Inventory(db);
+  const item = (type: number, sub: number, grade: number, enh = 0) => ({ type, sub, grade, base: 10, icon: 0, count: 1, enh, level: 20, reqLevel: 20,
+    aux: 0, sockets: [0xff, 0xff, 0xff, 0xff, 0xff], options: [] as [number, number][], name: '' });
+  inv.items.push(item(0, 4, 0), item(0x1b, 0x1b, 0), item(0, 5, 1), item(0, 6, 0, 3), item(0, 4, 4));
+  const picks = bulkSellPick(inv.items, 1);
+  assert.deepEqual(picks, [0, 2]);                                      // no premium, enhanced or grade-4 item
+  let n = 0;
+  const r = decomposeMany(db, inv, picks, rng, () => n++);
+  assert.deepEqual([r.done, n, r.full], [2, 2, false]);
+  assert.ok(inv.items.some((it) => it.type === 0x1b && it.sub === 0x1b));   // the coupon stays
+  assert.equal(inv.items.filter((it) => it.type < 0x10).length, 2);
+  assert.ok(r.gains.every(([t]) => t === 0x15 || t === 0x16));
+  inv.cap = inv.items.length + 2;                                       // no room: nothing taken
+  const r2 = decomposeMany(db, inv, bulkSellPick(inv.items, 4), rng);
+  assert.deepEqual([r2.done, r2.full], [0, true]);
+});

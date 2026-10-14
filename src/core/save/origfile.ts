@@ -144,16 +144,23 @@ export function parseSlot(b: Uint8Array, gd: Partial<OrigAccount> | null, slot: 
   };
 }
 
+/** items a slot loses on export to the original file (past its 80 slots) */
+export function origOverflow(d: SaveData): number { return Math.max(0, (d.inv?.items.length ?? 0) - 80); }
+
 /** web SaveData -> plaintext slot (over the imported bytes when present), member number and checksum */
 export function buildSlot(d: SaveData & { orig?: SlotOrig }, member: bigint): Uint8Array {
   const b = d.orig?.raw ? unb64(d.orig.raw) : new Uint8Array(SLOT_SIZE), dv = new DataView(b.buffer);
   const inv = d.inv ?? { items: [], equip: [null, null, null, null, null, null], quick: [], gold: d.gold, bags: 0 };
   const t = d.playTicks || 1;
-  for (let i = 0; i < 100; i++) putItem(b, i * ITEM, inv.items[i], t);
+  // the original buys 2 bags at most (80 slots): more bags (BAG_MAX) export as 2, and items past slot 80 are left out
+  const bags = Math.min(2, inv.bags ?? 0), items = inv.items.slice(0, (bags + 3) * 16);
+  for (let i = 0; i < 100; i++) putItem(b, i * ITEM, items[i], t);
   for (let k = 0; k < 6; k++) putItem(b, 0x23f0 + k * ITEM, inv.equip[k], t);
   for (let k = 0; k < 17; k++) putItem(b, 0x2618 + k * ITEM, inv.keys ? inv.keys[k] ?? null : d.orig?.questItems?.[k] ?? null, t);   // key store
   for (let k = 0; k < 6; k++) {
-    const q = inv.quick[k] ?? { kind: 0, id: 0, cd: 0, maxCd: 0, itemType: 0, itemSub: 0 }, o = 0x2c34 + 8 * k;
+    let q = inv.quick[k] ?? { kind: 0, id: 0, cd: 0, maxCd: 0, itemType: 0, itemSub: 0 };
+    if (q.kind === 2 && q.id >= items.length) q = { kind: 0, id: 0, cd: 0, maxCd: 0, itemType: 0, itemSub: 0 };   // its item was left out
+    const o = 0x2c34 + 8 * k;
     dv.setInt16(o, q.cd, true); dv.setInt16(o + 2, q.maxCd, true); dv.setInt16(o + 4, q.id, true); b[o + 6] = q.kind; b[o + 7] = q.itemType ?? 0;
   }
   const s = d.story;
@@ -185,8 +192,7 @@ export function buildSlot(d: SaveData & { orig?: SlotOrig }, member: bigint): Ui
   b.set([...(d.skills ?? []), ...new Array(16).fill(0)].slice(0, 16), 0x3141);
   b[0x31c9] = d.cls; b[0x31cb] = ~(d.skillPoints ?? 0) & 0xff; b[0x31cd] = ~d.level & 0xff;
   b[0x31ce] = (b[0x31ce] & 0xfc) | (d.dir & 3);
-  b[0x3279] = inv.items.length; b[0x3290] = d.returnZone ?? 0;
-  const bags = inv.bags ?? 0;
+  b[0x3279] = items.length; b[0x3290] = d.returnZone ?? 0;
   b[0x327c] = bags; b[0x31cc] = (bags + 3) * 16;
   b[0x32a5] = (b[0x32a5] & 0xf0) | ((inv.unlocks ?? 0) & 0x0f);                // permanent unlock bits
   b[0x32a7] = d.packs?.[0] ?? 0; b[0x32a8] = d.packs?.[1] ?? 0;               // AP / SP packs

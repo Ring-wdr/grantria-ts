@@ -11,7 +11,7 @@ import '../styles/shop.css';
 import '../styles/convenience.css';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import type { Item } from '../../core/rules/items';
+import { BAG_COUNT, type Item } from '../../core/rules/items';
 import { Popup } from './popup';
 import type { GameContext } from './scene';
 import {
@@ -81,6 +81,8 @@ export class ShopScreen {
   /** 되사기: items sold during this visit (newest first) with the gold they brought */
   private sold: { it: Item; qty: number; value: number }[] = [];
   private bbSel = 0;
+  /** list 0x15 bag column scroll (up to BAG_COUNT bags) */
+  private bagScroll: ScrollRef = { y: 0 };
   /** 일괄 판매: highest grade taken, focus 0 = sell, 1 = cancel */
   private bulk = { grade: 0, focus: 0 as 0 | 1 };
 
@@ -112,7 +114,7 @@ export class ShopScreen {
   }
   private get inv() { return this.fs.inv; }
   private get region(): number { return shopRegion(this.fs.field.map.header.zone, this.fs.field.mapId); }
-  /** sell / enhance list the player's bags (3 + purchased, up to 5), buy lists the stock pages */
+  /** sell / enhance list the player's bags (3 + purchased, up to BAG_COUNT), buy lists the stock pages */
   private get bags(): number { return this.action === 1 || this.action === 2 ? this.inv.bags + 3 : Math.max(1, Math.ceil(this.stock.length / 16)); }
   private get idx(): number { return this.bag * 16 + this.sel; }
   private listItem(): Item | undefined { return this.action === 1 || this.action === 2 ? this.inv.items[this.idx] : this.stock[this.idx]; }
@@ -735,7 +737,8 @@ export class ShopScreen {
     const price = this.focus === 1 && cur && (this.action === 0
       ? this.gold(this.kind === 3 ? priceOf(this.a, cur) * (cur.type < 0x10 ? 15 : 10) : shownBuyPrice(this.a, cur))
       : this.action === 1 ? this.gold(shownSellPrice(this.a, cur)) : null);
-    const bags = Array.from({ length: this.bags }, (_, i) => button(sprite('t', 15, 24, 16, 16), {
+    this.bagScroll.follow = this.bag;
+    const bags = Array.from({ length: Math.min(this.bags, BAG_COUNT) }, (_, i) => button(sprite('t', 15, 24, 16, 16), {
       sel: i === this.bag, glow: this.focus === 0, cls: 'shop-bag',
       on: () => { this.focus = 0; if (this.bag !== i) { this.bag = i; this.sel = 0; } },
     }));
@@ -748,7 +751,7 @@ export class ShopScreen {
     });
     return this.frame(this.focus === 1 && cur && gt(cur.name), price,
       h('div.v-row.v-grow.shop-list', null,
-        h('div.v-col.shop-bags', null, bags,
+        h('div.v-col.shop-bags', null, h('div.v-col.v-scroll.v-bagcol.shop-bag-list', { scroll: this.bagScroll }, bags),
           !sellMode && h('div.v-box.shop-count-box', null, `${inv.items.length}/${inv.cap}`)),
         h('div.v-box.shop-grid', null, cells)),
       h('div.v-row.shop-foot', null,

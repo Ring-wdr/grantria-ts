@@ -80,8 +80,9 @@
 
 /* list 0x15: bag keycaps | 4x4 grid */
 .shop-list { gap: 9px; align-items: stretch; padding-left: 2px; }
-.shop-bags { width: 30px; flex: none; gap: 5px; }
-.ui-view .shop-bag { width: 30px; height: 30px; padding: 0; }
+.shop-bags { width: 30px; flex: none; gap: 5px; min-height: 0; }
+.shop-bag-list { flex: 1 1 0; min-height: 0; gap: 5px; padding: 5px; margin: -5px; }   /* room for the selection glow (tabs.css .tb-bags) */
+.ui-view .shop-bag { width: 30px; height: 30px; padding: 0; flex: none; }
 .shop-count-box { margin-top: auto; height: 24px; display: flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; white-space: nowrap; letter-spacing: -0.5px; }
 .shop-grid {
   flex: 1 1 auto;

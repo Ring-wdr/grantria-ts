@@ -218,6 +218,28 @@ export function decompose(db: ItemDb, inv: Inventory, idx: number, rng: Rng, pay
   return gains;
 }
 
+/** 일괄 분해 (not in the original): decompose (no fee, the 마법 해체기 way) each pick from the last one, so the
+ *  earlier indexes stay valid. Stops when the bag lacks the room the single decompose asks for (items + 2 < cap,
+ *  shop precheck code 2) or a material stack would pass 9999. `onEach` runs per item (the 해체 achievement). */
+export function decomposeMany(db: ItemDb, inv: Inventory, picks: readonly number[], rng: Rng, onEach: () => void = () => {}):
+  { done: number; gains: [number, number, number][]; full: boolean } {
+  const sum = new Map<string, [number, number, number]>();
+  let done = 0, full = false;
+  for (const i of [...picks].sort((a, b) => b - a)) {
+    if (!inv.items[i] || inv.items[i].type >= 0x10) continue;
+    if (inv.items.length + 2 >= inv.cap) { full = true; break; }
+    const g = decompose(db, inv, i, rng, false);
+    if (!g) { full = true; break; }
+    done++;
+    onEach();
+    for (const [t, s, c] of g) {
+      const k = `${t}:${s}`, e = sum.get(k);
+      if (e) e[2] += Math.max(c, 1); else sum.set(k, [t, s, Math.max(c, 1)]);
+    }
+  }
+  return { done, gains: [...sum.values()], full };
+}
+
 // ---- combine (recipes 0x19) ----
 export interface Need { type: number; sub: number; count: number; }
 export function combineNeeds(a: Assets, rec: Item): Need[] {

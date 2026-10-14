@@ -581,9 +581,10 @@ export class PlayScene implements Scene {
       return;
     }
     if (this.shop) { if (this.shop.update(presses) === 'close') this.shop = null; return; }
+    if (!this.menu) this.field.closeMenu = false;                    // a return stone from a quick slot: no menu to close
     if (this.menu) {
       const r = this.menu.update(presses);
-      if (r === 'close' || this.field.closeMenu) { this.menu = null; this.field.closeMenu = false; }   // entering the dimension closes the menu
+      if (r === 'close' || this.field.closeMenu) { this.menu = null; this.field.closeMenu = false; }   // entering the dimension or a return stone closes the menu
       else if (r === 'title') this.pause = new Popup(this.ctx, 10);
       else if (r === 'save' && this.field.canSave) this.askSave = new Popup(this.ctx, 8);   // menu save: silent where not allowed
       else if (r === 'launch') {                                     // 기록실 → 보스 기록: 보스 러시 on a copy of the slot (sandbox.ts)

@@ -2,9 +2,10 @@
 // original save.dat / gamedata.dat through file upload and download (account.md §5.3).
 import { account, resetAccountCache, saveAccount } from '../../core/rules/account';
 import { resetRecordsCache } from '../../core/rules/records';
+import { resetDevCache } from '../../core/rules/dev';
 import { resetReadLogCache } from '../../core/save/readLog';
 import { AVK } from '../input/input';
-import { SAVE_SIZE, SLOT_SIZE, backupJson, buildGamedata, buildOption, buildSlot, fileKind, memberFromName, parseGamedata, parseOption, parseSlot, restoreJson, xtea, type OrigAccount } from '../../core/save/origfile';
+import { SAVE_SIZE, SLOT_SIZE, backupJson, buildGamedata, buildOption, buildSlot, fileKind, origOverflow, memberFromName, parseGamedata, parseOption, parseSlot, restoreJson, xtea, type OrigAccount } from '../../core/save/origfile';
 import { loadOptions, saveOptions } from '../../core/save/options';
 import { SLOT_COUNT, loadSlot, saveSlot, type SaveData } from '../../core/save/save';
 import type { GameContext, Scene } from './scene';
@@ -106,7 +107,7 @@ export class DataScene implements Scene {
         if (f) {
           const n = restoreJson(new TextDecoder().decode(f.bytes));
           // drop every in-memory copy of what the backup replaced, or the next write puts the old one back
-          resetAccountCache(); resetRecordsCache(); resetReadLogCache();
+          resetAccountCache(); resetRecordsCache(); resetDevCache(); resetReadLogCache();
           this.ctx.options = loadOptions(); this.ctx.applyOptions();
           this.msg = `백업을 복원했습니다 (${n}개 항목).`;
         }
@@ -118,7 +119,9 @@ export class DataScene implements Scene {
         const input = await platform().prompt('회원번호 (원본 파일 이름의 숫자 접미사, 모르면 0)', known);
         if (input !== null && /^\d+$/.test(input.trim())) {
           for (const f of exportOriginal((o) => this.ctx.assets.d8(o), BigInt(input.trim()))) await download(f.name, f.bytes);
-          this.msg = '원본 세이브 파일을 내려받았습니다.';
+          // the original holds 80 bag slots: more bags (BAG_MAX) do not go into its file
+          const lost = Array.from({ length: SLOT_COUNT }, (_, k) => loadSlot(k)).reduce((n, d) => n + (d ? origOverflow(d) : 0), 0);
+          this.msg = lost ? `원본 세이브 파일을 내려받았습니다. 원본 가방(80칸)을 넘는 아이템 ${lost}개는 빠졌습니다.` : '원본 세이브 파일을 내려받았습니다.';
         }
       }
     } catch (e) { this.msg = `실패: ${(e as Error).message}`; }

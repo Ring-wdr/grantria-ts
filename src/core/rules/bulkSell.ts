@@ -1,6 +1,7 @@
-// 일괄 판매 (not in the original): which bag items a "sell everything up to grade N" order takes. Only plain
-// equipment: no enhanced items, nothing with a gem in a socket, never quest / key / premium items (the shop
-// refuses those anyway, shop.ts precheck code 7). Equipped items are not in the bag list.
+// 일괄 판매 / 일괄 버리기 / 일괄 분해 (not in the original): which bag items an "everything up to grade N" order takes.
+// Only plain equipment: no enhanced items, nothing with a gem in a socket, never quest / key / premium (0x1b, coupon
+// shop) items or materials (the shop refuses those anyway, shop.ts precheck code 7). Equipped items are not in the
+// bag list.
 import type { Item } from './items';
 
 export function bulkSellPick(items: readonly (Item | null | undefined)[], maxGrade: number): number[] {

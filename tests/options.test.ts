@@ -39,3 +39,19 @@ test('fullscreen follows the screen until the player sets it', () => {
   saveOptions({ ...defaultOptions(), fullscreen: 1, fullscreenSet: 1 });
   assert.equal(loadOptions().fullscreen, 1);
 });
+
+test('개발자 모드: whole-number multipliers, off until unlocked, lock resets them', async () => {
+  const { dev, dropMul, killMul, lockDev, resetDevCache, saveDev, unlockDev } = await import('../src/core/rules/dev.ts');
+  platform().storage.set('grantria.dev', JSON.stringify({ unlocked: false, killMul: 3, dropMul: 2 }));
+  resetDevCache();
+  assert.deepEqual([killMul(), dropMul()], [1, 1]);                    // locked: the original rates
+  unlockDev();
+  assert.deepEqual([killMul(), dropMul()], [3, 2]);
+  platform().storage.set('grantria.dev', JSON.stringify({ unlocked: true, killMul: 1.5, dropMul: 99 }));
+  resetDevCache();
+  assert.deepEqual([dev().killMul, dev().dropMul], [1, 1]);            // fractions and out-of-range fall back to ×1
+  dev().killMul = 4; saveDev(); resetDevCache();
+  assert.equal(killMul(), 4);
+  lockDev(); resetDevCache();
+  assert.deepEqual(dev(), { unlocked: false, killMul: 1, dropMul: 1 });
+});

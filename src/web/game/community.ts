@@ -6,7 +6,7 @@ import { account, saveAccount } from '../../core/rules/account';
 import { cfmt } from '../../core/data/skillDetail';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { UNLOCK_1B, type Item } from '../../core/rules/items';
+import { BAG_COUNT, BAG_MAX, UNLOCK_1B, type Item } from '../../core/rules/items';
 import { Popup } from './popup';
 import { Rng } from '../../core/rules/rules';
 import { loadWarehouse, saveWarehouse } from '../../core/save/save';
@@ -68,9 +68,9 @@ function itemCell(fs: FieldScene, it: Item): VNode[] {
 /** save after a grant the way FUN_00020024 does: at once where saving is allowed outside the garden */
 function grantSave(fs: FieldScene): void { if (fs.canSave && fs.gardenMode === 0) fs.autosave(); }
 
-/** bag expansion (popup 0x7E yes, FUN_00053510 case 0x44): 25 coupons, at most 2 bags (48 -> 64 -> 80) */
+/** bag expansion (popup 0x7E yes, FUN_00053510 case 0x44): 25 coupons, at most BAG_MAX bags (the original 2: 48 -> 64 -> 80) */
 export function buyBag(ctx: GameContext, fs: FieldScene): Popup {
-  if (fs.inv.bags >= 2) return new Popup(ctx, 0x65);
+  if (fs.inv.bags >= BAG_MAX) return new Popup(ctx, 0x65);
   if (coupons(fs) < BAG_PRICE) return new Popup(ctx, 0x7d);
   consume(fs.inv, COUPON[0], COUPON[1], BAG_PRICE);
   fs.inv.setBags(fs.inv.bags + 1);
@@ -190,11 +190,11 @@ class PremiumShop {
 
   private buy(): void {
     const fs = this.fs, [id, price, qty] = PREMIUM[this.cur];
-    // FUN_00054cb8: bag at most 2, stacks at most 9999, unlock items (1 / 9 / 10 / 13) once (+0x32a5 bit) -> 0x65
+    // FUN_00054cb8: bag at most 2 (BAG_MAX here), stacks at most 9999, unlock items (1 / 9 / 10 / 13) once (+0x32a5 bit) -> 0x65
     const unlock = (UNLOCK_1B as readonly number[]).includes(id);
     const packCount = id === 0x2f ? account().traitBought : id === 0x31 ? fs.packs[0] : fs.packs[1];
     const capped = POINT_PACKS.has(id) ? packCount > 9
-      : id === 8 ? fs.inv.bags >= 2 : unlock ? fs.inv.unlocked(id) : STACKED.has(id) && countOf(fs.inv, 0x1b, id) + qty > COUPON_MAX;
+      : id === 8 ? fs.inv.bags >= BAG_MAX : unlock ? fs.inv.unlocked(id) : STACKED.has(id) && countOf(fs.inv, 0x1b, id) + qty > COUPON_MAX;
     if (capped) { this.popup = { p: new Popup(this.ctx, 0x65) }; return; }
     if (coupons(fs) < price) { this.popup = { p: new Popup(this.ctx, 0x7d), ok: () => { this.request = 'coupon'; } }; return; }
     this.popup = { p: couponCard(this.ctx, fs, 0x4c, id, price, qty > 1 ? `${this.name(id)} x${qty}` : this.name(id)), yes: () => {
@@ -272,6 +272,8 @@ class Storage {
   request: 'premium' | null = null;
   /** 골드전송 input (DAT_00403420, thousands) while the pad is open (DAT_003b3c6e) */
   private goldPad: string | null = null;
+  /** bag tab column scroll (the own bags go up to BAG_COUNT) */
+  private bagScroll: ScrollRef = { y: 0 };
   constructor(private ctx: GameContext, private fs: FieldScene, mode: 0 | 1) { this.mode = mode; }
 
   /** FUN_00043500: digits (up to 11, value at most 10000), '#' deletes, '*' sends, CLR closes. The original keypad's
@@ -385,8 +387,9 @@ class Storage {
    * the 4x4 item grid with the selected item's name, and the three buttons of the mode.
    */
   draw(u: Ui): void {
-    const t = this.ctx.assets.text, list = this.list(), n = this.bags();
-    const tabs = Array.from({ length: 5 }, (_, i) => button(
+    const t = this.ctx.assets.text, list = this.list(), n = this.bags(), shown = Math.min(BAG_COUNT, Math.max(5, n));
+    this.bagScroll.follow = this.bag;
+    const tabs = Array.from({ length: shown }, (_, i) => button(
       [sprite('t', 15, 24, 16, 16), i < n && digits(Math.max(0, Math.min(16, list.length - 16 * i)))], {
         sel: i === this.bag, glow: this.focus === 0,
         cls: `mc-bag${i >= n ? ' mc-off' : i === this.bag ? '' : ' mc-faint'}`,
@@ -409,7 +412,7 @@ class Storage {
       button(gt(t[this.mode === 0 ? 0x198 : 0x185] ?? ''), { sel: !!it, glow: false, cls: it ? 'mc-move-btn' : 'mc-move-btn mc-off', on: it ? () => [AVK.OK] : undefined }));
     u.mount('tab', 'storage', h('div.v-col.v-fill.v-tab', null,
       h('div.v-row.v-grow.mc-storage', null,
-        h('div.v-col.mc-bags', null, tabs),
+        h('div.v-col.v-scroll.v-bagcol.mc-bags', { cls: shown > 5 && 'many', scroll: this.bagScroll }, tabs),
         h('div.v-box.v-col.v-grow.mc-panel', null,
           h('div.v-row.mc-where', null, gt(t[this.mode === 0 ? 0x19e5 : 0x19e4] ?? '', { pen: 0xffe0 }), gt(`${list.length}/${this.mode === 0 ? this.fs.inv.cap : WAREHOUSE_SIZE}`)),
           h('div.mc-grid.mc-grid4', null, cells),

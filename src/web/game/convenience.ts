@@ -2,6 +2,7 @@
 // ↑↓ pick a row, ←→ / 5 change it (applied at once), Esc closes and saves. Every default is the original behaviour.
 import { AVK } from '../input/input';
 import { saveOptions, type Options } from '../../core/save/options';
+import { DEV_TAPS, dev, unlockDev } from '../../core/rules/dev';
 import type { GameContext } from './scene';
 import { gt, h, type ScrollRef, type VNode } from '../render/view';
 import '../styles/convenience.css';
@@ -39,12 +40,16 @@ const ROW_H = 20;
 export class ConveniencePanel {
   private cur = 0;
   private scroll: ScrollRef = { y: 0 };
+  /** 버프 표시 changed this many times in a row (개발자 모드 opens at DEV_TAPS), and the note shown when it did */
+  private taps = 0;
+  private note = '';
 
   constructor(private ctx: GameContext) {}
 
   /** false once closed (CLR) */
   update(presses: number[]): boolean {
     for (const k of presses) {
+      if (!((k === AVK.LEFT || k === AVK.RIGHT || k === AVK.OK) && ROWS[this.cur].key === 'hudBuffs')) this.taps = 0;
       if (k === AVK.UP) this.move((this.cur + ROWS.length - 1) % ROWS.length);
       else if (k === AVK.DOWN) this.move((this.cur + 1) % ROWS.length);
       else if (k === AVK.LEFT) this.change(-1);
@@ -56,6 +61,7 @@ export class ConveniencePanel {
 
   private move(i: number): void {
     this.cur = i;
+    this.note = '';
     const top = i * ROW_H, view = 6 * ROW_H;
     if (top < this.scroll.y) this.scroll.y = top;
     else if (top + ROW_H > this.scroll.y + view) this.scroll.y = top + ROW_H - view;
@@ -66,6 +72,10 @@ export class ConveniencePanel {
     // volumes stop at the ends; the other rows wrap like the original option rows
     o[r.key] = r.values ? (v + d + r.count) % r.count : Math.max(0, Math.min(r.count - 1, v + d));
     this.ctx.applyOptions();
+    if (r.key === 'hudBuffs' && ++this.taps >= DEV_TAPS && !dev().unlocked) {
+      unlockDev();
+      this.note = '개발자 모드가 열렸습니다. 환경설정 맨 아래에서 들어갈 수 있습니다.';
+    }
   }
 
   view(): VNode {
@@ -84,6 +94,6 @@ export class ConveniencePanel {
     return h('div.v-col.v-fill.v-tab', { style: 'gap:3px' },
       h('div.v-box.v-heading', null, gt('편의 설정')),
       h('div.v-box.v-grow.v-scroll.cv-list', { style: 'padding:4px 6px', scroll: this.scroll }, h('div.v-col', null, rows)),
-      h('div.v-box.km-foot.cv-foot', null, gt(ROWS[this.cur].help)));
+      h('div.v-box.km-foot.cv-foot', null, gt(this.note || ROWS[this.cur].help)));
   }
 }

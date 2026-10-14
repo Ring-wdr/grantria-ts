@@ -50,8 +50,10 @@
 
 /* inventory: bag column | name bar, 4x4 grid, gold + button */
 .v-row.tb-inv { gap: 6px; align-items: stretch; }
-.tb-bags { width: 34px; flex: none; justify-content: space-between; padding: 1px 2px; }
-.v-btn.tb-bag { width: 30px; height: 33px; padding: 0; }
+/* the column scrolls (clips at its padding box): 5px padding keeps the selection glow (.v-sel::after, 3px + ring + blur)
+   inside it, and the negative margin gives the same 34px footprint as before */
+.tb-bags { width: 40px; flex: none; justify-content: space-between; gap: 3px; padding: 5px; margin: -4px -3px; min-height: 0; }
+.v-btn.tb-bag { width: 30px; height: 33px; padding: 0; flex: none; }
 .tb-bag .v-col { gap: 0; line-height: 11px; }
 .tb-bag-n { color: #c8d6ee; letter-spacing: -0.5px; }
 .tb-bag.locked > .v-sprite:first-child { opacity: 0.35; filter: grayscale(1); }
@@ -70,6 +72,10 @@
 
 /* item detail (220x196 window) */
 .tb-detail { gap: 4px; padding: 7px; }
+/* 가방 관리 (bagTools.ts): opaque, the bag grid under it would show between its buttons */
+.u-window.tb-tools { background: rgb(32, 49, 69); }
+/* its help line is one or two lines: always two-line tall so the menu does not shift */
+.tb-tools > .v-note { height: calc(2lh + 2px); }
 .v-box.tb-detail-head { flex: none; gap: 8px; padding: 2px 6px 2px 2px; min-height: 30px; }
 .tb-enh { color: #ffe58a; flex: none; }
 .tb-sub { gap: 6px; color: #9cb4d6; line-height: 12px; }

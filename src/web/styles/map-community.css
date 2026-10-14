@@ -68,8 +68,10 @@
 
 /* ---- storage: bag tabs | 4x4 grid + item name ---- */
 .mc-storage { gap: 6px; align-items: stretch; }
-.mc-bags { width: 32px; flex: none; gap: 3px; }
+.mc-bags { width: 40px; flex: none; gap: 3px; padding: 4px; margin: -4px; }   /* room for the selection glow (tabs.css .tb-bags) */
 .mc-bag { flex: 1 1 0; min-height: 0; padding: 0; flex-direction: column; gap: 1px; }
+/* more than 5 bags (BAG_COUNT): the 5-tab height, the column scrolls */
+.mc-bags.many > .mc-bag { flex: none; height: 29px; }
 .mc-panel { align-items: center; justify-content: center; gap: 3px; padding: 3px 4px; }
 .mc-panel > .mc-grid4 { row-gap: 4px; }
 .mc-where { width: 100%; justify-content: space-between; padding: 0 4px; }

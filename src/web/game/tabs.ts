@@ -1,20 +1,21 @@
 // Inventory tab (0x1E) and equipment tab (0x1F, candidate select 0x2F) on the 1.3x layer,
 // ported from analysis/features/ui-tabs.md §0.4 / §0.5 (C220 coordinates unless noted).
 // Enhance / decompose / combine from the inventory open the shop screens (shop.md §2.9); socket reset
-// and gem attach / detach follow shop.md §2.8. Bag purchase: locked bag -> popup 0x7E (community.ts). 가방정리 ('#', FUN_0003b3a8(0)): Inventory.sortBag.
+// and gem attach / detach follow shop.md §2.8. Bag purchase: locked bag -> popup 0x7E (community.ts). 가방정리 ('#') opens
+// 가방 관리 (bagTools.ts, not in the original): 정렬 (the original FUN_0003b3a8(0), Inventory.sortBag), 일괄 버리기, 일괄 분해.
 import type { Cmf } from '../../core/data/assets';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
-import type { Item } from '../../core/rules/items';
+import { BAG_COUNT, type Item } from '../../core/rules/items';
 import { Popup, QtyPopup } from './popup';
-import { buyBag, coupons } from './community';
-import { josa, ShopScreen } from './shop';
-import { cfmt } from '../../core/data/skillDetail';
+import { buyBag } from './community';
+import { BagTools, buyCouponTool, couponToolPopup } from './bagTools';
+import { ShopScreen } from './shop';
 import { combineNeeds, countOf, consume } from '../../core/rules/shopRules';
 import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
-import { button, cSprite, gt, h, padBadge, sprite, type KeyAct, type VChild, type VNode } from '../render/view';
+import { button, cSprite, gt, h, padBadge, sprite, type KeyAct, type ScrollRef, type VChild, type VNode } from '../render/view';
 import '../styles/tabs.css';
 import { compareGear, equipSlot } from '../../core/rules/compare';
 import '../styles/convenience.css';
@@ -229,10 +230,14 @@ export class InventoryTab {
   private shop: ShopScreen | null = null;
   /** gem picker in the item detail ('0'): gem inventory indexes and the cursor */
   private gems: { list: number[]; cur: number } | null = null;
+  /** 가방 관리 panel ('#') */
+  private tools: BagTools | null = null;
+  /** bag column scroll (up to BAG_COUNT bags, 5 in view) */
+  private bagScroll: ScrollRef = { y: 0 };
 
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
-  get busy(): boolean { return !!(this.action || this.detail || this.quick || this.confirm || this.qty || this.message || this.shop); }
+  get busy(): boolean { return !!(this.action || this.detail || this.quick || this.confirm || this.qty || this.message || this.shop || this.tools); }
   /** the quick-slot picker is open (its slot keys must not page the menu) */
   get picking(): boolean { return !!this.quick; }
 
@@ -243,6 +248,10 @@ export class InventoryTab {
     if (this.f < 15) this.f++;
     const inv = this.fs.inv;
     if (this.shop) { if (this.shop.update(presses) === 'close') { this.shop = null; this.fs.recompute(); } return true; }
+    if (this.tools) {
+      if (!this.tools.update(presses)) { if (this.tools.toCoupons) this.toCoupons = true; this.tools = null; this.sel = Math.min(this.sel, 15); }
+      return true;
+    }
     if (this.message) {
       if (this.message.handle(presses)) { if (this.message.id === 0x7d) this.toCoupons = true; this.message = null; }   // 쿠폰 부족 → 쿠폰 구매
       return true;
@@ -297,10 +306,10 @@ export class InventoryTab {
     }
     for (const k of presses) {
       if (this.focus === 0) {
-        // the cursor also reaches the first locked bag (5 at most), where OK asks to buy it (popup 0x7E)
-        if (k === AVK.UP || k === AVK.DOWN) { const n = Math.min(5, inv.bags + 4); this.bag = (this.bag + (k === AVK.UP ? n - 1 : 1)) % n; this.sel = 0; this.f = 0; }
+        // the cursor also reaches the first locked bag (BAG_COUNT at most), where OK asks to buy it (popup 0x7E)
+        if (k === AVK.UP || k === AVK.DOWN) { const n = Math.min(BAG_COUNT, inv.bags + 4); this.bag = (this.bag + (k === AVK.UP ? n - 1 : 1)) % n; this.sel = 0; this.f = 0; }
         else if (k === AVK.OK) { if (this.bag >= inv.bags + 3) this.askBag(); else this.focus = 1; }
-        else if (k === AVK.POUND) inv.sortBag();                       // 가방정리 (both foci)
+        else if (k === AVK.POUND) this.tools = new BagTools(this.ctx, this.fs);   // 가방정리 → 가방 관리 (both foci)
         else return false;                                            // common tab keys
       } else {
         const before = this.sel;
@@ -309,7 +318,7 @@ export class InventoryTab {
         else if (k === AVK.UP && this.sel >= 4) this.sel -= 4;
         else if (k === AVK.DOWN) this.sel = Math.min(this.sel + 4, 15);
         else if (k === AVK.OK) { if (inv.items[this.idx]) this.openActions(); }
-        else if (k === AVK.POUND) inv.sortBag();
+        else if (k === AVK.POUND) this.tools = new BagTools(this.ctx, this.fs);
         else if (k === AVK.CLR) this.focus = 0;
         else return false;
         if (this.sel !== before) this.f = 0;
@@ -407,21 +416,9 @@ export class InventoryTab {
    */
   private askCoupon(act: 2 | 3 | 4, idx: number): void {
     if (!this.fs.canSave) { this.message = new Popup(this.ctx, 0x6d); return; }
-    const t = this.ctx.assets.text, inv = this.fs.inv;
-    const sub = act === 2 ? 0x0c : act === 3 ? 10 : 9, cost = act === 2 ? 10 : 15;
-    const name = t[0x7fc + this.fs.db.model(0x1b, sub, 0)] ?? '';
-    const what = cfmt(t[act === 2 ? 0x1b32 : 0x1b33] ?? '', name);
-    const head = cfmt(t[0x1d0] ?? '', name, what);
-    this.confirm = { popup: new Popup(this.ctx, 0x49, 0, (s) => josa(cfmt(s, head, t[0x17b] ?? '', '', cost))), idx, yes: () => {
-      if (coupons(this.fs) < cost) { this.message = new Popup(this.ctx, 0x7d); return; }
-      const st = inv.items.find((x) => x.type === 0x1b && x.sub === 0x0c);     // FUN_0003632c(0x1b, 0xc, 0, 10) for all three
-      if (st ? st.count + 10 > 9999 : inv.items.length >= inv.cap) {
-        this.message = new Popup(this.ctx, 0x6a, 0, () => t[inv.bags < 2 ? 0x4f7 : 0x507] ?? '');
-        return;
-      }
-      consume(inv, 0x1b, 0x1b, cost);
-      inv.gain(0x1b, sub, 0, act === 2 ? 10 : 1, this.fs.rng);               // sub 9 / 10 set the permanent unlock bit
-      this.fs.autosave();
+    this.confirm = { popup: couponToolPopup(this.ctx, this.fs, act), idx, yes: () => {
+      const refused = buyCouponTool(this.ctx, this.fs, act);
+      if (refused) { this.message = refused; return; }
       this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: act === 2 ? 'enhance' : act === 3 ? 'combine' : 'decompose', idx });
     } };
   }
@@ -456,12 +453,16 @@ export class InventoryTab {
     if (this.shop) return;
     if (this.detail) { this.drawDetail(u, this.detail); return; }
     u.mount('tab', 'inv', this.mainView());
+    if (this.tools) u.mount('tab-over', 'bagTools', this.tools.view());
     if (this.quick) this.drawQuick(u);
   }
 
   private mainView(): VNode {
     const fs = this.fs, inv = fs.inv, t = this.ctx.assets.text, bags = inv.bags + 3;
-    const bagButtons = Array.from({ length: 5 }, (_, i) => {
+    // the owned bags and the locked ones up to the next one to buy (5 at least, as the original's column)
+    const shown = Math.min(BAG_COUNT, Math.max(5, bags + 1));
+    this.bagScroll.follow = this.bag;
+    const bagButtons = Array.from({ length: shown }, (_, i) => {
       if (i >= bags) {                                          // locked bag: popup 0x7E (25 coupons, FUN_00047488)
         return button([sprite('t', 15, 24, 16, 16), sprite('c', 208, 63, 7, 9, { cls: 'tb-lock' })], {
           sel: i === this.bag, glow: this.focus === 0, cls: 'tb-bag locked', on: () => this.askBag(),
@@ -489,7 +490,7 @@ export class InventoryTab {
     const cur = this.focus === 1 ? inv.items[this.idx] : undefined;
     return h('div.v-row.v-fill.tb-inv', null,
       this.action?.backdrop(),
-      h('div.v-col.tb-bags', null, bagButtons),
+      h('div.v-col.v-scroll.v-bagcol.tb-bags', { scroll: this.bagScroll }, bagButtons),
       h('div.v-col.v-grow', { style: 'gap:4px' },
         h('div.v-box.v-heading.tb-name', null, cur && gt(cur.name, { cls: 'tb-ellipsis' }), baseDelta(fs, cur)),
         h('div.v-box.v-grow.tb-grid', null, cells),
@@ -557,6 +558,7 @@ export class InventoryTab {
 
   drawPopups(): void {
     if (this.shop) { this.shop.drawOverlay(); return; }
+    this.tools?.drawPopup();
     if (this.qty && !this.message) this.qty.popup.draw();
     (this.message ?? this.confirm?.popup)?.draw();
   }

@@ -13,6 +13,8 @@ import { clipImage, DEFAULT_EQUIP } from '../render/sprites';
 import type { Cmf } from '../../core/data/assets';
 import { KeyMapPanel } from './keyMap';
 import { ConveniencePanel } from './convenience';
+import { DevPanel } from './devPanel';
+import { dev } from '../../core/rules/dev';
 import { ArchivePanel, RECORD_ROWS, type Launch } from './archive';
 import { platform } from '../../core/platform';
 
@@ -35,6 +37,8 @@ export class OptionTab {
   private keys: KeyMapPanel | null = null;
   /** 편의 설정 sub panel */
   private conv: ConveniencePanel | null = null;
+  /** 개발자 모드 sub panel (the row shows once unlocked, core/rules/dev.ts) */
+  private devp: DevPanel | null = null;
   /** 기록실 list cursor (-1 closed), the archive page opened from it, and what it asks the play scene to start */
   private records = -1;
   private archive: ArchivePanel | null = null;
@@ -49,11 +53,13 @@ export class OptionTab {
 
   get busy(): boolean { return this.setting || this.help >= 0 || this.book >= 0 || this.records >= 0; }
 
-  /** extra settings rows after the five options: 편의 설정, 풀스크린 on a touch-first screen, 키 설정 unless the player is on touch */
-  private get extraRows(): ('conv' | 'full' | 'keys')[] {
-    const r: ('conv' | 'full' | 'keys')[] = ['conv'];
+  /** extra settings rows after the five options: 편의 설정, 풀스크린 on a touch-first screen, 키 설정 unless the player
+   *  is on touch, 개발자 모드 once unlocked */
+  private get extraRows(): ('conv' | 'full' | 'keys' | 'dev')[] {
+    const r: ('conv' | 'full' | 'keys' | 'dev')[] = ['conv'];
     if (platform().touchFirst()) r.push('full');
     if (this.ctx.input.device !== 'touch') r.push('keys');
+    if (dev().unlocked) r.push('dev');
     return r;
   }
   private get settingRows(): number { return 5 + this.extraRows.length; }
@@ -67,6 +73,10 @@ export class OptionTab {
     this.t++;
     if (this.keys) { if (!this.keys.update(presses)) this.keys = null; return true; }
     if (this.conv) { if (!this.conv.update(presses)) this.conv = null; return true; }
+    if (this.devp) {                                                  // closed; the row is gone when the mode was hidden
+      if (!this.devp.update(presses)) { this.devp = null; if (!dev().unlocked) this.cur = 5; }
+      return true;
+    }
     if (this.archive) {                                                // back to the 기록실 list when closed
       if (!this.archive.update(presses)) this.archive = null;
       else if (this.archive.launch) { this.launch = this.archive.launch; this.archive.launch = null; }
@@ -128,7 +138,9 @@ export class OptionTab {
     else if (k === AVK.DOWN) this.cur = (this.cur + 1) % n0;
     else if (this.cur >= 5 && this.extraRows[this.cur - 5] !== 'full') {
       if (k === AVK.OK || k === AVK.RIGHT) {
-        if (this.extraRows[this.cur - 5] === 'keys') this.keys = new KeyMapPanel(this.ctx);
+        const kind = this.extraRows[this.cur - 5];
+        if (kind === 'keys') this.keys = new KeyMapPanel(this.ctx);
+        else if (kind === 'dev') this.devp = new DevPanel();
         else this.conv = new ConveniencePanel(this.ctx);
       }
       else if (k === AVK.CLR) { saveOptions(o); this.setting = false; }
@@ -151,7 +163,7 @@ export class OptionTab {
   }
 
   draw(u: Ui): void {
-    const view = this.keys ? this.keys.view() : this.conv ? this.conv.view() : this.archive ? this.archive.view() : this.help >= 0 ? this.helpView()
+    const view = this.keys ? this.keys.view() : this.conv ? this.conv.view() : this.devp ? this.devp.view() : this.archive ? this.archive.view() : this.help >= 0 ? this.helpView()
       : this.book >= 0 ? (this.bookDetail ? this.bookDetailView() : this.bookView())
       : this.records >= 0 ? this.recordsView() : this.setting ? this.settingView() : this.mainView();
     u.mount('tab', 'option', view);
@@ -192,8 +204,9 @@ export class OptionTab {
       const i = 5 + j, cur = this.cur === i;
       if (kind !== 'full') {
         rows.push(h(`div.v-row.v-opt-set${cur ? '.cur' : ''}`, { on: () => { if (this.cur === i) return [AVK.OK]; this.cur = i; } },
-          gt(kind === 'keys' ? '키 설정' : '편의 설정', { cls: 'v-opt-label' }),
-          h('div.v-row.v-grow.v-center', null, h('span.v-opt-value.on', null, kind === 'keys' ? '키보드 / 패드 ▶' : '대사 · 소리 · 화면 ▶'))));
+          gt(kind === 'keys' ? '키 설정' : kind === 'dev' ? '개발자 모드' : '편의 설정', { cls: 'v-opt-label' }),
+          h('div.v-row.v-grow.v-center', null, h('span.v-opt-value.on', null,
+            kind === 'keys' ? '키보드 / 패드 ▶' : kind === 'dev' ? '경험치 · 드랍 배율 ▶' : '대사 · 소리 · 화면 ▶'))));
         return;
       }
       // 풀스크린: the same on / off values (0x1b / 0x1c) as the original rows
@@ -207,7 +220,7 @@ export class OptionTab {
     });
     return h('div.v-col.v-fill.v-tab', { style: 'gap:3px' },
       h('div.v-box.v-heading', null, gt(t[0xdf] ?? '')),
-      h('div.v-box.v-col.v-grow', { style: 'padding:6px 8px;justify-content:space-around' }, rows));
+      h(`div.v-box.v-col.v-grow${rows.length > 7 ? '.v-opt-dense' : ''}`, { style: 'padding:6px 8px;justify-content:space-around' }, rows));
   }
 
   /**

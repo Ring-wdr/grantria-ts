@@ -1,6 +1,7 @@
 // Option tab 0x23 (FUN_0005ad88 / keys FUN_000567e8) and settings 0x27 (FUN_0005abac -> FUN_0002de7c,
 // keys FUN_00055f94 -> FUN_00045ea4), analysis/features/ui-tabs.md §0.9.
 // Help 0x26 (FUN_0005d890) and the monster book 0x32 / 0x33 (FUN_000598ac / FUN_0005cda8), misc-systems.md §8.
+// Not in the original: the 몬스터도감 row is 기록실, a list of the monster book and the archive pages (archive.ts).
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { OPTION_COUNTS, OPTION_KEYS, saveOptions } from '../../core/save/options';
@@ -11,6 +12,8 @@ import { button, cmfFrame, cSprite, gt, h, menuList, sprite, type ScrollRef, typ
 import { clipImage, DEFAULT_EQUIP } from '../render/sprites';
 import type { Cmf } from '../../core/data/assets';
 import { KeyMapPanel } from './keyMap';
+import { ConveniencePanel } from './convenience';
+import { ArchivePanel, RECORD_ROWS, type Launch } from './archive';
 import { platform } from '../../core/platform';
 
 const GREY565 = 0x632c;          // 0x666666
@@ -30,6 +33,12 @@ export class OptionTab {
   private scroll: ScrollRef = { y: 0 };
   /** 키 설정 sub panel (keyboard / pad only) */
   private keys: KeyMapPanel | null = null;
+  /** 편의 설정 sub panel */
+  private conv: ConveniencePanel | null = null;
+  /** 기록실 list cursor (-1 closed), the archive page opened from it, and what it asks the play scene to start */
+  private records = -1;
+  private archive: ArchivePanel | null = null;
+  launch: Launch | null = null;
 
   /** cmf_status for the status-effect help page (loaded on first use) */
   private statusCmf: Cmf | null = null;
@@ -38,11 +47,11 @@ export class OptionTab {
     void ctx.assets.cmf('cmf_status').then((c) => { this.statusCmf = c; });
   }
 
-  get busy(): boolean { return this.setting || this.help >= 0 || this.book >= 0; }
+  get busy(): boolean { return this.setting || this.help >= 0 || this.book >= 0 || this.records >= 0; }
 
-  /** extra settings rows after the five options: 풀스크린 on a touch-first screen, 키 설정 unless the player is on touch */
-  private get extraRows(): ('full' | 'keys')[] {
-    const r: ('full' | 'keys')[] = [];
+  /** extra settings rows after the five options: 편의 설정, 풀스크린 on a touch-first screen, 키 설정 unless the player is on touch */
+  private get extraRows(): ('conv' | 'full' | 'keys')[] {
+    const r: ('conv' | 'full' | 'keys')[] = ['conv'];
     if (platform().touchFirst()) r.push('full');
     if (this.ctx.input.device !== 'touch') r.push('keys');
     return r;
@@ -57,9 +66,16 @@ export class OptionTab {
   update(presses: number[]): boolean {
     this.t++;
     if (this.keys) { if (!this.keys.update(presses)) this.keys = null; return true; }
+    if (this.conv) { if (!this.conv.update(presses)) this.conv = null; return true; }
+    if (this.archive) {                                                // back to the 기록실 list when closed
+      if (!this.archive.update(presses)) this.archive = null;
+      else if (this.archive.launch) { this.launch = this.archive.launch; this.archive.launch = null; }
+      return true;
+    }
     for (const k of presses) {
       if (this.help >= 0) { this.helpKey(k); continue; }
       if (this.book >= 0) { this.bookKey(k); continue; }
+      if (this.records >= 0) { this.recordsKey(k); continue; }
       if (this.setting) this.settingKey(k);
       else if (k === AVK.UP) this.sel = (this.sel + 4) % 5;
       else if (k === AVK.DOWN) this.sel = (this.sel + 1) % 5;
@@ -67,7 +83,7 @@ export class OptionTab {
         if (this.sel === 0) this.request = 'save';
         else if (this.sel === 1) this.help = 0;
         else if (this.sel === 2) { this.setting = true; this.cur = 0; }
-        else if (this.sel === 3 && this.fs) { this.book = 0; this.bookDetail = false; }
+        else if (this.sel === 3 && this.fs) this.records = 0;
         else if (this.sel === 4) this.request = 'quit';
       } else return false;
     }
@@ -78,6 +94,16 @@ export class OptionTab {
     if (k === AVK.LEFT) this.help = (this.help + 24) % 25;
     else if (k === AVK.RIGHT || k === AVK.OK) this.help = (this.help + 1) % 25;
     else if (k === AVK.CLR) this.help = -1;
+  }
+
+  /** 기록실: 몬스터 도감 (the original book screens) or an archive page; Esc there comes back here */
+  private recordsKey(k: number): void {
+    const n = RECORD_ROWS.length;
+    if (k === AVK.UP) this.records = (this.records + n - 1) % n;
+    else if (k === AVK.DOWN) this.records = (this.records + 1) % n;
+    else if (k === AVK.OK && this.records === 0) { this.book = 0; this.bookDetail = false; }
+    else if (k === AVK.OK) this.archive = new ArchivePanel(this.ctx, this.fs!, this.records - 1);
+    else if (k === AVK.CLR) this.records = -1;
   }
 
   private bookKey(k: number): void {
@@ -100,12 +126,16 @@ export class OptionTab {
     if (this.cur >= n0) this.cur = 0;
     if (k === AVK.UP) this.cur = (this.cur + n0 - 1) % n0;
     else if (k === AVK.DOWN) this.cur = (this.cur + 1) % n0;
-    else if (this.cur >= 5 && this.extraRows[this.cur - 5] === 'keys') {
-      if (k === AVK.OK || k === AVK.RIGHT) this.keys = new KeyMapPanel(this.ctx);
+    else if (this.cur >= 5 && this.extraRows[this.cur - 5] !== 'full') {
+      if (k === AVK.OK || k === AVK.RIGHT) {
+        if (this.extraRows[this.cur - 5] === 'keys') this.keys = new KeyMapPanel(this.ctx);
+        else this.conv = new ConveniencePanel(this.ctx);
+      }
       else if (k === AVK.CLR) { saveOptions(o); this.setting = false; }
     }
     else if (this.cur >= 5 && (k === AVK.LEFT || k === AVK.RIGHT || k === AVK.OK)) {   // 풀스크린 on / off
       o.fullscreen ^= 1;
+      o.fullscreenSet = 1;                                             // the player's choice from now on (not the touch default)
       this.ctx.applyOptions();
       vibrate(o.vibration);
     }
@@ -121,16 +151,26 @@ export class OptionTab {
   }
 
   draw(u: Ui): void {
-    const view = this.keys ? this.keys.view() : this.help >= 0 ? this.helpView() : this.book >= 0 ? (this.bookDetail ? this.bookDetailView() : this.bookView())
-      : this.setting ? this.settingView() : this.mainView();
+    const view = this.keys ? this.keys.view() : this.conv ? this.conv.view() : this.archive ? this.archive.view() : this.help >= 0 ? this.helpView()
+      : this.book >= 0 ? (this.bookDetail ? this.bookDetailView() : this.bookView())
+      : this.records >= 0 ? this.recordsView() : this.setting ? this.settingView() : this.mainView();
     u.mount('tab', 'option', view);
   }
 
   private mainView(): VNode {
     const t = this.ctx.assets.text;
-    return menuList(Array.from({ length: 5 }, (_, i) => button(gt(t[0x14f + i] ?? ''), {
+    const label = (i: number) => (i === 3 ? '기록실' : t[0x14f + i] ?? '');      // 몬스터도감 → 기록실 (not in the original)
+    return menuList(Array.from({ length: 5 }, (_, i) => button(gt(label(i)), {
       sel: i === this.sel, on: () => { if (this.sel === i) return [AVK.OK]; this.sel = i; },
-    })), gt(t[0x13f + this.sel] ?? ''));
+    })), gt(this.sel === 3 ? '도감·보스 기록·도전과제·출석을 봅니다.' : t[0x13f + this.sel] ?? ''));
+  }
+
+  private recordsView(): VNode {
+    const help = ['몬스터별 처치 기록과 정보를 봅니다.', '얻은 적 있는 아이템을 봅니다.', '보스 처치 기록과 보스 러시입니다.',
+      '원본과 추가 도전과제를 봅니다.', '출석 보상과 심연 기록을 봅니다.'];
+    return menuList(RECORD_ROWS.map((name, i) => button(gt(name), {
+      sel: i === this.records, on: () => { if (this.records === i) return [AVK.OK]; this.records = i; },
+    })), gt(help[this.records] ?? ''));
   }
 
   /** settings 0x27: label, then the values (the current one bright), arrows on the cursor row */
@@ -150,10 +190,10 @@ export class OptionTab {
     });
     this.extraRows.forEach((kind, j) => {
       const i = 5 + j, cur = this.cur === i;
-      if (kind === 'keys') {
+      if (kind !== 'full') {
         rows.push(h(`div.v-row.v-opt-set${cur ? '.cur' : ''}`, { on: () => { if (this.cur === i) return [AVK.OK]; this.cur = i; } },
-          gt('키 설정', { cls: 'v-opt-label' }),
-          h('div.v-row.v-grow.v-center', null, h('span.v-opt-value.on', null, '키보드 / 패드 ▶'))));
+          gt(kind === 'keys' ? '키 설정' : '편의 설정', { cls: 'v-opt-label' }),
+          h('div.v-row.v-grow.v-center', null, h('span.v-opt-value.on', null, kind === 'keys' ? '키보드 / 패드 ▶' : '대사 · 소리 · 화면 ▶'))));
         return;
       }
       // 풀스크린: the same on / off values (0x1b / 0x1c) as the original rows
@@ -219,7 +259,7 @@ export class OptionTab {
       case 10:                                                     // resistances: text, then the three icons with their labels
         return [para(0x11f), h('div.v-col.help-resist', null, [0, 1, 2].map((k) =>
           h('div.v-row', { style: 'gap:8px' }, cSprite(a, 3 + k), gt((t[0x12f] ?? '').split('|@|@')[k] ?? ''))))];
-      case 22: return h('div.v-col.v-center.v-fill', null, para(0x4e4));
+      case 22: return h('div.v-col.v-center.v-grow', null, para(0x4e4));   // centred in the body (a .v-fill, absolute, covered the pager)
       case 23:                                                     // 게임심의정보: the rating table 0x130..0x13b
         return h('div.help-table', null, [0, 1, 2, 3, 4, 5].map((r) =>
           [gt(t[0x130 + 2 * r] ?? ''), gt(t[0x131 + 2 * r] ?? '')]));

@@ -1,0 +1,100 @@
+/* 편의 기능 (not in the original): dialogue LOG / AUTO buttons, the dialogue log, the 편의 설정 panel */
+.dlg-buttons { gap: 4px; height: 100%; }
+.dlg-btn { min-height: 17px; height: 17px; padding: 0 6px; font-size: 9px; line-height: 9px; }
+.dlg-btn.on { color: #ffe066; }
+/* key / pad glyph inside a label (dialogue.ts inlineHint) */
+.u-pad.dlg-key { position: static; display: inline-block; margin-left: 3px; vertical-align: middle; }
+
+.log-modal { background: rgba(0, 0, 0, 0.72); }
+.log-window { width: 440px; height: 296px; gap: 4px; }
+.log-head { height: 20px; padding: 0 2px 0 6px; color: #8df1f2; gap: 6px; }
+.log-list { background: rgba(0, 0, 0, 0.6); border: 1px solid #5d7092; border-radius: 2px; padding: 6px 10px; }
+.log-entry { padding: 4px 0; border-bottom: 1px solid rgba(93, 112, 146, 0.35); }
+.log-entry:last-child { border-bottom: none; }
+.log-entry.caption { text-align: center; }
+.log-name { margin-bottom: 1px; }
+.log-empty { color: #888; text-align: center; padding-top: 100px; }
+.log-foot { color: #9aa6bd; text-align: center; font-size: 9px; height: 12px; }
+
+.cv-row { min-height: 19px; padding: 0 4px; gap: 4px; border-radius: 2px; }
+.cv-row.cur { background: rgba(66, 154, 198, 0.35); }
+.cv-label { width: 84px; flex: none; white-space: nowrap; }
+.cv-value { flex: 1 1 auto; min-width: 0; text-align: center; white-space: nowrap; }
+.cv-bar { display: inline-flex; gap: 1px; vertical-align: middle; margin-right: 4px; }
+.cv-list { min-height: 0; }
+/* help line: room for two lines so the list above, not the window, gives way */
+.cv-foot { flex: none; height: 30px; display: flex; align-items: center; justify-content: center; line-height: 13px; }
+.cv-bar i { width: 3px; height: 8px; background: #2d3d5e; }
+.cv-bar i.on { background: #8df1f2; }
+
+/* HUD 정보 (fieldHud.ts extraInfo) */
+.hx-stat, .hx-exp, .hx-buff-t, .hx-boss-name, .hx-quest {
+  color: #fff;
+  font-size: 9px;
+  line-height: 10px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+}
+.hx-exp { color: #ffe066; }
+.hx-buff-t { text-align: center; font-size: 8px; line-height: 9px; }
+.hx-boss-name { text-align: center; color: #ffb0a0; }
+.hx-boss-bar {
+  border: 1px solid #000;
+  background: linear-gradient(90deg, #e03a2a calc(var(--hp) * 100%), rgba(40, 10, 10, 0.75) 0);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+.hx-quest { opacity: 0.9; }
+.hx-quest.main { color: #ffe066; }
+.hx-quest.done { color: #8df18d; }
+
+/* 비교 (tabs.ts baseDelta) */
+.tb-delta { flex: none; margin-left: 4px; color: #c0c0c0; }
+.tb-delta.up { color: #4cff4c; }
+.tb-delta.down { color: #ff5a5a; }
+
+/* 상점 편의 (shop.ts): 수량 최대 / ±10, 일괄 판매, 되사기 */
+.shop-qty-extra { gap: 3px; align-items: center; margin: 0 4px; }
+.shop-bulk-grade { height: 20px; gap: 4px; }
+.shop-bulk-list { padding: 3px 4px; gap: 2px; }
+.shop-bulk-row { gap: 4px; min-height: 20px; padding: 0 2px; border-radius: 2px; }
+.shop-bulk-row.cur { background: rgba(66, 154, 198, 0.35); }
+.ui-view .shop-qty.shop-qty-wide { width: 214px; }
+.mc-quest-other { filter: hue-rotate(160deg) saturate(1.3); opacity: 0.85; }
+
+/* title 회상 button (screens.ts titleButtons): the original buttons' white lettering with a dark outline; dimmed
+   as a whole like the unchosen originals (alpha 0x1A / 32) */
+.u-group.title-dim { opacity: 0.8125; }
+.title-btn-label { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700; letter-spacing: 1px;
+  text-shadow: -1px 0 #102850, 1px 0 #102850, 0 -1px #102850, 0 1px #102850, 1px 1px #102850; }
+
+/* 회차 tag on a save slot card (screens.ts SlotScene) */
+.slot-lap { width: 100%; height: 100%; font-size: 8px; line-height: 10px; color: #8df1f2; white-space: nowrap;
+  text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000; }
+
+/* 기록실 (archive.ts) */
+.ar-tabs { width: 100%; gap: 4px; }
+.ar-title { text-align: center; color: #ffe066; }
+.ar-list { padding: 4px 6px; }
+.ar-row { min-height: 18px; gap: 5px; padding: 1px 3px; border-radius: 2px; }
+.ar-row.cur { background: rgba(66, 154, 198, 0.35); }
+.ar-row.done .ar-line { color: #8df18d; }
+.ar-num { width: 16px; flex: none; color: #9aa6bd; text-align: right; }
+.ar-cell { min-width: 0; }
+.ar-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ar-sub { color: #9aa6bd; font-size: 9px; line-height: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ar-head { color: #8df1f2; margin-top: 4px; }
+.ar-check { width: 10px; flex: none; color: #8df18d; }
+.ar-empty { color: #888; text-align: center; padding-top: 50px; }
+.rp-list { width: 100%; height: 100%; padding: 2px; background: rgba(0, 0, 0, 0.55); border-radius: 2px; }   /* 회상 list beside the portrait (replay.ts) */
+.ar-btn { width: 100%; }
+.ar-btn.off { opacity: 0.5; }
+.ar-days { gap: 3px; margin: 3px 0; }
+.ar-day { width: 22px; height: 18px; display: flex; align-items: center; justify-content: center; border: 1px solid #5d7092; border-radius: 2px; color: #9aa6bd; }
+.ar-day.done { background: #2f679d; color: #fff; }
+.ar-day.big { border-color: #ffe066; }
+
+/* 회상 / 보스 러시 (sandbox.ts) */
+.sb-bar { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #ffe066;
+  background: rgba(0, 0, 0, 0.6); border: 1px solid #5d7092; border-radius: 7px; white-space: nowrap; }

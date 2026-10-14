@@ -31,6 +31,21 @@ export interface HudState {
   target?: { name: string; level: number; hp: number; maxHp: number; ghost: number } | null;
   /** HIT counter DAT_003b61c8: hits and the display timer */
   hits?: { count: number; timer: number };
+  /** frames left before a boss's story event (FUN_00061bb0 countdown DAT_00408478, 200..1); 0 = none */
+  nextEvent?: number;
+  /** not in the original (편의 설정 HUD 정보): display only */
+  extra?: HudExtra;
+}
+
+export interface HudExtra {
+  numbers?: { expPct: number };
+  /** item icon of each active buff and the seconds left (-1 = until cleared) */
+  buffs?: { icon: { image: string; sx: number; sy: number }; secs: number }[];
+  boss?: { name: string; hp: number; maxHp: number } | null;
+  /** tracked quests: name, progress text, ready to report, main quest */
+  quests?: { name: string; progress: string; done: boolean; main: boolean }[];
+  /** the minimap is shown (the quest tracker goes under it) */
+  minimap?: boolean;
 }
 
 export type SlotView =
@@ -45,7 +60,7 @@ export const FIELD_ZONES: { x: number; y: number; w: number; h: number; key: num
   { x: 156, y: 2, w: 32, h: 32, key: -30 },
   { x: 0, y: 75, w: 80, h: 70, key: AVK.MAP },                     // minimap -> map tab                         // gate icon -> community menu
   { x: 322, y: 0, w: 52, h: 32, key: -7 },                          // SHOP -> premium shop
-  { x: 410, y: 55, w: 76, h: 30, key: -31, mouseOnly: true },       // coupon shop button (not drawn on touch)
+  { x: 410, y: 55, w: 76, h: 30, key: AVK.LOG, mouseOnly: true },   // 대사 로그 (not drawn on touch; was the coupon shop button)
   { x: 427, y: 104, w: 50, h: 50, key: AVK.CLR, edge: 1 },
   { x: 361, y: 157, w: 50, h: 50, key: AVK.STAR, edge: 1 },
   { x: 427, y: 157, w: 50, h: 50, key: AVK.POUND, edge: 1 },
@@ -63,7 +78,6 @@ const MENU = { x: W - 0x2e + 20, y: H - 0xe5 + 20 };
 const SLOT_X = [0xc0, 0x83, 0xb8, 0x7b, 0x72, 0x31], SLOT_Y = [0x31, 0x31, 0x67, 0x66, 0x9c, 0x9b];
 const slotCentre = (i: number): [number, number] => [W - SLOT_X[i] + 20, H - SLOT_Y[i] + 20];
 
-const escapeHtml = (t: string) => t.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** World-space combat text. */
 interface FloatText {
@@ -152,7 +166,9 @@ export class FieldHud {
     if (s.target) this.targetPanel(s.target);
     if (s.hits?.count) this.hitCounter(s.hits.count, s.hits.timer);
     this.statusBar(s);
+    if (s.extra) this.extraInfo(s, s.extra);
     this.floorName(s.mapId);
+    if (s.nextEvent) this.nextProgress(s.nextEvent);
     if (buttons) this.touchButtons(s);
     this.drawMessages();
     u.alpha = 32;
@@ -222,6 +238,46 @@ export class FieldHud {
     u.image('c', 0, 0xa8, Math.trunc(Math.max(0, s.exp - lo) * 0xe0 / Math.max(1, hi - lo)), 4, W / 2 - 0x70, H - 5);
   }
 
+  /** 편의 설정 HUD 정보 (not in the original): HP / MP at the bottom left (the floor name and the minimap sit under the
+   *  status bar), EXP % after the EXP bar, buff icons
+   *  under the QUEST / SAVE / SHOP pills, a boss bar at the bottom, the quest tracker under the minimap */
+  private extraInfo(s: HudState, x: HudExtra): void {
+    const u = this.ui;
+    u.alpha = 32;
+    if (x.numbers) {
+      // under the HUD message lines (bottom one at H - 30, drawMessages)
+      u.el('hx-stat', 4, H - 19, 120, 9, { text: `HP ${Math.max(0, s.hp)}/${s.maxHp}` });
+      u.el('hx-stat', 4, H - 10, 120, 9, { text: `MP ${Math.max(0, s.mp)}/${s.maxMp}` });
+      u.el('hx-exp', W / 2 + 0x70 + 3, H - 10, 44, 10, { text: `${x.numbers.expPct.toFixed(1)}%` });
+    }
+    x.buffs?.slice(0, 10).forEach((b, k) => {
+      const bx = 196 + 18 * k;
+      u.image(b.icon.image, b.icon.sx, b.icon.sy, 16, 16, bx, 29);
+      if (b.secs >= 0) u.el('hx-buff-t', bx - 3, 45, 22, 9, { text: b.secs >= 60 ? `${Math.ceil(b.secs / 60)}m` : `${b.secs}` });
+    });
+    if (x.boss && x.boss.maxHp > 0) {
+      const r = Math.max(0, Math.min(1, x.boss.hp / x.boss.maxHp));
+      u.el('hx-boss-name', 130, H - 33, 150, 10, { text: x.boss.name });
+      u.el('hx-boss-bar', 130, H - 21, 150, 7, { vars: { '--hp': r.toFixed(3) } });
+    }
+    const top = x.minimap ? 156 : 60;                               // under the minimap, else under the floor name
+    x.quests?.slice(0, 3).forEach((q, k) => {
+      u.el(`hx-quest${q.done ? ' done' : ''}${q.main ? ' main' : ''}`, 4, top + 12 * k, 180, 11, { text: `${q.done ? '✓' : '·'} ${q.name}${q.progress ? ` ${q.progress}` : ''}` });
+    });
+  }
+
+  /** FUN_000270d0, drawn while a boss's story event counts down (FUN_00061bb0 sets 200 frames): a window in the
+   *  220 box with "다음 진행" (0x1A3E) and a red bar half the frames left long */
+  private nextProgress(left: number): void {
+    const u = this.ui;
+    u.alpha = 32;
+    u.pushCenter220();
+    u.window(0xf, 0x1c, 0xbe, 0x32);
+    u.textId(0x1a3e, 0x1e, 0x2f);
+    u.fill(100, 0x32, left >> 1, 8, 0xff0000);
+    u.pop();
+  }
+
   /** FUN_000354bc floor name: round box 0x333333 alpha 16, text alpha follows the slide. */
   private floorName(mapId: number): void {
     const u = this.ui, be8 = this.slide;
@@ -242,7 +298,7 @@ export class FieldHud {
     const u = this.ui, inp = this.input;
     const held = inp.lastHeld();
     const idx = ({ [AVK.UP]: 0, [AVK.LEFT]: 1, [AVK.DOWN]: 2, [AVK.RIGHT]: 3, [AVK.K1]: 4, [AVK.K3]: 5, [AVK.K7]: 6,
-      [AVK.K9]: 7, [AVK.STAR]: 8, [AVK.POUND]: 9, [-7]: 10, [AVK.SAVE]: 11, [10000]: 12 } as Record<number, number>)[held] ?? 0xff;
+      [AVK.K9]: 7, [AVK.STAR]: 8, [AVK.POUND]: 9, [-7]: 10, [AVK.SAVE]: 11, [10000]: 12, [AVK.LOG]: 14 } as Record<number, number>)[held] ?? 0xff;
     const on = (b: boolean) => (b ? ' on' : '');
     u.alpha = 32;
     // virtual stick: ring, four chevrons, a knob that follows the finger (radius 22); touch only, keyboard and
@@ -279,11 +335,12 @@ export class FieldHud {
       u.groupEnd();
     }
     u.el(`t-circle t-menu${on(held === AVK.CLR)}`, MENU.x + e - 19, MENU.y - 19, 38, 38, { html: ICONS.menu });
-    // QUEST / SAVE / SHOP (the original swaps the QUEST/SHOP highlight) and the coupon shop
+    // QUEST / SAVE / SHOP (the original swaps the QUEST/SHOP highlight) and 대사 로그 (not in the original)
     for (const [lit, icon, label, x] of [[12, 'quest', 'QUEST', 194], [11, 'save', 'SAVE', 258], [10, 'shop', 'SHOP', 322]] as const)
       u.el(`t-pill${on(idx === lit)}`, x, 6, 52, 20, { html: `${ICONS[icon]}<span>${label}</span>` });
-    // the coupon shop button is left out on touch (still in the community menu); keyboard / pad / mouse keep it
-    if (!touch) u.el('t-pill t-coupon', W - 0x50, H - 0x102, 0x4c, 22, { html: `${ICONS.coupon}<span>${escapeHtml(u.textOf(0x1a08))}</span>` });
+    // 대사 로그 where the coupon shop button was (the shop stays in the community menu); keyboard / pad / mouse only,
+    // touch opens the log from the dialogue box
+    if (!touch) u.el(`t-pill${on(idx === 14)}`, W - 0x50, H - 0x102, 0x4c, 22, { html: `${ICONS.log}<span>대사 로그</span>` });
     if (inp.device !== 'touch') this.padHints();
   }
 
@@ -313,7 +370,7 @@ export class FieldHud {
     hint(AVK.MAP, 4, 47);
     hint(HUD.QUEST, 194 + 44, 6 + 12);                                       // d-pad on the field (PAD_FIELD)
     hint(HUD.SHOP, 322 + 44, 6 + 12);
-    hint(HUD.COUPON, W - 0x50 + 0x4c - 8, H - 0x102 + 14);
+    hint(AVK.LOG, W - 0x50 + 0x4c - 8, H - 0x102 + 14);
     hint(HUD.COMMUNITY, 156 + 24, 2 + 24);                                  // gate icon -> community                                                    // minimap -> map tab
   }
 

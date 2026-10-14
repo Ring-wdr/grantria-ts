@@ -9,6 +9,16 @@
   --glow: #8df1f2;
 }
 
+/* touch: no tap highlight (mobile browsers and the Android WebView tint a tapped element light blue), no
+   long-press callout and no text selection anywhere on the page; scrolling (touch-action) is left alone */
+html, body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+input, textarea { -webkit-user-select: text; user-select: text; }
+
 #stage {
   position: relative;
   width: 480px;
@@ -19,6 +29,8 @@
 /* edge layout (app.ts fit()): the HUD's touch controls reach into the side margins; the rest stays clipped */
 #stage.edge { overflow: visible; }
 .stage-clip { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+/* a wide scene (Scene.wide: logo, title) in fullscreen: its full-view fills reach into the side margins */
+.stage-clip.wide { overflow: visible; }
 #stage > canvas {
   position: absolute;
   left: 0;
@@ -284,10 +296,6 @@
 }
 .t-pill svg { width: 11px; height: 11px; flex: none; }
 .t-pill.on { opacity: 1; border-color: var(--t-accent); color: #fff; transform: scale(0.95); box-shadow: 0 0 6px rgba(141, 241, 242, 0.6); }
-.t-coupon {
-  border-color: rgba(120, 190, 255, 0.8);
-  background: linear-gradient(rgba(48, 102, 168, 0.8), rgba(24, 58, 110, 0.8));
-}
 
 /* ---- declarative views (view.ts): menu and popup contents laid out by CSS ---- */
 .ui-view { pointer-events: none; }

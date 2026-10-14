@@ -36,6 +36,10 @@ export const ACTIONS: Action[] = [
   { key: HUD.COMMUNITY, label: '차원의 문', kb: ['KeyG'], pad: [] },
   { key: AVK.TAB_L, label: '이전 탭', kb: ['KeyQ'], pad: [] },
   { key: AVK.TAB_R, label: '다음 탭', kb: ['KeyE'], pad: [] },
+  // during dialogue the pad's □ / △ (quick slots 1 / 2) also open the log / toggle auto (PlayScene)
+  { key: AVK.LOG, label: '대사 로그', kb: ['KeyL'], pad: [] },
+  { key: AVK.AUTO, label: '자동 진행', kb: ['KeyK'], pad: [] },
+  { key: AVK.FAST, label: '빨리 넘기기 (누르고 있기)', kb: ['ControlLeft'], pad: [] },
 ];
 
 /** pad buttons the player may assign (the d-pad stays directions / HUD keys, home is the system's) */

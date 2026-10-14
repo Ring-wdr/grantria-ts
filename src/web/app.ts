@@ -62,7 +62,7 @@ const ctx: GameContext = {
   assets, renderer, overlay, compositor, ui, ui13, hud, cmfs, audio: new GameAudio(),
   options: loadOptions(),
   applyOptions() {
-    this.audio.setEnabled(this.options.volume !== 0);
+    this.audio.setEnabled(this.options.volume !== 0, this.options.bgm, this.options.sfx);
     tickMs = 1000 / optionFps(this.options);
     document.documentElement.style.setProperty('--tick', `${tickMs}ms`);
     fit();
@@ -78,7 +78,21 @@ const ctx: GameContext = {
 ctx.applyOptions();
 scene = new LogoScene(ctx);
 
+/** per scene: the UI reaching into the fullscreen margins (Scene.wide) and the page colour around the frame */
+let wideNow = -1, backdropNow = -1;
+function sceneFrame(): void {
+  const wide = scene.wide && compositor.pad > 0 ? compositor.pad : 0;
+  if (wide !== wideNow) { wideNow = wide; clip.classList.toggle('wide', wide > 0); ui.bleed = wide; }
+  const bg = scene.backdrop ?? 0;
+  if (bg !== backdropNow) {
+    backdropNow = bg;
+    compositor.clearColor = bg;
+    document.body.style.background = bg ? `#${bg.toString(16).padStart(6, '0')}` : '';
+  }
+}
+
 function drawScene(): void {
+  sceneFrame();
   beginDomFrame();
   scene.draw();
   endDomFrame();

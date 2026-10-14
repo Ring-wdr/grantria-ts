@@ -17,17 +17,21 @@ import { SLOT_COUNT, deleteSlot, loadGamedata, loadSlot, newGame, saveSlot, setL
 import { Story } from '../../core/data/story';
 import type { GameContext, Scene } from './scene';
 import { tri, type Ui } from '../render/ui';
-import { button, gt, slot, win } from '../render/view';
+import { button, gt, h, slot, win } from '../render/view';
 import { greyUniform, setGrey } from '../render/sprites';
 import { RankingScene } from './ranking';
 import { DataScene } from './dataScene';
 import { OptionTab } from './optionTab';
 import { keyHint } from '../input/keyHints';
+import { BacklogView, backlog } from './backlog';
+import { SandboxScene } from './sandbox';
+import { ReplayListScene } from './replay';
+import { saveOptions } from '../../core/save/options';
 
 export const MENU_IMAGES = ['c', 't', 'f', 'logo', 'h_logo', 'title_bg', 'title_bg2', 'char_slot'];
 export const MENU_CMFS = ['cmf_title', 'cmf_c0', 'cmf_c1', 'cmf_c2'];
 
-function fillScreen(u: Ui, rgb: number): void {
+export function fillScreen(u: Ui, rgb: number): void {
   u.fill(0, 0, W, H, rgb);
 }
 
@@ -50,7 +54,9 @@ function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
     const rise = final ? 0x8c : Math.min(t * 2, 0x8c);
     const bob = Math.abs(5 - Math.trunc(t / 12) % 10);
     u.image('title_bg2', 0, 0, 0x17c, 0x104, W / 2 - 0xbe, H - rise + bob);   // island
-    for (const ox of [cx, cx - 0x1e0]) {                        // clouds, blend 1 (lighten)
+    // clouds, blend 1 (lighten): two 0xf0 tiles every 0x1e0, from past the left edge to past the right one (in
+    // fullscreen the title reaches u.bleed into the side margins)
+    for (let ox = cx - Math.ceil((cx + u.bleed) / 0x1e0) * 0x1e0; ox < W + u.bleed; ox += 0x1e0) {
       u.image('title_bg', 0, 0x69, 0xf0, 0x77, ox, H + 0x77 - cy, 0x109);
       u.image('title_bg', 0, 0x69, 0xf0, 0x77, ox, H - cy, 0x100);
       u.image('title_bg', 0, 0x69, 0xf0, 0x77, ox + 0xf0, H + 0x77 - cy, 0x108);
@@ -69,14 +75,27 @@ function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
   }
 }
 
-/** Title menu buttons (FUN_00035988): 게임시작 and 게임순위 (local ranking); the Kakao button is removed. */
+/** title button row (not the original's places): 게임시작 in the middle of the screen, 게임순위 and 회상 either side,
+ *  the original 11 px apart; x of each 99 x 0x2C image */
+const TITLE_BTN = { rank: 80, start: 190, replay: 300, y: 0x102 };
+
+/** Title menu buttons (FUN_00035988): 게임시작 and 게임순위 (local ranking); the Kakao button is removed.
+ *  회상 (not in the original) is the 게임순위 art with its lettering covered by the plain face (sheet columns
+ *  16..21 hold no lettering), in a group so the dimming does not let the old lettering through. */
 function titleButtons(u: Ui, sel = 0): void {
   u.alpha = sel === 0 ? 32 : 0x1a;
-  u.image('t', 0, 0xae, 99, 0x2c, 0xf5, 0x102);            // 게임시작
+  u.image('t', 0, 0xae, 99, 0x2c, TITLE_BTN.start, TITLE_BTN.y);   // 게임시작
+  u.group(sel === 2 ? '' : 'title-dim', 0, 0, 'titleReplay');
+  u.alpha = 32;
+  const rx = TITLE_BTN.replay, ry = TITLE_BTN.y;
+  u.image('t', 0x6f, 0xbe, 99, 0x2c, rx, ry);
+  for (let x = 22; x < 77; x += 6) u.image('t', 0x6f + 16, 0xbe + 9, Math.min(6, 77 - x), 26, rx + x, ry + 9);   // face rows 9..34
+  u.view('titleReplayLabel', rx + 15, ry + 9, 73, 26, h('div.title-btn-label', null, '회상'));
+  u.groupEnd();
   u.alpha = 0x1a;
   u.image('t', 0x40, 0xda, 0x20, 0x21, 0x157, 7);           // settings
   u.alpha = sel === 1 ? 32 : 0x1a;
-  u.image('t', 0x6f, 0xbe, 99, 0x2c, 0x87, 0x102);          // 게임순위 (local ranking)
+  u.image('t', 0x6f, 0xbe, 99, 0x2c, TITLE_BTN.rank, TITLE_BTN.y);   // 게임순위 (local ranking)
   u.alpha = 0x1a;
   u.image('t', 0, 0xda, 0x20, 0x21, 0x187, 7);              // help
   u.alpha = 32;
@@ -101,6 +120,8 @@ export function render(ctx: GameContext, drawUi: () => void, drawZoom?: () => vo
 
 /** State 0x05: company logo on white, 21 frames (FUN_0002c4b4). */
 export class LogoScene implements Scene {
+  readonly wide = true;
+  readonly backdrop = 0xffffff;                                       // the logo sits on white, so does the page
   private t = 0;
   constructor(private ctx: GameContext) { ctx.input.uiMode = false; ctx.input.zones = []; }
   update(presses: number[]): void {
@@ -124,6 +145,8 @@ export class LogoScene implements Scene {
 
 /** State 0x06: rating notice (h_logo lower half), 80 frames (FUN_00035c4c). */
 class RatingScene implements Scene {
+  readonly wide = true;
+  readonly backdrop = 0xffffff;
   private t = 0;
   constructor(private ctx: GameContext) {}
   update(presses: number[]): void {
@@ -137,24 +160,28 @@ class RatingScene implements Scene {
   }
 }
 
-const TITLE_RANKING = -40, TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43;
+const TITLE_RANKING = -40, TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43, TITLE_REPLAY = -44;
+/** title buttons left to right (sel values): 게임순위, 게임시작, 회상 */
+const TITLE_ORDER = [1, 0, 2];
 /** pad key -> title icon key, icon x: 옵션 (□/X = '1'), 도움말 (△/Y = '3'), 데이터 (L2 = '*') */
 const TITLE_PAD: [number, number, number][] = [[AVK.K1, TITLE_OPTION, 0x157], [AVK.K3, TITLE_HELP, 0x187], [AVK.STAR, TITLE_DATA, 0x1b6]];
 
 /** States 0x08 (110-frame intro) and 0x09 (menu). */
 export class TitleScene implements Scene {
+  readonly wide = true;                                               // fullscreen: sky and clouds across the margins
   private t = 0;
   private state: 8 | 9;
   private badgeUntil = performance.now() + 3500;   // rating badge for 3.5 s (FUN_00035b80)
-  /** title menu type: 0 START, 1 게임순위 */
+  /** title menu type: 0 START, 1 게임순위, 2 회상 (not in the original) */
   private sel = 0;
   constructor(private ctx: GameContext, intro = false) {
     this.state = intro ? 8 : 9;
     if (!intro) this.t = 200;
     ctx.audio.playBgm(0);
-    // touchdata[9]: 게임시작 (239,252,110,57)
-    ctx.input.uiMode = false; ctx.input.zones = [{ x: 239, y: 252, w: 110, h: 57, key: AVK.OK }, { x: 135, y: 258, w: 99, h: 44, key: TITLE_RANKING },
-      { x: 0x157, y: 7, w: 32, h: 33, key: TITLE_OPTION }, { x: 0x187, y: 7, w: 32, h: 33, key: TITLE_HELP }, { x: 0x1b6, y: 7, w: 32, h: 33, key: TITLE_DATA }];
+    // touchdata[9]: 게임시작 (239,252,110,57), 게임순위 (135,258,99,44); moved with the buttons (TITLE_BTN)
+    ctx.input.uiMode = false; ctx.input.zones = [{ x: TITLE_BTN.start - 6, y: 252, w: 110, h: 57, key: AVK.OK }, { x: TITLE_BTN.rank, y: 258, w: 99, h: 44, key: TITLE_RANKING },
+      { x: 0x157, y: 7, w: 32, h: 33, key: TITLE_OPTION }, { x: 0x187, y: 7, w: 32, h: 33, key: TITLE_HELP }, { x: 0x1b6, y: 7, w: 32, h: 33, key: TITLE_DATA },
+      { x: TITLE_BTN.replay, y: 258, w: 99, h: 44, key: TITLE_REPLAY }];
   }
   update(presses: number[]): void {
     this.t++;
@@ -162,7 +189,10 @@ export class TitleScene implements Scene {
       if (this.t > 0x6e || presses.includes(AVK.OK)) { this.state = 9; this.t = Math.max(this.t, 0x71); }
       return;
     }
-    for (const k of presses) if (k === AVK.LEFT || k === AVK.RIGHT) this.sel ^= 1;
+    for (const k of presses) if (k === AVK.LEFT || k === AVK.RIGHT) {
+      const i = TITLE_ORDER.indexOf(this.sel);
+      this.sel = TITLE_ORDER[(i + (k === AVK.LEFT ? 2 : 1)) % 3];
+    }
     // the three top-right icons are touch zones only; a pad reaches them with □ / △ / L2 (TITLE_PAD)
     presses = presses.map((k) => TITLE_PAD.find(([key]) => key === k)?.[1] ?? k);
     if (presses.length) frozenTick = this.t;                         // the frame at the confirming tick
@@ -170,6 +200,7 @@ export class TitleScene implements Scene {
     if (presses.includes(TITLE_OPTION)) { this.ctx.go(new TitleOptionScene(this.ctx, 'settings')); return; }   // state 0x0C
     if (presses.includes(TITLE_HELP)) { this.ctx.go(new TitleOptionScene(this.ctx, 'help')); return; }         // state 0x0D
     if (presses.includes(TITLE_RANKING) || (presses.includes(AVK.OK) && this.sel === 1)) { this.ctx.go(new RankingScene(this.ctx)); return; }
+    if (presses.includes(TITLE_REPLAY) || (presses.includes(AVK.OK) && this.sel === 2)) { this.ctx.go(new CharSelectScene(this.ctx, -1, true)); return; }
     if (presses.includes(AVK.OK)) this.ctx.go(new SlotScene(this.ctx));
   }
   draw(): void {
@@ -201,6 +232,7 @@ export function playTime(ticks: number): string {
 
 /** State 0x0A slot select (FUN_00034040 + FUN_00033dcc), C220 coordinates. */
 export class SlotScene implements Scene {
+  readonly wide = true;                                               // over the title backdrop
   private t = 0;
   private cur = 0;
   private slots: (SaveData | null)[] = [];
@@ -229,13 +261,17 @@ export class SlotScene implements Scene {
       if (r) {
         const id = this.popup.id;
         this.popup = null;
-        if (r === 'yes' && id === 0x5d) this.convert(this.cur);
+        if (r === 'yes' && id === 0x5d) this.convert(this.cur, this.laps[this.cur] === 3 ? 4 : 2);
         if (r === 'yes' && id === 1) { deleteSlot(this.cur); this.refresh(); }
       }
       return;
     }
     for (const k of presses) {
       if (k === AVK.STAR && this.slots[this.cur] && this.laps[this.cur] === 1) { this.popup = new Popup(this.ctx, 0x5d); this.ctx.audio.playSfx(0x1f); return; }
+      if (k === AVK.STAR && this.slots[this.cur] && this.laps[this.cur] === 3) {   // 3회차 (not in the original)
+        this.popup = new Popup(this.ctx, 0x5d, 0, () => '3회차를 시작하시겠습니까?|@레벨·아이템·스킬은 그대로이고 이야기는 처음부터 다시 시작합니다.|@몬스터가 더 강해지고(HP ×1.5, 공격 ×1.25) 경험치가 1.5배가 됩니다.');
+        this.ctx.audio.playSfx(0x1f); return;
+      }
       if (k >= 0x100 && k < 0x103) { if (this.cur === k - 0x100) this.choose(); else this.cur = k - 0x100; }
       else if (k === AVK.UP) this.cur = (this.cur + 2) % 3;
       else if (k === AVK.DOWN) this.cur = (this.cur + 1) % 3;
@@ -245,16 +281,19 @@ export class SlotScene implements Scene {
     }
   }
   /** FUN_00053510 case 0x36 (hardmode.md §3.2): keep level, items, gold, skills; reset the story */
-  private convert(i: number): void {
+  private convert(i: number, lap = 2): void {
     const s = this.slots[i];
     if (!s) return;
     const fresh = Story.fresh(s.cls).toJSON();
     const book = s.story?.book;
-    s.story = { ...fresh, book, gather: s.story?.gather, titles: s.story?.titles, title: s.story?.title };   // titles kept (hardmode.md §3.3)        // event bits, quests, visited maps, keys, chests reset; book / gather level kept
+    // not in the original: the added challenges and the attendance cycle stay with the slot (else they pay again)
+    const kept = Object.fromEntries(Object.entries(s.story?.counters ?? {}).filter(([k]) => k.startsWith('xch') || k.startsWith('attend')));
+    s.story = { ...fresh, book, gather: s.story?.gather, titles: s.story?.titles, title: s.story?.title,   // titles kept (hardmode.md §3.3)
+      counters: { ...(fresh.counters ?? {}), ...kept } };       // event bits, quests, visited maps, keys, chests reset; book / gather level kept
     s.buffs = undefined; s.day = 0;                                    // the return zone +0x3104 is kept
     if (s.inv) { s.inv.items = s.inv.items.filter((it) => it.type !== 0x1a); s.inv.keys = []; }   // key store wiped (FUN_00036180)
     saveSlot(i, s);
-    setLap(i, 2);
+    setLap(i, lap);
     this.refresh();
   }
 
@@ -291,12 +330,15 @@ export class SlotScene implements Scene {
         u.textId(0x1d6 + (sl.zone ?? 0), 0x91, iy + 0x1e, 'center');
         u.string(String(sl.gold), 0xda, iy + 0x2e, 'right');
         u.string(playTime(sl.playTicks), 0x4d, iy + 0x2e);
-        if (this.laps[i] === 2) u.textId(0x1a3c, 0xda, iy + 0x1e, 'right', { pen: 0xf800 });   // red "Hard"
+        if (this.laps[i] >= 2) u.textId(0x1a3c, 0xda, iy + 0x1e, 'right', { pen: 0xf800 });   // red "Hard" (3회차 is hard too)
+        // 회차 (not in the original): 1 normal (lap 0 / 1), 2 hard (2 / 3), 3 the third run (4); dimmed with the slot
+        const run = this.laps[i] >= 4 ? 3 : this.laps[i] >= 2 ? 2 : 1;
+        u.view(`slotLap${i}`, 7, iy + 8, 30, 10, h('div.slot-lap', { style: this.cur === i ? '' : 'opacity:0.5' }, `${run}회차`));
         u.alpha = 32;
       }
       const tx = this.ctx.assets.text, full = 'width:100%;height:100%';
-      if (this.slots[this.cur] && this.laps[this.cur] === 1)            // 하드코어 (FUN_00034040)
-        u.view('slotHard', 0xf0, 0x90, 0x44, 0x16, button(gt(tx[0x19d6] ?? ''), { sel: true, glow: false, style: full }));
+      if (this.slots[this.cur] && (this.laps[this.cur] === 1 || this.laps[this.cur] === 3))   // 하드코어 (FUN_00034040); 3회차 on a cleared hard slot
+        u.view('slotHard', 0xf0, 0x90, 0x44, 0x16, button(gt(this.laps[this.cur] === 3 ? '3회차' : tx[0x19d6] ?? ''), { sel: true, glow: false, style: full }));
       u.view('slotDelete', 0xf0, 0xbe, 0x44, 0x16, button(gt(tx[0x19d7] ?? ''), {   // 슬롯삭제 (variant 3 when empty)
         sel: !!this.slots[this.cur], glow: false, cls: this.slots[this.cur] ? '' : 'off', style: full,
       }));
@@ -306,12 +348,13 @@ export class SlotScene implements Scene {
   }
 }
 
-/** State 0x0B character select (FUN_0002eef8), confirmation popup 0. */
+/** State 0x0B character select (FUN_0002eef8), confirmation popup 0. With replay (not in the original, title 회상)
+ *  the chosen class opens its 회상 list instead, without the popup, and Esc goes back to the title. */
 export class CharSelectScene implements Scene {
+  readonly wide = true;
   private t = 0;
-  private cls = 0;
   private popup: Popup | null = null;
-  constructor(private ctx: GameContext, private slot: number) {
+  constructor(private ctx: GameContext, private slot: number, private replay = false, private cls = 0) {
     // touch (C220 + (80,40)): arrows (99,165) / (178,165) 39x23, 3 cards (49,33,223,130), close
     ctx.input.uiMode = false; ctx.input.zones = [
       { x: 179, y: 205, w: 39, h: 23, key: AVK.LEFT },
@@ -334,12 +377,16 @@ export class CharSelectScene implements Scene {
       return;
     }
     for (const k of presses) {
-      if (k >= 0x110 && k < 0x113) { if (this.cls === k - 0x110) this.popup = new Popup(this.ctx, 0, this.cls); else this.cls = k - 0x110; }
+      if (k >= 0x110 && k < 0x113) { if (this.cls === k - 0x110) { this.choose(); return; } this.cls = k - 0x110; }
       else if (k === AVK.LEFT) this.cls = (this.cls + 2) % 3;
       else if (k === AVK.RIGHT) this.cls = (this.cls + 1) % 3;
-      else if (k === AVK.OK) this.popup = new Popup(this.ctx, 0, this.cls);
-      else if (k === AVK.CLR) this.ctx.go(new SlotScene(this.ctx));
+      else if (k === AVK.OK) { this.choose(); return; }
+      else if (k === AVK.CLR) { this.ctx.go(this.replay ? new TitleScene(this.ctx) : new SlotScene(this.ctx)); return; }
     }
+  }
+  private choose(): void {
+    if (this.replay) this.ctx.go(new ReplayListScene(this.ctx, this.cls as 0 | 1 | 2));
+    else this.popup = new Popup(this.ctx, 0, this.cls);
   }
   draw(): void {
     render(this.ctx, () => {
@@ -401,9 +448,8 @@ class TitleOptionScene implements Scene {
 }
 
 /** Field play bound to a save slot, with SAVE, a pause popup and the game-over menu (0x1B). */
-/** HUD touch keys: the gate icon (156..188, 2..34) -> community 0x24, SHOP (-7) -> premium shop,
- *  the coupon button -> coupon shop 0x28 (FUN_00047488) */
-export const HUD_COMMUNITY = HUD.COMMUNITY, HUD_SHOP = HUD.SHOP, HUD_COUPON = HUD.COUPON, HUD_QUEST = HUD.QUEST;
+/** HUD touch keys: the gate icon (156..188, 2..34) -> community 0x24, SHOP (-7) -> premium shop */
+export const HUD_COMMUNITY = HUD.COMMUNITY, HUD_SHOP = HUD.SHOP, HUD_QUEST = HUD.QUEST;
 
 export class PlayScene implements Scene {
   private overSel = 0;
@@ -424,8 +470,15 @@ export class PlayScene implements Scene {
   /** game-over popups (0x4E / 0x7D) and the coupon shop opened from there (DAT_003b3cc1) */
   private overPopup: { p: Popup; then?: (r: 'yes' | 'no' | 'ok') => void } | null = null;
   private overShop: CouponShop | null = null;
+  /** 대사 로그 (backlog.ts) over the game */
+  private log: BacklogView | null = null;
+  /** 회상 / 보스 러시 run on top (sandbox.ts): the scene is kept instead of disposed */
+  private suspended = false;
+  suspend(): void { this.suspended = true; }
+  resume(): void { this.suspended = false; this.field.resumeFromSandbox(); }
 
   private constructor(private ctx: GameContext, private slot: number, readonly field: FieldScene) {
+    backlog.clear();
     field.autosave = () => { saveSlot(slot, field.toSave()); };
     field.prevSave = () => loadSlot(slot);
     field.bindSlot(slot);
@@ -439,10 +492,10 @@ export class PlayScene implements Scene {
   update(presses: number[]): void {
     // touch (UI mode): taps run the topmost area registered while drawing (menus / popups first, then the field UI)
     const f = this.field;
-    this.ctx.input.uiMode = !!(this.field.ending || this.overShop || this.overPopup || this.menu || this.shop || this.pause || this.notice || this.askSave || f.popup || f.busyTalking || f.dead);
+    this.ctx.input.uiMode = !!(this.log || this.field.ending || this.overShop || this.overPopup || this.menu || this.shop || this.pause || this.notice || this.askSave || f.popup || f.busyTalking || f.dead);
     this.ctx.input.padField = !this.ctx.input.uiMode;
     // touch: dialogue / event / popup on the field keeps a confirm button under the right thumb (fieldHud confirmControls)
-    this.ctx.input.confirm = this.ctx.input.device === 'touch' && !this.menu && !this.shop && !this.overShop && !this.pause && !f.ending
+    this.ctx.input.confirm = this.ctx.input.device === 'touch' && !this.log && !this.menu && !this.shop && !this.overShop && !this.pause && !f.ending
       && !f.warpList && !!(f.busyTalking || f.popup || this.notice || this.askSave || this.overPopup);
     for (const t of this.ctx.input.takeTaps()) {
       const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? this.ctx.hud.tapAt(t.x, t.y);
@@ -451,7 +504,10 @@ export class PlayScene implements Scene {
     if (this.field.ending) {                                  // state 0x3D: black, BGM 0, popup 0x5C unless hard
       if (!this.endPopup) {
         this.ctx.audio.playBgm(0);
-        if (this.field.hard) { this.ctx.go(new TitleScene(this.ctx)); return; }
+        if (this.field.hard) {
+          if (this.field.lap === 2) setLap(this.slot, 3);              // 3회차 (not in the original): the hard ending opens it
+          this.ctx.go(new TitleScene(this.ctx)); return;
+        }
         this.endPopup = new Popup(this.ctx, 0x5c);
       }
       if (this.endPopup.handle(presses)) { setLap(this.slot, 1); this.ctx.go(new TitleScene(this.ctx)); }   // slot save not written
@@ -484,6 +540,7 @@ export class PlayScene implements Scene {
       }
       return;
     }
+    if (this.log) { if (!this.log.update(presses)) this.log = null; return; }
     if (this.notice) { if (this.notice.handle(presses)) this.notice = null; return; }
     if (this.askSave) {
       const r = this.askSave.handle(presses);
@@ -497,6 +554,15 @@ export class PlayScene implements Scene {
       else if (r) this.pause = null;
       return;
     }
+    // 편의 기능: during a dialogue page the pad's □ / △ (keyboard 1 / 2) are LOG / AUTO; L (pad d-pad → on the field)
+    // opens the log anywhere on the field, K toggles auto there too (said on the HUD when no dialogue shows the button)
+    if (f.dialogueShown) presses = presses.map((k) => (k === AVK.K1 ? AVK.LOG : k === AVK.K3 ? AVK.AUTO : k));
+    if (presses.includes(AVK.AUTO) && !this.shop && !this.menu && !f.popup && !f.warpList) {
+      this.ctx.options.auto ^= 1; saveOptions(this.ctx.options);
+      if (!f.dialogueShown) f.hud.message(`자동 진행 ${this.ctx.options.auto ? '켬' : '끔'}`);
+    }
+    if (presses.includes(AVK.LOG) && !this.shop && !this.menu && !f.popup && !f.warpList) { this.log = new BacklogView(); return; }
+    presses = presses.filter((k) => k !== AVK.LOG && k !== AVK.AUTO && k !== AVK.FAST);
     if (presses.includes(AVK.SAVE) && !this.field.busyTalking) {
       // HUD SAVE (misc-systems.md §7.2): popup 8 where saving is allowed, else "저장이 불가능한 지역입니다."
       if (this.field.canSave) this.askSave = new Popup(this.ctx, 8);
@@ -509,12 +575,18 @@ export class PlayScene implements Scene {
       if (r === 'close' || this.field.closeMenu) { this.menu = null; this.field.closeMenu = false; }   // entering the dimension closes the menu
       else if (r === 'title') this.pause = new Popup(this.ctx, 10);
       else if (r === 'save' && this.field.canSave) this.askSave = new Popup(this.ctx, 8);   // menu save: silent where not allowed
+      else if (r === 'launch') {                                     // 기록실 → 보스 기록: 보스 러시 on a copy of the slot (sandbox.ts)
+        this.menu.takeLaunch();
+        if (this.field.gardenMode !== 0 || this.field.inEvent) { this.notice = new Popup(this.ctx, 0x18, 0, () => '지금은 시작할 수 없습니다.'); return; }
+        this.menu = null;
+        void SandboxScene.rush(this.ctx, this);
+      }
       return;
     }
     if (presses.includes(AVK.CLR) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field); return; }
     if (presses.includes(AVK.MAP) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field).openTab(5); return; }
     if (presses.includes(HUD_QUEST) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field).openTab(4); return; }
-    for (const [key, screen] of [[HUD_COMMUNITY, 'dimension'], [HUD_SHOP, 'premium'], [HUD_COUPON, 'coupon']] as const) {
+    for (const [key, screen] of [[HUD_COMMUNITY, 'dimension'], [HUD_SHOP, 'premium']] as const) {
       if (!presses.includes(key) || this.field.busyTalking) continue;
       const m = new GameMenu(this.ctx, this.field).openTab(7);
       if (screen) m.community.open(screen);
@@ -608,6 +680,7 @@ export class PlayScene implements Scene {
       this.overPopup?.p.draw();
       u.end();
     }
+    if (this.log) { this.ctx.ui.begin(); this.log.draw(this.ctx.ui, this.ctx.input); this.ctx.ui.end(); }
     const pop = this.notice ?? this.askSave ?? this.pause;
     if (pop) {
       this.ctx.ui13.begin();
@@ -621,7 +694,7 @@ export class PlayScene implements Scene {
     return `슬롯 ${this.slot + 1} · ${this.field.debugLine()}`;
   }
 
-  dispose(): void { this.field.dispose(); }
+  dispose(): void { if (!this.suspended) this.field.dispose(); }
 }
 
 class LoadingScene implements Scene {

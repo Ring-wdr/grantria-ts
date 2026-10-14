@@ -1,6 +1,7 @@
 // Sound (engine.md §5, GrantriaSound + PlayBGM FUN_0001afb0 / PlaySFX FUN_0001af90):
 // n < 19 = BGM sN.ogg, looping at gain 0.5, not restarted when already playing;
 // n >= 19 = SFX sN.ogg (48 -> s53) at gain 0.8 on a single stream (a new one stops the previous).
+// The music / effect volumes (0..10, not in the original) scale those gains; 10 keeps them.
 // Browsers start audio only after a user gesture (the context resumes on the first input); in the background
 // (platform lifecycle: hidden page, minimised window, app switched away) everything is muted.
 import { platform } from '../core/platform';
@@ -14,6 +15,9 @@ export class GameAudio {
   private sfxGain: GainNode | null = null;
   /** option.volume: 0 mutes (BGM gain 0, SFX not played) */
   enabled = true;
+  /** music / sound effect volume 0..10 (편의 설정) */
+  private bgmLevel = 10;
+  private sfxLevel = 10;
   private wanted = -1;
 
   /** the page is hidden (minimised window, app in the background): everything stays silent until it is back */
@@ -25,10 +29,10 @@ export class GameAudio {
       try {
         this.ctx = new AudioContext();
         this.bgmGain = this.ctx.createGain();
-        this.bgmGain.gain.value = this.enabled ? 0.5 : 0;
+        this.bgmGain.gain.value = this.bgmValue();
         this.bgmGain.connect(this.ctx.destination);
         this.sfxGain = this.ctx.createGain();
-        this.sfxGain.gain.value = 0.8;
+        this.sfxGain.gain.value = this.sfxValue();
         this.sfxGain.connect(this.ctx.destination);
         if (this.paused) void this.ctx.suspend();
         if (this.wanted >= 0) { const n = this.wanted; this.bgm.n = -1; this.playBgm(n); }
@@ -80,13 +84,19 @@ export class GameAudio {
       src.start();
       this.bgm.src = src;
     });
-    if (this.bgmGain) this.bgmGain.gain.value = this.enabled ? 0.5 : 0;
+    if (this.bgmGain) this.bgmGain.gain.value = this.bgmValue();
   }
 
-  /** Soundmute: volume 0 silences the BGM (gain 0) and skips SFX requests */
-  setEnabled(on: boolean): void {
+  private bgmValue(): number { return this.enabled ? 0.5 * this.bgmLevel / 10 : 0; }
+  private sfxValue(): number { return 0.8 * this.sfxLevel / 10; }
+
+  /** Soundmute: volume 0 silences the BGM (gain 0) and skips SFX requests; bgm / sfx scale the gains (0..10) */
+  setEnabled(on: boolean, bgm = this.bgmLevel, sfx = this.sfxLevel): void {
     this.enabled = on;
-    if (this.bgmGain) this.bgmGain.gain.value = on ? 0.5 : 0;
+    this.bgmLevel = bgm;
+    this.sfxLevel = sfx;
+    if (this.bgmGain) this.bgmGain.gain.value = this.bgmValue();
+    if (this.sfxGain) this.sfxGain.gain.value = this.sfxValue();
   }
 
   stopBgm(): void {
@@ -96,7 +106,7 @@ export class GameAudio {
   }
 
   playSfx(n: number): void {
-    if (!this.enabled || !this.ctx || n < 19 || (n > 47 && n !== 48)) return;
+    if (!this.enabled || !this.sfxLevel || !this.ctx || n < 19 || (n > 47 && n !== 48)) return;
     void this.load(n).then((buf) => {
       if (!buf || !this.ctx) return;
       try { this.sfx?.stop(); } catch { /* already ended */ }

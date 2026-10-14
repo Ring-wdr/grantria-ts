@@ -56,8 +56,8 @@ const keyOfButton = (b: PadButton): number | undefined => PAD_BINDINGS[b] ?? DPA
 const extraOf = (b: PadButton): number | undefined => PAD_BINDINGS[b] === AVK.K7 ? AVK.TAB_L : PAD_BINDINGS[b] === AVK.K9 ? AVK.TAB_R : undefined;
 
 /** on the field (no menu, popup or dialogue) the d-pad presses the HUD buttons instead of walking (the left
- *  stick walks): up QUEST, left SHOP, right coupon shop, down the gate icon (community) */
-export const PAD_FIELD: Partial<Record<PadButton, number>> = { up: HUD.QUEST, left: HUD.SHOP, right: HUD.COUPON, down: HUD.COMMUNITY };
+ *  stick walks): up QUEST, left SHOP, right the dialogue log (was the coupon shop), down the gate icon (community) */
+export const PAD_FIELD: Partial<Record<PadButton, number>> = { up: HUD.QUEST, left: HUD.SHOP, right: AVK.LOG, down: HUD.COMMUNITY };
 
 /** keys a button sends when pressed, on the field or in the UI */
 export function padKeysOf(b: PadButton, field: boolean): number[] {
@@ -74,9 +74,9 @@ export function padButtonFor(key: number): PadButton | null {
 }
 
 const GLYPHS: Record<PadKind, Partial<Record<PadButton, string>>> = {
-  ps: { south: '✕', east: '○', west: '□', north: '△', l1: 'L1', r1: 'R1', l2: 'L2', r2: 'R2', select: 'CREATE', start: 'OPTIONS', r3: 'R3' },
-  xbox: { south: 'A', east: 'B', west: 'X', north: 'Y', l1: 'LB', r1: 'RB', l2: 'LT', r2: 'RT', select: 'VIEW', start: 'MENU', r3: 'RS' },
-  generic: { south: 'A', east: 'B', west: 'X', north: 'Y', l1: 'L1', r1: 'R1', l2: 'L2', r2: 'R2', select: 'SELECT', start: 'START', r3: 'R3' },
+  ps: { south: '✕', east: '○', west: '□', north: '△', l1: 'L1', r1: 'R1', l2: 'L2', r2: 'R2', select: 'CREATE', start: 'OPTIONS', l3: 'L3', r3: 'R3' },
+  xbox: { south: 'A', east: 'B', west: 'X', north: 'Y', l1: 'LB', r1: 'RB', l2: 'LT', r2: 'RT', select: 'VIEW', start: 'MENU', l3: 'LS', r3: 'RS' },
+  generic: { south: 'A', east: 'B', west: 'X', north: 'Y', l1: 'L1', r1: 'R1', l2: 'L2', r2: 'R2', select: 'SELECT', start: 'START', l3: 'L3', r3: 'R3' },
 };
 const DPAD: Partial<Record<PadButton, string>> = { up: '▲', down: '▼', left: '◀', right: '▶' };
 

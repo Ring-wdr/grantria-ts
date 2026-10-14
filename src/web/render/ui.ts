@@ -391,6 +391,9 @@ export class GlUi extends Ui {
   readonly text: TextRenderer;
   private cam: THREE.OrthographicCamera;
   private white: THREE.DataTexture;
+  /** fullscreen bleed (the field's effect layer, compositor.pad): the view reaches this far past both sides of the
+   *  480-wide window, like the field under it, so balloons and marks over actors in the margins are not cut off */
+  bleed = 0;
 
   constructor(assets: WebAssets, private compositor: Compositor, zoom = 1) {
     super(assets, zoom);
@@ -445,8 +448,17 @@ export class GlUi extends Ui {
     this.withAlpha(() => this.layer.texture(r.texture, 0, 0, r.width, r.height, x0 + this.ox, y + this.oy));
   }
 
-  endClear(): void {
-    this.compositor.draw(this.layer.group, this.cam, VIEW_W, VIEW_H, undefined, true);
+  endClear(): void { this.present(true); }
+
+  /** draw the layer into the compositor target: the 480x320 view, wider by the bleed on both sides */
+  private present(clear: boolean): void {
+    const hw = VIEW_W / 2 / this.zoom, b = this.bleed / this.zoom;
+    if (this.cam.left !== VIEW_W / 2 - hw - b) {
+      this.cam.left = VIEW_W / 2 - hw - b;
+      this.cam.right = VIEW_W / 2 + hw + b;
+      this.cam.updateProjectionMatrix();
+    }
+    this.compositor.draw(this.layer.group, this.cam, VIEW_W + 2 * this.bleed, VIEW_H, undefined, clear);
   }
 
   dispose(): void {
@@ -455,9 +467,7 @@ export class GlUi extends Ui {
     this.white.dispose();
   }
 
-  end(): void {
-    this.compositor.draw(this.layer.group, this.cam, VIEW_W, VIEW_H, undefined, false);
-  }
+  end(): void { this.present(false); }
 }
 
 /** FUN_00049458 triangle wave. */

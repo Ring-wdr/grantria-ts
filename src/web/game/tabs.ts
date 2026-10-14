@@ -16,6 +16,8 @@ import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
 import { button, cSprite, gt, h, padBadge, sprite, type KeyAct, type VChild, type VNode } from '../render/view';
 import '../styles/tabs.css';
+import { compareGear, equipSlot } from '../../core/rules/compare';
+import '../styles/convenience.css';
 import { platform } from '../../core/platform';
 
 /** URL of an image under assets/images (resolved per call: the platform is installed at boot) */
@@ -27,7 +29,8 @@ const ACTION = { DETAIL: 1, USE: 2, DECOMPOSE: 3, QUICK: 5, DROP: 4, CANCEL: 6, 
 /** FUN_00036d24: 0x1b subs that can go on a quick slot (half HP/MP, 차원·공격·방어 elixirs, special elixirs) */
 const QUICK_1B = new Set([0x02, 0x15, 0x16, 0x17, 0x23, 0x24, 0x25, 0x26]);
 // 0x30 (황금알) and the operator boxes 0x33..0x38 are server gifts with no offline source: no "use" entry
-const USABLE_1B = new Set([2, 4, 5, 6, 7, ...range(0xe, 0x1a), ...range(0x1d, 0x20), ...range(0x22, 0x2e)]);
+// 0x30 황금알 is usable here (not in the original): the 출석 보상's day-7 gift (core/rules/attendance.ts)
+const USABLE_1B = new Set([2, 4, 5, 6, 7, ...range(0xe, 0x1a), ...range(0x1d, 0x20), ...range(0x22, 0x2e), 0x30]);
 
 function range(a: number, b: number): number[] { return Array.from({ length: b - a + 1 }, (_, i) => a + i); }
 
@@ -60,6 +63,42 @@ export function cellView(fs: FieldScene, it: Item | null | undefined, opts: { se
 /** stat option line (text 1972 + id, "%d" / "%%") */
 function optionText(t: string[], id: number, v: number): string {
   return (t[1972 + id] ?? '').replace('%d', String(v)).replace('%%', '%');
+}
+
+/** an option difference: "+-3" of the formatted text becomes "-3" */
+function optionDiffText(t: string[], id: number, d: number): string {
+  return optionText(t, id, d).replace('+-', '-').replace('--', '-');
+}
+
+/**
+ * 비교 (not in the original): the gear item against the one worn in its slot — main stat, every option and the
+ * sockets, green for a gain and red for a loss. Nothing when it is the worn item itself or not gear.
+ */
+export function compareView(fs: FieldScene, it: Item): VChild {
+  if (it.type >= 0x10) return null;
+  const worn = fs.inv.equip[equipSlot(it)] ?? null;
+  if (worn === it) return null;
+  const t = fs.db.a.text, d = compareGear(it, worn);
+  const label = it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6;
+  const sign = (v: number) => (v > 0 ? `+${v}` : String(v));
+  const pen = (v: number) => (v > 0 ? 0x07e0 : 0xf800);
+  return [
+    h('div.v-rule'),
+    gt(worn ? `착용 중: ${worn.name}` : '착용 중인 장비 없음', { pen: 0xc618, cls: 'tb-ellipsis' }),
+    gt(`${t[label] ?? ''} ${d.base === 0 ? '±0' : `${sign(d.base)} ${d.base > 0 ? '▲' : '▼'}`}`, { pen: d.base === 0 ? 0xc618 : pen(d.base) }),
+    d.options.map(([id, v]) => gt(`${optionDiffText(t, id, v)} ${v > 0 ? '▲' : '▼'}`, { pen: pen(v) })),
+    (d.gems[1] || d.socketsOld[1]) ? gt(`소켓 ${d.gems[0]}/${d.gems[1]} (착용 중 ${d.socketsOld[0]}/${d.socketsOld[1]})`, { pen: 0xc618 }) : null,
+  ];
+}
+
+/** main-stat change against the worn item, for the inventory name bar */
+function baseDelta(fs: FieldScene, it: Item | undefined): VChild {
+  if (!it || it.type >= 0x10) return null;
+  const worn = fs.inv.equip[equipSlot(it)] ?? null;
+  if (worn === it) return null;
+  const v = compareGear(it, worn).base;
+  if (v === 0) return h('span.tb-delta', null, '±0');
+  return h(`span.tb-delta.${v > 0 ? 'up' : 'down'}`, null, `${v > 0 ? '▲' : '▼'}${Math.abs(v)}`);
 }
 
 /** ◀ / ▶ arrow (t.pxl 0,0x13 15x19) that presses LEFT / RIGHT */
@@ -129,7 +168,8 @@ export function itemDetailView(fs: FieldScene, it: Item, footer?: VChild, overla
       gt(desc),
       gear && h('div.v-rule'),
       gear && gt(`${t[label] ?? ''} ${it.base}`, { pen: YELLOW565 }),
-      gear && it.options.filter(([id]) => id !== 0xff).map(([id, v]) => gt(optionText(t, id, v), { pen: 0x9e7f }))),
+      gear && it.options.filter(([id]) => id !== 0xff).map(([id, v]) => gt(optionText(t, id, v), { pen: 0x9e7f })),
+      gear && compareView(fs, it)),
     footer,
     overlay);
 }
@@ -451,7 +491,7 @@ export class InventoryTab {
       this.action?.backdrop(),
       h('div.v-col.tb-bags', null, bagButtons),
       h('div.v-col.v-grow', { style: 'gap:4px' },
-        h('div.v-box.v-heading.tb-name', null, cur && gt(cur.name, { cls: 'tb-ellipsis' })),
+        h('div.v-box.v-heading.tb-name', null, cur && gt(cur.name, { cls: 'tb-ellipsis' }), baseDelta(fs, cur)),
         h('div.v-box.v-grow.tb-grid', null, cells),
         h('div.v-row', { style: 'gap:6px' },
           h('div.v-box.v-row.v-grow.tb-gold', null, sprite('t', 38, 24, 12, 12), h('span.v-grow', null, inv.gold.toLocaleString('en-US'))),
@@ -529,10 +569,12 @@ export class EquipTab {
   private action: ActionPopup | null = null;
   private detail: Item | null = null;
   private pick: { cands: number[]; cur: number } | null = null;
+  /** not in the original: DROP of a worn item asks first (popup 0xB, as for a bag item) */
+  private confirmDrop: Popup | null = null;
 
   constructor(private ctx: GameContext, private fs: FieldScene, private playerCmf: Cmf) {}
 
-  get busy(): boolean { return !!(this.action || this.detail || this.pick); }
+  get busy(): boolean { return !!(this.action || this.detail || this.pick || this.confirmDrop); }
 
   private slotOf(it: Item): number { return it.type === 15 ? 5 : Math.trunc(it.type / 3); }
 
@@ -540,6 +582,14 @@ export class EquipTab {
     this.t++;
     const inv = this.fs.inv;
     if (this.detail) { if (presses.includes(AVK.OK) || presses.includes(AVK.CLR)) this.detail = null; return true; }
+    if (this.confirmDrop) {
+      const r = this.confirmDrop.handle(presses);
+      if (r) {
+        this.confirmDrop = null;
+        if (r === 'yes' && inv.equip[this.slot]) { inv.equip[this.slot] = null; this.fs.recompute(); }
+      }
+      return true;
+    }
     if (this.pick) {
       const p = this.pick;
       for (const k of presses) {
@@ -581,7 +631,7 @@ export class EquipTab {
       const cands = inv.items.map((x, i) => [x, i] as const).filter(([x]) => x.type < 0x10 && this.slotOf(x) === this.slot).map(([, i]) => i);
       this.pick = { cands, cur: 0 };
     } else if (action === ACTION.UNEQUIP) { inv.unequip(this.slot); this.fs.recompute(); }
-    else if (action === ACTION.DROP && it) { inv.equip[this.slot] = null; this.fs.recompute(); }
+    else if (action === ACTION.DROP && it) this.confirmDrop = new Popup(this.ctx, 0xb);   // the original drops at once
   }
 
   /** FUN_0005b4b8: six slots around the character preview, the slot's item name, stats */
@@ -658,4 +708,6 @@ export class EquipTab {
   drawOverlay(u: Ui): void {
     this.action?.draw(u);
   }
+
+  drawPopups(): void { this.confirmDrop?.draw(); }
 }

@@ -277,6 +277,8 @@ export class Inventory {
   /** GRAN_GET FUN_0003ecc4: returns false when refused (full, or a stack would exceed 9999). */
   /** type 0x1d is a collection flag (keys, sage stones), not an item (GRAN_GET) */
   onCollect: (sub: number) => void = () => {};
+  /** an item reached the bag or the key store (not in the original: the item book, rules/records.ts) */
+  onGot: (it: Item) => void = () => {};
 
   gain(type: number, sub: number, grade: number, count: number, rng: Rng, made?: Item): boolean {
     const text = this.db.a.text;
@@ -332,6 +334,7 @@ export class Inventory {
   }
 
   private logGot(it: Item, count: number): void {
+    this.onGot(it);
     const text = this.db.a.text;
     const name = it.name;
     if (count < 2) this.log('got', (text[0x3b6] ?? '%s').replace('%s', name));

@@ -15,6 +15,14 @@ export function buffDef(a: Assets, i: number): { k: number; v: number; dur: numb
   return { k: a.d8(0x2513b + 4 * i), v, dur: d3 === 0xff ? 20000 : a.s8(0x2513d + 4 * i) * 10 };
 }
 
+/** the item that starts buff slot i (FieldScene use): elixirs 0x11 sub i + 14, 차원의 문 elixirs 0x1b sub i - 7,
+ *  special elixirs 0x1b sub i + 4 */
+export function buffItem(i: number): [number, number] {
+  if (i < 28) return [0x11, i + 14];
+  if (i < 31) return [0x1b, i - 7];
+  return [0x1b, i + 4];
+}
+
 export class Buffs {
   slots: BuffSlot[] = Array.from({ length: BUFF_COUNT }, () => ({ t: 0, on: false }));
   /** slot drawn as the aura (last used), -1 = pick the highest active */
@@ -56,6 +64,17 @@ export class Buffs {
     if (i < 0) return -1;
     const base = AURA[i] ?? 212, t = this.slots[i].t;
     return t <= 11 ? base + ((t >> 2) % 12) : base + 5 + ((t >> 2) % 5);
+  }
+
+  /** active buffs with the ticks left (dur 20000 = until cleared: -1), for the HUD buff icons (not in the original) */
+  active(a: Assets): { slot: number; left: number }[] {
+    const out: { slot: number; left: number }[] = [];
+    this.slots.forEach((s, i) => {
+      if (!s.on) return;
+      const d = buffDef(a, i).dur;
+      out.push({ slot: i, left: d >= 20000 ? -1 : Math.max(0, d - s.t) });
+    });
+    return out;
   }
 
   toJSON(): [number, number][] { return this.slots.map((s) => [s.t, s.on ? 1 : 0]); }

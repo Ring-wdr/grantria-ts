@@ -2,8 +2,18 @@
 // typewriter of text-rendering.md §0.5: width W-12, 3 lines per page, 13 px lines, '@' breaks,
 // character-based wrapping (margin 18 on a page's 3rd line, else 9), one character per frame.
 // Window frames: c.pxl pieces of FUN_0002a270 styles 8 / 0xd (polish.md §5); the original has no page-end mark.
+// Not in the original (편의 설정): typewriter speed, auto advance, the blinking ▼ at a page end and the LOG / AUTO
+// buttons. The event clock stands still while a page is shown, so none of them changes an event's timing.
 import { stringWidth } from '../render/text';
 import type { Ui } from '../render/ui';
+import type { Options } from '../../core/save/options';
+import { optionFps } from '../../core/save/options';
+import { AVK } from '../input/input';
+import { button, h, type VChild } from '../render/view';
+import { keyHint } from '../input/keyHints';
+import type { PadKind } from '../input/gamepad';
+import '../styles/convenience.css';
+import { readLog } from '../../core/save/readLog';
 
 const W = 480, H = 320;
 
@@ -40,9 +50,29 @@ export class Dialogue {
   page = 0;
   /** typewriter position in characters within the page */
   shown = 0;
+  /** ticks since the page was complete (auto advance) */
+  private doneTicks = 0;
+  /** the line was read before (읽은 대사): it may be fast-forwarded and shows a mark */
+  readonly seen: boolean;
 
-  constructor(text: string, readonly speakerName: string, readonly face: number, readonly shake = false) {
+  /** textId: the game text shown, for the log and the read marks (-1 = not tracked) */
+  constructor(text: string, readonly speakerName: string, readonly face: number, readonly shake = false, readonly textId = -1) {
     this.lines = wrapEventText(text, W - 12);
+    this.seen = readLog().has(textId);
+  }
+
+  /** the last page was dismissed: remember the line as read (written to storage at once if new) */
+  markRead(): void {
+    if (this.textId < 0) return;
+    readLog().mark(this.textId);
+    readLog().flush();
+  }
+
+  /** held fast-forward (편의 설정 빨리 넘기기): fills the page at once and turns it after 2 ticks; true = advance now */
+  fastDue(o: Options, holding: boolean): boolean {
+    if (!holding || !o.skip || (o.skip === 1 && !this.seen)) return false;
+    if (!this.pageDone) { this.shown = this.pageLen(); this.doneTicks = 0; return false; }
+    return this.doneTicks >= 2;
   }
 
   get pages(): number { return Math.max(1, Math.ceil(this.lines.length / 3)); }
@@ -50,12 +80,26 @@ export class Dialogue {
   private pageLen(): number { return this.pageLines().reduce((n, l) => n + units(l), 0); }
   get pageDone(): boolean { return this.shown >= this.pageLen(); }
 
-  tick(): void { if (!this.pageDone) this.shown++; }
+  /** one tick of the typewriter: 1 character in the original, more with the text speed option */
+  tick(o?: Options): void {
+    if (this.pageDone) { this.doneTicks++; return; }
+    const step = [1, 2, 4, Infinity][o?.textSpeed ?? 0] ?? 1;
+    this.shown = Math.min(this.pageLen(), this.shown + step);
+    this.doneTicks = 0;
+  }
+
+  /** auto advance: the page has been complete long enough to read it (about 10 / 15 / 22 characters a second) */
+  autoDue(o: Options): boolean {
+    if (!o.auto || !this.pageDone) return false;
+    const chars = this.pageLines().reduce((n, l) => n + l.replace(/\|./g, '').length, 0);
+    const ms = [1400 + chars * 100, 900 + chars * 65, 500 + chars * 45][o.autoSpeed] ?? 900 + chars * 65;
+    return this.doneTicks * (1000 / optionFps(o)) >= ms;
+  }
 
   /** '5': finish the page, else next page; true when the last page is dismissed */
   advance(): boolean {
     if (!this.pageDone) { this.shown = this.pageLen(); return false; }
-    if (this.page + 1 < this.pages) { this.page++; this.shown = 0; return false; }
+    if (this.page + 1 < this.pages) { this.page++; this.shown = 0; this.doneTicks = 0; return false; }
     return true;
   }
 
@@ -72,7 +116,41 @@ export class Dialogue {
       left -= units(ln);
       u.string(vis.endsWith('|') ? vis.slice(0, -1) : vis, 6, H - 52 + dy + i * 13);
     });
+    if (this.pageDone && (frame & 8)) u.string('▼', W - 14, H - 15, 'left', { pen: 0xffe0 });
+    // beside the LOG / AUTO buttons: the box's right end is under the touch confirm button
+    if (this.seen) u.string('읽은 대사', 196, H - 84, 'left', { pen: 0xc618, outline: 0x3186 });
   }
+}
+
+/** '5' or the 빨리 넘기기 key held for 0.3 s (a tap never fast-forwards) */
+export class HoldSkip {
+  private t = 0;
+  /** a key already down when the dialogue opened (the '5' that started a talk, attack held into an event) must be let
+   *  go first, so a hold never runs into pages or a shop the player did not mean to skip */
+  private armed = false;
+  update(held: boolean): boolean {
+    if (!held) { this.armed = true; this.t = 0; return false; }
+    if (this.armed) this.t++;
+    return this.t >= 6;
+  }
+  reset(): void { this.t = 0; this.armed = false; }
+}
+
+type HintInput = { device: string; padKind: PadKind };
+
+/** the key or pad button glyph of an action, inline after a label (nothing on touch) */
+export function inlineHint(input: HintInput, key: number): VChild {
+  const k = keyHint(input, key);
+  return k && h(`span.u-pad.dlg-key.${k.cls.split(' ').join('.')}`, null, k.glyph);
+}
+
+/** LOG / AUTO buttons beside the name plate, each with its key: pad □ / △ (the quick-slot 1 / 2 buttons, which
+ *  turn into LOG / AUTO while a page is up), keyboard L / K */
+export function drawDialogueButtons(u: Ui, auto: boolean, input: HintInput): void {
+  const pad = input.device === 'pad';
+  u.view('dlgButtons', 90, H - 88, 130, 19, h('div.v-row.dlg-buttons', null,
+    button(['LOG', inlineHint(input, pad ? AVK.K1 : AVK.LOG)], { cls: 'dlg-btn', glow: false, on: () => [AVK.LOG] }),
+    button(['AUTO', inlineHint(input, pad ? AVK.K3 : AVK.AUTO)], { sel: auto, cls: `dlg-btn${auto ? ' on' : ''}`, glow: false, on: () => [AVK.AUTO] })));
 }
 
 /** CAPTION (cmd 0x1d): white centred text rising 1 px per frame over 80 frames. */

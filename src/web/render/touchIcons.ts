@@ -8,7 +8,8 @@ export const ICONS = {
   quest: svg('<path d="M7 4h10a2 2 0 0 1 2 2v14l-3-2-2.5 2-2.5-2-2.5 2L6 18V5a1 1 0 0 1 1-1z"/><path d="M10 9h6M10 13h4"/>'),
   save: svg('<path d="M5 4h11l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><path d="M8 4v5h7V4"/><path d="M8 20v-6h8v6"/>'),
   shop: svg('<path d="M5 8h14l-1.2 12H6.2z"/><path d="M9 10V7a3 3 0 0 1 6 0v3"/>'),
-  coupon: svg('<path d="M3 7h18v3a2 2 0 0 0 0 4v3H3v-3a2 2 0 0 0 0-4z"/><path d="M15 7v10" stroke-dasharray="1.5 2.5"/>'),
+  // 대사 로그: a speech bubble with lines
+  log: svg('<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>'),
   check: svg('<path d="m5 12.5 4.5 4.5L19 7"/>'),
   chevron: svg('<path d="m6 15 6-6 6 6"/>'),
 } as const;

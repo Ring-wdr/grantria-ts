@@ -1,6 +1,8 @@
 // Data management (title "info" icon): JSON backup of every web save, and import / export of the
 // original save.dat / gamedata.dat through file upload and download (account.md §5.3).
 import { account, resetAccountCache, saveAccount } from '../../core/rules/account';
+import { resetRecordsCache } from '../../core/rules/records';
+import { resetReadLogCache } from '../../core/save/readLog';
 import { AVK } from '../input/input';
 import { SAVE_SIZE, SLOT_SIZE, backupJson, buildGamedata, buildOption, buildSlot, fileKind, memberFromName, parseGamedata, parseOption, parseSlot, restoreJson, xtea, type OrigAccount } from '../../core/save/origfile';
 import { loadOptions, saveOptions } from '../../core/save/options';
@@ -25,7 +27,7 @@ export async function importOriginal(files: { name: string; bytes: Uint8Array }[
     else if (kind === 'save') { save = xtea(f.bytes, false); member = memberFromName(f.name); }
     else if (kind === 'option') {
       const o = parseOption(xtea(f.bytes, false)), cur = loadOptions();
-      saveOptions({ volume: o.volume & 1, vibration: o.vibration & 1, speed: Math.min(2, o.speed), minimap: o.minimap & 1, effects: o.effects & 1, fullscreen: cur.fullscreen });
+      saveOptions({ ...cur, volume: o.volume & 1, vibration: o.vibration & 1, speed: Math.min(2, o.speed), minimap: o.minimap & 1, effects: o.effects & 1 });   // settings outside option.dat stay
       try { platform().storage.set('grantria.option.raw', o.raw); } catch { /* storage unavailable */ }
       optionDone = true;
     }
@@ -76,6 +78,7 @@ export function exportOriginal(d8: (o: number) => number, m: bigint): { name: st
 }
 
 export class DataScene implements Scene {
+  readonly wide = true;                                               // over the title backdrop
   private cur = 0;
   private t = 0;
   private msg = '';
@@ -100,7 +103,13 @@ export class DataScene implements Scene {
       if (i === 0) { await download(`grantria-backup-${new Date().toISOString().slice(0, 10)}.json`, backupJson(), 'application/json'); this.msg = '백업 파일을 내려받았습니다.'; }
       else if (i === 1) {
         const [f] = await pickFiles('.json,application/json', false);
-        if (f) { const n = restoreJson(new TextDecoder().decode(f.bytes)); resetAccountCache(); this.msg = `백업을 복원했습니다 (${n}개 항목).`; }
+        if (f) {
+          const n = restoreJson(new TextDecoder().decode(f.bytes));
+          // drop every in-memory copy of what the backup replaced, or the next write puts the old one back
+          resetAccountCache(); resetRecordsCache(); resetReadLogCache();
+          this.ctx.options = loadOptions(); this.ctx.applyOptions();
+          this.msg = `백업을 복원했습니다 (${n}개 항목).`;
+        }
       } else if (i === 2) {
         const files = await pickFiles('*', true);
         if (files.length) this.msg = await importOriginal(files);

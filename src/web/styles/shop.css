@@ -76,6 +76,7 @@
 /* function menu 0x16 */
 .shop-menu { justify-content: center; gap: 12px; padding: 0 10px; }
 .shop-menu > .v-btn { flex: none; }
+.shop-menu.dense { justify-content: space-evenly; gap: 4px; min-height: 0; }
 
 /* list 0x15: bag keycaps | 4x4 grid */
 .shop-list { gap: 9px; align-items: stretch; padding-left: 2px; }

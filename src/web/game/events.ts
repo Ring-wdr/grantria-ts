@@ -7,7 +7,11 @@
 import type { Dir } from '../../core/combat/player';
 import { blur8, smear } from '../../core/world/screenfx';
 import type { FieldScene } from './fieldScene';
-import { Dialogue, drawCaption } from './dialogue';
+import { Dialogue, HoldSkip, drawCaption, drawDialogueButtons } from './dialogue';
+import { readLog } from '../../core/save/readLog';
+import { addSeen } from '../../core/rules/records';
+import { backlog } from './backlog';
+import { fxScale, optionFps } from '../../core/save/options';
 import { AVK } from '../input/input';
 import type { Ui } from '../render/ui';
 import { button, h, padBadge } from '../render/view';
@@ -19,7 +23,7 @@ const PARTY_ALL = 0x120;
 const NO_SKIP = [0, 1, 4, 10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x27, 0x29, 0x2f, 0x30, 0x31, 0x32, 0x39];
 const FLASH = [32, 32, 32, 24, 24, 16, 8, 6, 24, 16, 8, 4, 2, 0, 0];
 /** repeatable hint events: the end handler clears their own flag again */
-const REPEATABLE = [0x6e, 0x6f, 0x70, 0x71, 0x79, 0x7c, 0x7f, 0x80, 0x81, 0x82, 0x83, 0x8a, 0x8d, 0x8e, 0x90, 0x92, 0x93, 0x94, 0x96];
+export const REPEATABLE = [0x6e, 0x6f, 0x70, 0x71, 0x79, 0x7c, 0x7f, 0x80, 0x81, 0x82, 0x83, 0x8a, 0x8d, 0x8e, 0x90, 0x92, 0x93, 0x94, 0x96];
 /** end handler flag changes (FUN_0002cdc8) */
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[]; doors?: number[]; item?: [number, number] }> = {
@@ -44,6 +48,10 @@ const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[];
   0x58: { set: [0x57], dim: [9, 5, 6, 7] }, 0x31: { dim: [4] }, 0x5d: { dim: [8] },   // dim: +0x3173 bit toggles
   0x5f: { set: [0x89], clr: [0x60] }, 100: { clr: [0x65, 0x8c] },
 };
+
+/** events whose done bit an end hook (or a class start) can set without the event being played: 회상 lists them
+ *  only when one of their lines is in the read log (archive.ts) */
+export const SET_WITHOUT_PLAY = new Set([0, ...Object.values(END_HOOK).flatMap((h) => h.set ?? [])]);
 
 /** SPAWN_TYPE placement (FUN_00063f7c per-event table, run with tools/grantria_spawn.py): 'event:type' -> [x, y, dir];
  *  'event:type@clock' where the placement code compares the event clock */
@@ -107,7 +115,7 @@ export class EventRunner {
   /** DAT_003b3c3a = 2: LIGHTNING filters while the white fade runs */
   private lightMode = 0;
   dialogue: Dialogue | null = null;
-  private caption: { text: string | string[]; n: number } | null = null;
+  private caption: { text: string | string[]; n: number; id: number } | null = null;
   /** caption index DAT_003b1dbc (reset at the start of 0x6A, hardmode.md §2.2) */
   private capIdx = -1;
   private showItem: { icon: number; k: number; x: number; y: number } | null = null;
@@ -115,6 +123,16 @@ export class EventRunner {
   private questPending = false;
   /** skip fade (state 0x3A): frames left */
   private skipFade = 0;
+  /** 회상 (not in the original): quests are not taken or completed and the end changes no flags */
+  replay = false;
+  /** auto advance (편의 설정): ticks spent on a WAIT_KEY */
+  private keyWaitTicks = 0;
+  /** held fast-forward (편의 설정 빨리 넘기기) */
+  private hold = new HoldSkip();
+  /** the last dialogue of this event had been read before: '읽은 대사만' lets a hold run on through WAIT_KEY too */
+  private lastSeen = false;
+  /** SKIP ('#') was used in this event (회상: a skipped replay is not counted as watched) */
+  skipped = false;
   /** camera: follow an actor or a fixed cell */
   camTarget: EvActor | null = null;
   camCell: [number, number] | null = null;
@@ -144,6 +162,7 @@ export class EventRunner {
     this.wait = 0x19;
     this.fill = 0; this.fade = 0; this.grey = false; this.flash = 0; this.darken = 0; this.darkLevel = 0;
     this.dialogue = null; this.caption = null; this.showItem = null; this.questPending = false;
+    this.lastSeen = false; this.hold.reset(); this.skipped = false;
     this.fs.beginEvent();
     this.camTarget = this.fs.lead;
     this.camCell = null;
@@ -179,7 +198,8 @@ export class EventRunner {
     if (!this.active) return;
     if (this.fade > 0) this.fade--; else if (this.fade < 0) this.fade++;
     if (this.flash > 0) this.flash--;
-    this.shakeY = this.shakeAmp ? ((this.frame & 1) ? this.shakeAmp : -this.shakeAmp) : 0;
+    const amp = Math.round(this.shakeAmp * fxScale(this.fs.ctx.options.shake));   // 편의 설정: shake reduced / off
+    this.shakeY = amp ? ((this.frame & 1) ? amp : -amp) : 0;
     if (this.skipFade > 0) { if (--this.skipFade === 0) this.fastForward(); return; }
     if (this.wait === 'map') return;
     if (this.wait === 0x19) { this.wait = 0; return; }
@@ -189,20 +209,36 @@ export class EventRunner {
     for (const a of this.fs.actors) a.update();
     this.fs.lead?.update();
     if (this.pc >= this.end && this.wait === 0) { this.finish(); return; }
+    // auto advance (편의 설정): a read page, or a WAIT_KEY after a short pause, counts as the '5' key
+    const opts = this.fs.ctx.options;
+    if (this.wait === 2 && !this.questPending) this.keyWaitTicks++; else this.keyWaitTicks = 0;
+    if (opts.auto && !this.fs.popupOpen && !presses.includes(AVK.OK)
+      && ((this.wait === 1 && this.dialogue?.autoDue(opts)) || (this.wait === 2 && !this.questPending && this.keyWaitTicks * (1000 / optionFps(opts)) >= 1200))) presses = [...presses, AVK.OK];
+    // held fast-forward: read pages (or every page) turn every few ticks, WAIT_KEY goes on, captions run 4x
+    const input = this.fs.ctx.input;
+    const holding = this.hold.update(!this.fs.popupOpen && (input.isHeld(AVK.OK) || input.isHeld(AVK.FAST)));
+    if (!presses.includes(AVK.OK)) {
+      if (this.wait === 1 && this.dialogue?.fastDue(opts, holding)) presses = [...presses, AVK.OK];
+      else if (this.wait === 2 && !this.questPending && holding && (opts.skip === 2 || (opts.skip === 1 && this.lastSeen)) && this.keyWaitTicks >= 2) presses = [...presses, AVK.OK];
+    }
+    if (this.wait === 4 && this.caption && holding && (opts.skip === 2 || (opts.skip === 1 && readLog().has(this.caption.id)))) this.caption.n = Math.min(79, this.caption.n + 3);
     // keys (DemoKey FUN_0004244c)
     for (const k of presses) {
       if (k === AVK.POUND && this.clock > 10 && this.skippable(this.lastCmd) && !this.questPending) { this.skip(); return; }
       if (k !== AVK.OK) continue;
       if (this.wait === 1 && this.dialogue) {
-        if (this.dialogue.advance()) { this.dialogue = null; this.next(); }
+        if (this.dialogue.advance()) { this.lastSeen = this.dialogue.seen; this.dialogue.markRead(); this.dialogue = null; this.next(); }
       } else if (this.wait === 2 && !this.questPending) this.next();          // WAIT_KEY
     }
     switch (this.wait) {
       case 0: this.clock++; break;
-      case 1: this.dialogue?.tick(); break;
+      case 1: this.dialogue?.tick(opts); break;
       case 2: if (this.questPending && !this.fs.popupOpen) this.next(); break;   // quest popup dismissed
       case 4:
-        if (this.caption && ++this.caption.n >= 80) { this.caption = null; this.wait = 0; this.clock++; }
+        if (this.caption && ++this.caption.n >= 80) {
+          if (this.caption.id >= 0) { readLog().mark(this.caption.id); readLog().flush(); }
+          this.caption = null; this.wait = 0; this.clock++;
+        }
         break;
       case 0x0c: this.wait = 0; break;
       case 0x0d: case 0x0e: {
@@ -315,7 +351,9 @@ export class EventRunner {
         this.textId++;
         if (fast) break;
         const a = this.actor(arg);
-        this.dialogue = new Dialogue(fs.ctx.assets.text[this.textId] ?? '', fs.ctx.assets.text[this.db.nameId(a.id)] ?? '', this.faceOf(a), cmd === 7);
+        const text = fs.ctx.assets.text[this.textId] ?? '', name = fs.ctx.assets.text[this.db.nameId(a.id)] ?? '';
+        this.dialogue = new Dialogue(text, name, this.faceOf(a), cmd === 7, this.textId);
+        if (!this.replay) backlog.push({ name, text, textId: this.textId, kind: 'talk' });
         this.wait = cmd === 5 ? 1 : 1;
         this.camTarget = a; this.camCell = null;
         break;
@@ -346,8 +384,10 @@ export class EventRunner {
         break;
       }
       case 0x10: this.wait = 'map'; void fs.eventMap(arg).then(() => { this.wait = 0; }); break;
-      case 0x13: if (!fast) { this.questPending = true; this.wait = 2; fs.quests.accept(arg); } break;
+      // 회상: the quest is neither taken nor completed; the wait without a popup ends the next frame like the original's
+      case 0x13: if (!fast) { this.questPending = true; this.wait = 2; if (!this.replay) fs.quests.accept(arg); } break;
       case 0x14: {
+        if (this.replay) { if (!fast) { this.questPending = true; this.wait = 2; } break; }
         if (fast) break;
         const q = this.id === 0x1e ? [0x12, 0x25, 0x38][fs.model.cls] : arg;
         this.questPending = true; this.wait = 2; fs.quests.complete(q);
@@ -369,11 +409,14 @@ export class EventRunner {
         if (this.id === 0x6a) {                                // staff roll: [4,9,7,11,8,11,1] consecutive text ids
           const L = [4, 9, 7, 11, 8, 11, 1][++this.capIdx] ?? 1, lines: string[] = [];
           for (let i = 0; i < L; i++) lines.push(fs.ctx.assets.text[++this.textId] ?? '');
-          if (!fast) { this.caption = { text: lines, n: 0 }; this.wait = 4; }
+          if (!fast) { this.caption = { text: lines, n: 0, id: this.textId }; this.wait = 4; if (!this.replay) backlog.push({ name: '', text: lines.join('@'), textId: -1, kind: 'caption' }); }
           break;
         }
         this.textId++;
-        if (!fast) { this.caption = { text: fs.ctx.assets.text[this.textId] ?? '', n: 0 }; this.wait = 4; }
+        if (!fast) {
+          this.caption = { text: fs.ctx.assets.text[this.textId] ?? '', n: 0, id: this.textId }; this.wait = 4;
+          if (!this.replay) backlog.push({ name: '', text: this.caption.text as string, textId: this.textId, kind: 'caption' });
+        }
         break;
       case 0x1e: fs.partyJoin(); break;
       case 0x25: fs.partyHide(); this.camTarget = fs.lead; if (!fast) this.wait = 0x0c; break;
@@ -417,6 +460,7 @@ export class EventRunner {
   }
 
   private skip(): void {
+    this.skipped = true;
     this.clock = this.lastTime;
     this.skipFade = 16;
     this.fade = -16; this.fadeWhite = false;
@@ -457,7 +501,9 @@ export class EventRunner {
     this.id = -1;
     this.fs.partHide = 0;
     this.fill = 0; this.grey = false; this.dialogue = null; this.caption = null; this.shakeAmp = 0; this.darkLevel = 0;
+    if (this.replay) return;                                   // 회상: the copy is thrown away, nothing to record
     story.set(e);
+    if (!this.fs.sandbox) addSeen(this.fs.model.cls, [e]);       // 회상 (title screen): seen by this class, account-wide
     const hook = END_HOOK[e];
     for (const f of hook?.set ?? []) story.set(f);
     for (const f of hook?.clr ?? []) story.set(f, false);
@@ -485,12 +531,14 @@ export class EventRunner {
 
   drawOverlay(u: Ui): void {
     if (this.fill) u.fill(0, 0, W, H, this.fill === 1 ? 0x000001 : 0xffffff);
+    const flashK = fxScale(this.fs.ctx.options.flash);              // 편의 설정: white flashes reduced / off
     if (this.fade) {
       const a = this.fade < 0 ? ((this.fade + 15) * 2) : ((this.fade - 1) * 2);
-      if (a > 0) { u.alpha = Math.min(32, a); u.fill(0, 0, W, H, this.fadeWhite ? 0xffffff : 0); u.alpha = 32; }
+      const k = this.fadeWhite && this.lightMode === 2 ? flashK : 1;  // LIGHTNING's white burst
+      if (a * k > 0) { u.alpha = Math.min(32, Math.round(a * k)); u.fill(0, 0, W, H, this.fadeWhite ? 0xffffff : 0); u.alpha = 32; }
     }
     if (this.skipFade) { u.alpha = Math.min(32, (16 - this.skipFade) * 2); u.fill(0, 0, W, H, 0); u.alpha = 32; }
-    if (this.flash) { u.alpha = FLASH[15 - this.flash] ?? 0; u.fill(0, 0, W, H, 0xffffff); u.alpha = 32; }
+    if (this.flash && flashK) { u.alpha = Math.round((FLASH[15 - this.flash] ?? 0) * flashK); u.fill(0, 0, W, H, 0xffffff); u.alpha = 32; }
     if (this.showItem) {
       const s = this.showItem, r = this.fs.db.iconRect(s.icon);
       const x = s.x < 0 ? (W >> 1) - 12 : s.x - this.fs.cam.x - 12, y = s.y < 0 ? (H >> 1) - 12 : s.y - this.fs.cam.y - 24;
@@ -500,7 +548,7 @@ export class EventRunner {
     }
     if (this.caption) drawCaption(u, this.caption.text, this.caption.n);
     if (this.active) u.hit(0, 0, W, H, () => [AVK.OK]);       // tap = next line
-    if (this.dialogue) this.dialogue.draw(u, this.frame);
+    if (this.dialogue) { this.dialogue.draw(u, this.frame); if (!this.replay) drawDialogueButtons(u, !!this.fs.ctx.options.auto, this.fs.ctx.input); }
     if (this.active && this.clock >= 11 && this.skippable(this.lastCmd) && !this.skipFade) {
       // SKIP: the button at alpha 16 with the label blinking every 8 frames (CSS), centred in the button
       u.view('evSkip', W - 70 + this.fs.ctx.input.edge, 6, 50, 24,   // edge layout: at the right edge with the buttons

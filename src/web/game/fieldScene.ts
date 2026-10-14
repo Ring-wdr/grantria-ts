@@ -2,14 +2,14 @@
 // game-rules.md §3) and items (items.md: drops, pickup, potions, quick slots), started from a save slot.
 import type { Cmf } from '../../core/data/assets';
 import { DEFAULT_EQUIP, setDayShift, setGrey, type SpriteLayer } from '../render/sprites';
-import { Buffs, DAY_EVENTS, TINT_BASE, clockFrame, dayPhase, isSafeMap, returnPoint, tintRow } from '../../core/rules/buffs';
+import { Buffs, buffItem, DAY_EVENTS, TINT_BASE, clockFrame, dayPhase, isSafeMap, returnPoint, tintRow } from '../../core/rules/buffs';
 import { boxEquipment } from '../../core/rules/boxes';
 import { Gimmick } from '../../core/world/gimmicks';
 import { Minimap } from '../render/minimap';
 import { drawFortune, fortuneAskView, fortuneResultView, FORTUNE_CMF, today, type FortuneArt } from './fortune';
 import { achCheck, achEvent, challengeGold, titleBonus, type AchEvent, type Awards } from '../../core/rules/achievements';
 import { accountBook, accountDay, clearUnsavedUses, countUnsavedUse, saveAccount, setAccountDay, takeUnsavedUses, account, secondDrop, traitBox, traitOnLevelUp, traitReset, traitStatBonus, traitVal } from '../../core/rules/account';
-import { dimLevel, dimStats, dungeonStart, generateFloor, newRun, resultValues, rollDimDrops, type DimRun } from './dimension';
+import { ABYSS_RULES, abyssHeader, abyssRule, dimLevel, dimStats, dungeonStart, generateFloor, newRun, resultValues, rollDimDrops, type DimRun } from './dimension';
 import { findPath } from '../../core/world/pathfind';
 import { vibrate } from '../vibrate';
 import { GATHER_CAP, GatherRun, gatherExp, spawnNodes, type GatherNode } from './gather';
@@ -17,9 +17,15 @@ import { genDarkStock } from '../../core/rules/shopRules';
 import type { Item } from '../../core/rules/items';
 import { EvActor } from '../../core/world/actors';
 import { pickGuide, type Guide } from '../../core/rules/guide';
-import { Dialogue } from './dialogue';
+import { Dialogue, HoldSkip, drawDialogueButtons } from './dialogue';
+import { backlog } from './backlog';
+import { fxScale, optionFps } from '../../core/save/options';
 import { EventRunner } from './events';
 import { Popup } from './popup';
+import { deepestAbyss, extraPaid, itemKinds, markExtraPaid, records, recordAbyss, recordBoss, recordItem } from '../../core/rules/records';
+import { extraCheck, extraKey, type ExtraChallenge } from '../../core/rules/extraChallenges';
+import { attend, fortunePrize, GOLDEN_EGG } from '../../core/rules/attendance';
+import { untrackKey } from './questTab';
 import { QuestLog } from '../../core/rules/quests';
 import { Story, StoryDb } from '../../core/data/story';
 import { Field, VIEW_H, VIEW_W, type Drawable } from '../render/field';
@@ -49,9 +55,16 @@ const FIRST_NPC = 43;
 const HIDE_1E = [0x46, 0x25, 0x51, 0x74, 0x76, 0x77, 0x7a];
 const SHOW_1F = [0x74, 0x76, 0x77, 0x7a];
 /** first event per class (FUN_00053510 case 2) */
-const OPENING = [0, 10, 0x14];
+export const OPENING = [0, 10, 0x14];
 /** FUN_0004618c: the map an opening starts on (검사 10, 마법사 0x2f, 격투가 0x62); the event places the player */
 const OPENING_MAP = [10, 0x2f, 0x62];
+/** the map event e plays on: its header's, or for an opening (header map -1, started by a new game) the class's first map;
+ *  -1 for other events with no map */
+export function eventMap(e: number, headerMap: number): number {
+  if (headerMap >= 0) return headerMap;
+  const i = OPENING.indexOf(e);
+  return i >= 0 ? OPENING_MAP[i] : -1;
+}
 /** FUN_00032800 32218: every actor in slots 0..40 gets a shadow except type 0x13 */
 const NO_SHADOW = 0x13;
 
@@ -87,6 +100,8 @@ export class FieldScene implements Scene {
   private candidates: number[] = [];
   /** ordinary NPC talk (state 0x11) */
   private talk: { d: Dialogue; npc: EvActor; mark: number; q: number } | null = null;
+  /** held fast-forward of NPC talk (편의 설정 빨리 넘기기) */
+  private talkHold = new HoldSkip();
   /** NPC within reach for '5' (FUN_0002bfd4) */
   private talkTarget: EvActor | null = null;
   /** map gimmicks (slots 0x65..0x73): barriers and chests */
@@ -165,6 +180,14 @@ export class FieldScene implements Scene {
   private bannerT = -1;
   /** save slot of this play (account-wide day counter, book and reload prevention) */
   slot = -1;
+  /** 회상 / 보스 러시 (not in the original): a throwaway copy of the slot (never saved); no exp, no account effects,
+   *  no new events; in a rush the exits are shut */
+  sandbox: 'replay' | 'rush' | null = null;
+  /** tick the player last lost HP (boss records: a kill without being hit) */
+  private lastHurt = -1;
+  /** 출석 보상 waiting for the first free field frame, and the extra challenges waiting for their popup */
+  private attendPending = false;
+  private extraQueue: ExtraChallenge[] = [];
   /** bind to a slot: account day counter and book, reload prevention (FUN_0001a494) */
   bindSlot(slot: number): void {
     this.slot = slot;
@@ -172,6 +195,8 @@ export class FieldScene implements Scene {
     if (this.dayCounter >= 10000) { this.darkStock = genDarkStock(this.db, this.rng, this.field.mapId); this.darkState = 2; }   // load (FUN_0001a494)
     this.story.book = accountBook(this.story.book);
     if (this.story.fortuneDay !== today()) { this.story.fortuneDay = today(); this.fortunePending = true; }
+    this.attendPending = (this.story.counters.attendDay ?? 0) !== today();
+    this.inv.onGot = (it) => { if (it.type !== 0x1a) recordItem(it.type, it.sub, it.grade); };   // 아이템 도감
     for (const sub of takeUnsavedUses(slot)) {
       const i = this.inv.items.findIndex((it) => it.type === 0x1b && it.sub === sub);
       if (i >= 0) { const it = this.inv.items[i]; if (it.count > 1) it.count--; else this.inv.remove(i); }
@@ -255,14 +280,7 @@ export class FieldScene implements Scene {
     this.player.dir = save.dir;
     this.player.actions = ctx.assets.tables.playerActions[save.cls];
     this.player.mult = ctx.assets.tables.actionMult[save.cls];
-    EvActor.poses = { actions: ctx.assets.tables.playerActions, mult: ctx.assets.tables.actionMult };
-    EvActor.onPose = (a, ev, sound) => {                             // party pose effects / sounds in events
-      if (sound) this.ctx.audio.playSfx(sound);
-      if (ev >= 9 && ev <= 26 && this.projectiles.length < 60) {
-        const rec = this.projRecord(ev - 8);
-        this.projectiles.push(new Projectile(ev - 8, rec, { x: a.x, y: a.y, dir: a.dir, lastH: a.lastH, lastV: a.lastV }, this.sheets[rec.type] ?? this.player.cmf, 0, 0, 0));
-      }
-    };
+    this.installStatics();
     this.sdb = new StoryDb(ctx.assets);
     this.story = Story.from(save.story, save.cls);
     this.quests = this.makeQuests();
@@ -284,11 +302,13 @@ export class FieldScene implements Scene {
   }
 
   get popupOpen(): boolean { return !!this.popup; }
+  /** an event or NPC dialogue page is on screen (LOG / AUTO keys) */
+  get dialogueShown(): boolean { return !this.popup && (!!this.talk || (this.events.active && !!this.events.dialogue)); }
   get inEvent(): boolean { return this.events.active; }
   /** events and NPC talk (states 0x12 / 0x11) take every key; menu and SAVE are refused */
   get busyTalking(): boolean { return this.events.active || !!this.talk || !!this.popup || !!this.warpList; }
 
-  static async create(ctx: GameContext, save: SaveData, lap = 0): Promise<FieldScene> {
+  static async create(ctx: GameContext, save: SaveData, lap = 0, sandbox: FieldScene['sandbox'] = null): Promise<FieldScene> {
     const db = new ItemDb(ctx.assets);
     await db.init();
     db.tier2 = lap >= 2;                                            // DAT_003b3bef = lap >= 2 ? 2 : 0
@@ -296,6 +316,8 @@ export class FieldScene implements Scene {
     db.dimLvl = null;
     const s = new FieldScene(ctx, save, await ctx.assets.cmf(`cmf_c${save.cls}`), db);
     s.lap = lap;
+    s.sandbox = sandbox;
+    s.events.replay = sandbox === 'replay';
     await s.ui.init(FieldHud.images);
     s.statusCmf = await ctx.assets.cmf('cmf_status');
     s.hud = new FieldHud(s.hudUi, s.statusCmf, ctx.input);
@@ -351,12 +373,46 @@ export class FieldScene implements Scene {
         regions: st.zones.size, idleFrames: this.idleFrames, slowFrames: st.counters.slowFrames ?? 0,
       }));
     }
+    if (this.tick % 20 === 10) {                                     // 추가 도전과제 (not in the original)
+      const r = records(), c = this.story.counters;
+      for (const x of extraCheck(c, {
+        bossKinds: Object.values(r.bosses).filter((b) => b.k > 0).length, cleanBoss: Object.values(r.bosses).some((b) => b.clean),
+        itemKinds: itemKinds(), rushBosses: r.rush?.bosses ?? 0, rushAll: !!r.rush?.all, abyss: deepestAbyss(),
+        attendance: c.attendStreak ?? 0, replays: r.replays, lap: this.lap,
+      })) { c[extraKey(x.id)] = 1; if (!extraPaid(x.id)) this.extraQueue.push(x); }   // done on this slot; gold once an account
+    }
+    if (!this.popup && !this.achQueue.length && this.extraQueue.length) {   // the same popup 0x79 with the new challenge's name
+      const x = this.extraQueue.shift()!, t = this.db.a.text;
+      const body = (s: string) => `${s.replace('%s', x.name)}|@${x.desc}|@${(t[0x1c25] ?? '%d').replace('%d', String(x.gold))}`;
+      const give = () => { if (!extraPaid(x.id)) { markExtraPaid(x.id); this.inv.gain(0x1c, x.gold, 0, 1, this.rng); } this.autosave(); };
+      this.popup = { p: new Popup(this.ctx, 0x79, 0, body), onYes: give, onNo: give };
+    }
     if (!this.popup && this.achQueue.length) {                       // FUN_0001f17c: popup 0x79 + reward gold
       const n = this.achQueue.shift()!, t = this.db.a.text, gold = challengeGold(this.db.a, n);
       const body = (s: string) => `${s.replace('%s', t[0x1bcf + n] ?? '')}|@${(t[0x1c25] ?? '%d').replace('%d', String(gold))}`;
       const give = () => { this.inv.gain(0x1c, gold, 0, 1, this.rng); this.autosave(); };
       this.popup = { p: new Popup(this.ctx, 0x79, 0, body), onYes: give, onNo: give };
     }
+  }
+
+  /** 출석 보상 (not in the original, rules/attendance.ts): message popup 0x18 with the day's prizes; a prize that does
+   *  not fit waits like the fortune's (fortuneHold) when that slot is free, else it is paid in gold */
+  private openAttendance(): void {
+    const r = attend(this.story.counters, today(), this.db.a, this.model.level);
+    if (!r) return;
+    const names: string[] = [];
+    this.inv.gain(0x1c, r.gold, 0, 1, this.rng);
+    for (const p of r.items) {
+      const it = this.db.create(p.type, p.sub, 0, new Rng(1n, () => 0));
+      if (this.inv.gain(p.type, p.sub, 0, p.count, this.rng)) names.push(`${it.name} x${p.count}`);
+      else if (!this.story.fortuneHold) { this.story.fortuneHold = { type: p.type, sub: p.sub, count: p.count }; names.push(`${it.name} x${p.count} (가방에 자리가 나면 받습니다)`); }
+      else { const g = this.model.level * 300; this.inv.gain(0x1c, g, 0, 1, this.rng); names.push(`${g} 골드 (가방이 가득 참)`); }
+    }
+    const streak = this.story.counters.attendStreak ?? 1;
+    const body = `출석 ${r.day}일째 보상${streak > 1 ? ` (${streak}일 연속)` : ''}|@${r.gold} 골드|@${names.join('|@')}`;
+    this.popup = { p: new Popup(this.ctx, 0x18, 0, () => body) };
+    this.quests.onItems();
+    this.autosave();
   }
 
   /** popup 0x54: OK draws the fortune (FUN_00052610(1)), CLR gives up today's fortune; both save */
@@ -441,6 +497,37 @@ export class FieldScene implements Scene {
     if (this.gardenMode === 2 && file) Object.assign(d, { map: file.map, zone: file.zone, x: file.x, y: file.y, dir: file.dir });
     return d;
   }
+
+  /** a deep copy of the current state for 회상 / 보스 러시, without toSave's account bookkeeping */
+  snapshot(): SaveData { return JSON.parse(JSON.stringify(this.fullSave())) as SaveData; }
+
+  /** a boss of this room is alive (보스 러시) */
+  get bossAlive(): boolean { return this.monsters.some((m) => m.isBoss && m.alive); }
+  /** EvActor's shared pose tables and pose hook point at this scene (a sandbox scene takes them over meanwhile) */
+  private installStatics(): void {
+    EvActor.poses = { actions: this.ctx.assets.tables.playerActions, mult: this.ctx.assets.tables.actionMult };
+    EvActor.onPose = (a, ev, sound) => {                             // party pose effects / sounds in events
+      if (sound) this.ctx.audio.playSfx(sound);
+      if (ev >= 9 && ev <= 26 && this.projectiles.length < 60) {
+        const rec = this.projRecord(ev - 8);
+        this.projectiles.push(new Projectile(ev - 8, rec, { x: a.x, y: a.y, dir: a.dir, lastH: a.lastH, lastV: a.lastV }, this.sheets[rec.type] ?? this.player.cmf, 0, 0, 0));
+      }
+    };
+  }
+  /** back from a sandbox scene (회상 / 보스 러시): the shared actor statics and the room's music again */
+  resumeFromSandbox(): void {
+    this.installStatics();
+    EvActor.freeze = -1;
+    this.ctx.audio.playBgm(this.field.map.header.bgm);
+  }
+  /** 3회차 (not in the original): HP ×1.5, ATK ×1.25 outside the dimension */
+  private scaleLap(m: Monster): void {
+    if (this.lap < 4 || this.gardenMode === 2) return;
+    m.hp = m.maxHp = Math.trunc(m.maxHp * 1.5);
+    m.atk = Math.trunc(m.atk * 1.25);
+  }
+  /** full HP / MP (보스 러시 start) */
+  refill(): void { this.vitals.hp = this.stats.maxHp; this.vitals.mp = this.stats.maxMp; }
 
   private fullSave(): SaveData {
     return {
@@ -551,6 +638,8 @@ export class FieldScene implements Scene {
         }
       } catch { /* actor sprite missing */ }
     }
+    for (const m of this.monsters) this.scaleLap(m);
+    if (this.gateBoss) this.scaleLap(this.gateBoss);
     this.actors.push(...keep);
     this.placeDarkMerchant();
     // gimmicks (FUN_000176d8), opened ones removed (FUN_000194bc), battle barriers hidden (FUN_00017838)
@@ -764,6 +853,35 @@ export class FieldScene implements Scene {
       if (w > cur) ghost = w; else this.ghost = null;
     }
     return { name: this.db.a.text[0x3e1 + m.type] ?? '', level: m.level, hp: m.hp, maxHp: m.maxHp, ghost };
+  }
+
+  /** 편의 설정 HUD 정보 (not in the original): what fieldHud.extraInfo shows; display only */
+  private hudExtra(): HudState['extra'] {
+    const o = this.ctx.options, a = this.db.a, plain = (s: string) => s.replace(/\|./g, '');
+    const lo = expNeed(this.model.level - 1), hi = expNeed(this.model.level);
+    const fps = optionFps(o);
+    let boss: { name: string; hp: number; maxHp: number } | null = null;
+    if (o.hudBoss) {
+      const p = this.player;
+      const b = this.monsters.find((m) => m.isBoss && m.alive && m.hp > 0 && m.maxHp > 0 && Math.hypot(m.x - p.x, m.y - p.y) < 360);
+      if (b) boss = { name: plain(a.text[0x3e1 + b.type] ?? ''), hp: b.hp, maxHp: b.maxHp };
+    }
+    return {
+      numbers: o.hudNumbers ? { expPct: this.model.level >= MAX_LEVEL ? 100 : Math.max(0, Math.min(100, ((this.vitals.exp - lo) * 100) / Math.max(1, hi - lo))) } : undefined,
+      buffs: o.hudBuffs ? this.buffs.active(a).map(({ slot, left }) => {
+        const [t, sub] = buffItem(slot);
+        return { icon: this.db.iconRect(this.db.icon(t, sub)), secs: left < 0 ? -1 : Math.ceil(left / fps) };
+      }) : undefined,
+      boss,
+      quests: o.hudQuests ? this.story.active.filter((q) => !this.story.counters[untrackKey(q.q)]).slice(0, 3).map((q) => {   // 추적 끔 (quest detail) left out
+        const Q = this.sdb.quests[q.q], st = this.story.qs[q.q];
+        let progress = '';
+        if (Q.kind === 1) progress = `${q.cnt}/${this.sdb.killCond(Q)[1]}`;
+        else if (Q.kind === 0) { const c = this.sdb.collectCond(Q); if (c.type !== 0x1c) progress = `${Math.min(q.cnt, c.count)}/${c.count}`; }
+        return { name: plain(this.quests.name(q.q)), progress, done: st === 3 && Q.kind <= 1, main: this.sdb.mainQuest(q.q) };
+      }) : undefined,
+      minimap: !!o.minimap,
+    };
   }
 
   /** FUN_0001dd48 / FUN_0002cdc8: the class guide marker for this map and the first main quest (mode 0 only) */
@@ -1104,8 +1222,10 @@ export class FieldScene implements Scene {
     else if (mark === 1) t = 0x5ac + q;
     else if (npc.id === 0x9b && st.qs[0x3b] === 2) t = 0x775;
     if (t <= 0) { this.afterTalk(npc, mark, q); return; }
-    const a = this.ctx.assets;
-    this.talk = { d: new Dialogue(a.text[t] ?? '', a.text[this.sdb.nameId(npc.id)] ?? '', -1), npc, mark, q };
+    const a = this.ctx.assets, text = a.text[t] ?? '', name = a.text[this.sdb.nameId(npc.id)] ?? '';
+    this.talk = { d: new Dialogue(text, name, -1, false, t), npc, mark, q };
+    this.talkHold.reset();
+    backlog.push({ name, text, textId: t, kind: 'talk' });
   }
 
   /** end of NPC talk (FUN_00045008): quest marks, then shops / inn */
@@ -1123,7 +1243,7 @@ export class FieldScene implements Scene {
   /** FUN_000712a4: the inner rect warps (FUN_0006d1ec); the 32 px band around a target-0x100 portal
    *  (the 어둠의 정원 entrance on map 0x9f) asks popup 0x5E once */
   private checkPortals(): void {
-    if (this.player.autoWalking) return;                              // state 9 skips FUN_00071424
+    if (this.player.autoWalking || this.sandbox === 'rush') return;     // 보스 러시: the room stays shut                              // state 9 skips FUN_00071424
     const x = this.player.portalX ?? this.player.x, y = this.player.portalY ?? this.player.y;   // before the corner correction
     const inside = (r: { cx0: number; cy0: number; cx1: number; cy1: number }, m: number) =>
       r.cx0 * 16 - m <= x && x <= (r.cx1 + 1) * 16 + m && r.cy0 * 16 - m <= y && y <= (r.cy1 + 1) * 16 + m;
@@ -1163,6 +1283,7 @@ export class FieldScene implements Scene {
     let exp = killExp(this.rng, m.level, this.model.level, m.typeRec[4], 0, false);
     if (this.mapType >= 2) exp *= 10;
     exp = rdiv(exp * (100 + (this.stats.D[19] ?? 0) / 10), 100);
+    if (run.depth) exp = rdiv(exp * (100 + 10 * run.depth), 100);     // 심연 (not in the original): +10 % per depth
     this.hud.label(`+${exp * 2} EXP`, m.x, m.y - 40);
     run.pool += exp * 2;
     this.grantExp(exp * 2);
@@ -1215,7 +1336,32 @@ export class FieldScene implements Scene {
     if (!run || !run.clearT || this.popup) return;
     if (--run.clearT > 0) return;
     run.cleared = true;
-    this.popup = { p: this.dimResult(), onYes: () => this.leaveDimension(), onNo: () => this.leaveDimension() };
+    const result = () => { this.popup = { p: this.dimResult(), onYes: () => this.leaveDimension(), onNo: () => this.leaveDimension() }; };
+    // 심연 (not in the original, 편의 설정): go on below the boss with stronger floors, or leave with the result as before
+    if (!this.ctx.options.abyss) { recordAbyss(run.d, run.depth ?? 0); result(); return; }
+    const deeper = (run.depth ?? 0) + 1, rule = ABYSS_RULES[abyssRule()];
+    recordAbyss(run.d, run.depth ?? 0);
+    const body = `심연 ${deeper}단계로 내려가시겠습니까?|@몬스터 HP·공격력 +${(run.d === 0 ? 25 : 30) * deeper}%, 경험치 +${10 * deeper}%|@이번 주 규칙: ${rule.name} (${rule.desc})|@아니오를 고르면 결과를 받고 나갑니다.`;
+    this.popup = { p: new Popup(this.ctx, 0x0e, 0, () => body), onYes: () => this.descend(), onNo: result };
+  }
+
+  /** 심연 n: the same dungeon from floor 1, every floor generated again from the stronger header */
+  private descend(): void {
+    const run = this.dim!;
+    run.base ??= [...run.header];
+    // the clear above is kept: dying or leaving below gives it, not the deeper floors' pool
+    run.banked = (run.banked ?? 0) + run.pool;
+    run.pool = 0;
+    run.cleared = false;
+    run.depth = (run.depth ?? 0) + 1;
+    run.header = abyssHeader(run.base, run.d, run.depth, abyssRule());
+    run.floors = new Array(10).fill(null);
+    run.alive = Array.from({ length: 10 }, () => []);
+    run.clearT = 0;
+    recordAbyss(run.d, run.depth);
+    const [map, x, y] = dungeonStart(this.db.a, run.d);
+    this.pendingWarp = { map, x, y };
+    this.hud.message(`심연 ${run.depth}단계`);
   }
 
   dimResult(): Popup {
@@ -1227,8 +1373,12 @@ export class FieldScene implements Scene {
   leaveDimension(): void {
     const run = this.dim;
     if (!run) return;
-    if (run.cleared) { this.vitals.exp += run.pool; this.grantExp(0); this.story.dimClears = Math.min(65000, (this.story.dimClears ?? 0) + 1); this.achieve({ k: 'dimClear' }); }
-    if (this.mapType < 2 || run.cleared) this.autosave();
+    const won = run.cleared || run.banked !== undefined;          // 심연: an earlier depth was cleared
+    if (won) {
+      this.vitals.exp += (run.cleared ? run.pool : 0) + (run.banked ?? 0);
+      this.grantExp(0); this.story.dimClears = Math.min(65000, (this.story.dimClears ?? 0) + 1); this.achieve({ k: 'dimClear' });
+    }
+    if (this.mapType < 2 || won) this.autosave();
     this.reloadRequest = true;
   }
 
@@ -1260,6 +1410,7 @@ export class FieldScene implements Scene {
     const mt = this.mapType;
     if (mt >= 2) exp *= 10;                                            // FUN_0006ca90: special maps ×10
     else if (mt === 0 && this.dayPh === 2) exp = rdiv(exp * 130, 100);  // night ×1.3
+    if (this.lap >= 4) exp = rdiv(exp * 150, 100);                    // 3회차 (not in the original): ×1.5
     hud.label(`+${exp} EXP`, m.x, m.y - 40);
     // drops: 1, a second one with the account trait 9 chance (extra), objects 116..140
     const who = { cls: model.cls, luck: this.stats.luck, goldPct: this.stats.goldPct, hard: this.hard, pLevel: model.level, cap10: this.field.map.header.zone === 13 };
@@ -1273,9 +1424,14 @@ export class FieldScene implements Scene {
     }
     this.achieve({ k: 'kill', type: m.type, garden: this.gardenMode === 1 });
     this.killedHere = true;
-    if (this.gardenMode !== 2) {
+    if (this.gardenMode !== 2 && !this.sandbox) {
       this.quests.onKill(m.type);
       this.story.recordKill(m.type, this.field.map.header.zone);
+    }
+    if (m.isBoss) {                                                    // 보스 기록 (not in the original)
+      const clean = m.firstHit >= 0 && this.lastHurt < m.firstHit;
+      recordBoss(m.type, m.firstHit >= 0 ? this.tick - m.firstHit : -1, clean,
+        this.gardenMode === 0 && this.field.map.header.mapType === 2 && this.field.mapId < 0x165 ? this.field.mapId : -1);
     }
     this.grantExp(exp);
     if (m.isBoss) {                                  // FUN_00061bb0: the boss event 200 frames later
@@ -1353,6 +1509,7 @@ export class FieldScene implements Scene {
         m.maxHp = m.hp;
         m.parent = b;
         m.state = 2;
+        this.scaleLap(m);
         this.monsters.push(m);
       }
     }
@@ -1362,6 +1519,7 @@ export class FieldScene implements Scene {
 
   /** experience and level ups (FUN_00029b1c) */
   grantExp(exp: number): void {
+    if (this.sandbox) return;                                          // 회상 / 보스 러시: nothing carries over
     const { model, vitals, hud } = this;
     vitals.exp += exp;
     let ups = 0;
@@ -1512,6 +1670,16 @@ export class FieldScene implements Scene {
    *  6 / 0x20 account traits, 0x1e random gem box, 0x1f EXP box; boxes and packages go to boxes.ts first. */
   private useMisc(idx: number): boolean {
     const it = this.inv.items[idx]!, v = this.vitals, st = this.stats, m = this.model;
+    if (it.sub === GOLDEN_EGG[1]) {                                      // 황금알 (not in the original): gold and a 대길 prize
+      const p = fortunePrize(this.db.a, m.level, this.rng.rand(10));
+      if (!this.inv.canGain(p.type, p.sub, 0, p.count) && this.inv.items.length >= this.inv.cap) { this.hud.message(this.db.a.text[0x3cc] ?? ''); return false; }
+      this.consume(idx);
+      this.inv.gain(0x1c, m.level * 1000, 0, 1, this.rng);
+      this.inv.gain(p.type, p.sub, 0, p.count, this.rng);
+      this.useFx(0xd4);
+      this.autosave();
+      return true;
+    }
     if (it.sub >= 0x15 && it.sub <= 0x17) {                              // 차원의 문 only: every other buff off, slot sub + 7
       if (this.gardenMode !== 2) { this.hud.message(this.db.a.text[0x1ac2] ?? ''); return false; }
       this.buffs.clearNormal(); this.buffs.start(it.sub + 7); this.recompute();
@@ -1830,6 +1998,7 @@ export class FieldScene implements Scene {
     }
     if (knock && !player.knock) player.startKnock(knock, src.x, src.y, down ? { dir: 2 } : {});
     vitals.hp -= dmg;
+    if (dmg > 0) this.lastHurt = this.tick;
     vitals.tint = 5;
     hud.hurt(dmg, player.x, player.y - 40, player);
     vibrate(this.ctx.options.vibration);                               // FUN_0006f370: the player is hurt
@@ -1863,17 +2032,24 @@ export class FieldScene implements Scene {
     if (this.talk) {
       const t = this.talk;
       t.npc.update();
-      t.d.tick();
-      if (presses.includes(AVK.OK) && t.d.advance()) { this.talk = null; this.afterTalk(t.npc, t.mark, t.q); }
+      t.d.tick(this.ctx.options);
+      const inp = this.ctx.input, holding = this.talkHold.update(inp.isHeld(AVK.OK) || inp.isHeld(AVK.FAST));
+      if ((t.d.autoDue(this.ctx.options) || t.d.fastDue(this.ctx.options, holding)) && !presses.includes(AVK.OK)) presses = [...presses, AVK.OK];   // 편의 설정
+      if (presses.includes(AVK.OK) && t.d.advance()) { t.d.markRead(); this.talk = null; this.afterTalk(t.npc, t.mark, t.q); }
       return;
     }
+    if (this.pendingEvent && this.sandbox) this.pendingEvent = null;
     if (this.pendingEvent && ++this.pendingEvent.t >= 200) { const e = this.pendingEvent.e; this.pendingEvent = null; this.events.start(e); return; }
     if (this.pendingWarp) {
       const w = this.pendingWarp;
       this.pendingWarp = null;
       const save = this.saveAfterWarp;
       this.saveAfterWarp = false;
-      void this.enterMap(w.map, w.x, w.y).then(() => { if (save) this.autosave(); });
+      void this.enterMap(w.map, w.x, w.y).then(() => {
+        if (save) { this.autosave(); return; }
+        // 편의 설정 맵 이동 자동 저장 (not in the original): where a manual save is allowed, outside the garden / dimension
+        if (this.ctx.options.autosaveMap && this.canSave && this.gardenMode === 0 && !this.dead) { this.autosave(); this.hud.message('자동 저장'); }
+      });
       return;
     }
     this.playTicks++;
@@ -1882,8 +2058,9 @@ export class FieldScene implements Scene {
     if (this.warpT >= 0 && this.warpWarp()) return;
     if (this.arriveT >= 0 && ++this.arriveT >= 18) this.arriveT = -1;
     this.dimTick();
-    this.achTick();
+    if (!this.sandbox) this.achTick();
     if (this.fortunePending && !this.popup && !this.events.active && !this.talk) { this.fortunePending = false; this.openFortune(); }
+    if (this.attendPending && !this.fortunePending && !this.popup && !this.events.active && !this.talk) { this.attendPending = false; this.openAttendance(); }
     this.fortuneHoldTick();
     if (this.bannerT >= 0 && ++this.bannerT >= 32) this.bannerT = -1;
     this.checkRestPoint();
@@ -1966,7 +2143,7 @@ export class FieldScene implements Scene {
     if (this.vitals.invuln) this.vitals.invuln--;
     if (this.vitals.tint) this.vitals.tint--;
     this.checkPortals();
-    if (!this.pendingWarp) this.checkTriggers();
+    if (!this.pendingWarp && !this.sandbox) this.checkTriggers();
   }
 
   /** FUN_0007352c: 극독의 비약 (buff 14) poisons monsters within 50 px every 20 buff frames, and poisoned
@@ -2045,8 +2222,9 @@ export class FieldScene implements Scene {
     if (this.warpT > 9) pd.fx = { ...pd.fx, alpha: Math.max(0, (13 - this.warpT) * 6) };
     if (this.lead) { const d = this.lead.drawable(); if (d) { d.shadow = this.lead.id !== NO_SHADOW; ents.push(d); } } else { pd.shadow = true; ents.push(pd); }
     const originX = field.width < VIEW_W ? (VIEW_W - field.width) >> 1 : 0;
-    const [sx, sy0] = this.shake[0] ?? [0, 0];
-    const sy = sy0 + this.events.shakeY;
+    const shakeK = fxScale(this.ctx.options.shake);                     // 편의 설정: shake reduced / off
+    const [sx0, sy0] = this.shake[0] ?? [0, 0];
+    const sx = Math.round(sx0 * shakeK), sy = Math.round(sy0 * shakeK) + this.events.shakeY;
     if (this.events.grey) setGrey(1);
     const [tr, tg, tb] = tintRow(this.db.a, this.tintIndex());
     setDayShift(tr, tg, tb);
@@ -2071,6 +2249,7 @@ export class FieldScene implements Scene {
     if (ev && (this.events.screenFxOn || this.events.holdFrame)) this.ctx.compositor.filter565((b, w, h) => this.events.screenFx(b, w, h));
     setDayShift(0, 0, 0);
     if (this.events.grey) setGrey(0);           // the filter is applied before the dialogue
+    this.ui.bleed = this.ctx.compositor.pad;                       // balloons, marks and effects reach the fullscreen margins too
     this.ui.begin();
     const hud = this.hudUi;
     hud.begin();
@@ -2121,6 +2300,7 @@ export class FieldScene implements Scene {
         ...this.monsters.filter((m) => m.alive).map((m) => ({ x: m.x, y: m.y, monster: true })),
         // objects in slots 3..40 that are not monsters (type >= 43): actors created by the event (SPAWN_TYPE)
         ...this.actors.filter((a) => a.spawned && a.visible && a.id >= 43).map((a) => ({ x: a.x, y: a.y, monster: false })),
+        ...(this.ctx.options.minimapIcons ? this.minimapMarks() : []),
       ]);
     this.hud.draw({
       clock: clockFrame(this.dayCounter, this.dayPh),
@@ -2135,11 +2315,31 @@ export class FieldScene implements Scene {
       }),
       target: this.targetView(),
       hits: this.events.active ? undefined : this.hits,
+      extra: this.hudExtra(),
+      nextEvent: this.pendingEvent ? 200 - this.pendingEvent.t : 0,
     }, this.cam.x - originX - sx, this.cam.y - sy, this.showButtons && !this.dead && !this.talk && !this.ctx.input.confirm);
     if (this.ctx.input.confirm) this.hud.confirmControls();
-    if (this.flash) { hud.alpha = Math.min(32, this.flash * 4); hud.fill(0, 0, VIEW_W, VIEW_H, 0xffffff); hud.alpha = 32; }
-    if (this.talk) { hud.hit(0, 0, VIEW_W, VIEW_H, () => [AVK.OK]); this.talk.d.draw(hud, this.tick); }
+    const flashA = Math.round(Math.min(32, this.flash * 4) * fxScale(this.ctx.options.flash));
+    if (flashA > 0) { hud.alpha = flashA; hud.fill(0, 0, VIEW_W, VIEW_H, 0xffffff); hud.alpha = 32; }
+    if (this.talk) {
+      hud.hit(0, 0, VIEW_W, VIEW_H, () => [AVK.OK]);
+      this.talk.d.draw(hud, this.tick);
+      drawDialogueButtons(hud, !!this.ctx.options.auto, this.ctx.input);
+    }
     this.drawPopup();
+  }
+
+  /** 편의 설정 미니맵 아이콘 (not in the original): NPCs with a quest mark and this map's warp stone */
+  private minimapMarks(): { x: number; y: number; monster: false; mark: 'take' | 'report' | 'busy' | 'stone' }[] {
+    const out: { x: number; y: number; monster: false; mark: 'take' | 'report' | 'busy' | 'stone' }[] = [];
+    for (const a of this.actors) {
+      if (!a.visible || a.id < 43) continue;
+      const { mark } = this.quests.marker(a.id);
+      if (mark === 1 || mark === 2 || mark === 3) out.push({ x: a.x, y: a.y, monster: false, mark: mark === 1 ? 'take' : mark === 3 ? 'report' : 'busy' });
+    }
+    const r = this.stone(this.stoneRow());
+    if (r.map === this.field.mapId && (r.flag === -1 || this.story.isDone(r.flag))) out.push({ x: r.x0 + 25, y: r.y0 + 25, monster: false, mark: 'stone' });
+    return out;
   }
 
   /** quest marks over NPCs (end of FUN_00030cec): 1 yellow ?, 2 grey !, 3 orange !, bobbing, alpha 24 */

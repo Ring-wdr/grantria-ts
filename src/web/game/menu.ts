@@ -3,6 +3,7 @@
 // (analysis/features/ui-screens.md §0.8–0.10, tools/grantria_ui.py screen_gamemenu / tab_frame /
 // screen_tab_char). Tab bodies live in tabs.ts, skillTab.ts, questTab.ts, mapTab.ts, optionTab.ts and community.ts.
 import { cmfImages } from '../render/sprites';
+import type { Launch } from './archive';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
@@ -23,9 +24,12 @@ import { tabHint } from '../input/keyHints';
 
 const STAT_HELP = [0x1a18, 0x1a19, 0x1a1a, 0x1a1b, 0x1a1c];
 
-export type MenuResult = 'close' | 'title' | 'save' | null;
+export type MenuResult = 'close' | 'title' | 'save' | 'launch' | null;
 
 export class GameMenu {
+  /** 기록실 request (보스 러시), taken once by the play scene */
+  takeLaunch(): Launch | null { const l = this.option.launch; this.option.launch = null; return l; }
+
   /** open counter g_Menu.frame (input accepted from 12) */
   private f = 0;
   private t = 0;
@@ -122,7 +126,7 @@ export class GameMenu {
     }
     const body = this.body;
     if (body) {
-      if (body.busy) { body.update(presses); this.couponDetour(); this.backFromCoupons(); return null; }
+      if (body.busy) { body.update(presses); this.couponDetour(); this.backFromCoupons(); return body === this.option && this.option.launch ? 'launch' : null; }
       // tab bodies consume their keys; the rest falls through to the common tab keys
       const rest: number[] = [];
       for (const k of presses) if (!body.update([k])) rest.push(k);

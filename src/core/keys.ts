@@ -5,6 +5,10 @@ export const AVK = {
   CLR: -16, SAVE: -10, MAP: -6,
   /** not in the original: previous / next menu tab (pad L1 / R1, keyboard Q / E) */
   TAB_L: -101, TAB_R: -102,
+  /** not in the original: dialogue log, dialogue auto advance on / off (game/backlog.ts) */
+  LOG: -103, AUTO: -104,
+  /** not in the original: held to fast-forward dialogue (편의 설정 빨리 넘기기) */
+  FAST: -105,
 } as const;
 
 /** the six quick-slot keys in slot order (HUD slots 0..5) */
@@ -21,6 +25,7 @@ export function slotPickerKey(k: number, cur: number): { cur: number; pick: bool
   return i >= 0 ? { cur: i, pick: true } : null;
 }
 
-/** HUD touch keys (not original key codes): gate icon -> community, SHOP -> premium shop, coupon button,
- *  QUEST -> quest tab (10000 also lights the QUEST pill, FUN_0004b128 idx 12) */
-export const HUD = { COMMUNITY: -30, SHOP: -7, COUPON: -31, QUEST: 10000 } as const;
+/** HUD touch keys (not original key codes): gate icon -> community, SHOP -> premium shop,
+ *  QUEST -> quest tab (10000 also lights the QUEST pill, FUN_0004b128 idx 12).
+ *  The original's coupon shop button is gone: the shop is in the community menu (gate icon). */
+export const HUD = { COMMUNITY: -30, SHOP: -7, QUEST: 10000 } as const;

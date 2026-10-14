@@ -36,6 +36,12 @@ export interface Scene {
   /** render into the compositor target and the overlay */
   draw(): void;
   debugLine?(): string;
+  /** fullscreen: the screen UI reaches into the side margins, so a fill over the whole view covers them too
+   *  (the logo's white, the title backdrop); other screens stay in the 480x320 middle */
+  wide?: boolean;
+  /** colour around and under the screen while the scene shows (the logo's white): the page and the cleared
+   *  canvas, so no black shows at the frame's edges; black when unset */
+  backdrop?: number;
   /** the scene was replaced (GameContext.go): free its GPU resources */
   dispose?(): void;
 }

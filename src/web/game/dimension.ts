@@ -53,6 +53,28 @@ export interface DimRun {
   cleared: boolean;
   /** boss clear timer (200 frames) */
   clearT: number;
+  /** 심연 (not in the original): 0 = the original 10 floors, n = the n-th descent after the boss; base = header at 0 */
+  depth?: number;
+  base?: number[];
+  /** 심연: bonus exp of the clears before this depth, kept whatever happens below (the pool is this depth's alone) */
+  banked?: number;
+}
+
+/** 심연 weekly rule (not in the original): the same for everyone in a week, only below the original floors */
+export const ABYSS_RULES = [
+  { name: '광폭', desc: '몬스터 공격력 +50%' },
+  { name: '강철', desc: '몬스터 HP +50%' },
+  { name: '물량', desc: '몬스터 수 1.5배' },
+] as const;
+export function abyssRule(now = Date.now()): number { return Math.floor(now / (7 * 86_400_000)) % ABYSS_RULES.length; }
+
+/** 심연 depth n (n >= 1): the header of the run made stronger: HP / ATK +25 % per depth in dungeon 0 (its header is in
+ *  %), +30 % in the others (tens of %), and the weekly rule (+50 %) on top */
+export function abyssHeader(base: number[], d: number, depth: number, rule: number): number[] {
+  const h = [...base], step = d === 0 ? 25 : 3, extra = d === 0 ? 50 : 5;
+  const atk = step * depth + (rule === 0 ? extra : 0), hp = step * depth + (rule === 1 ? extra : 0);
+  if (d === 0) { h[2] += atk; h[3] += hp; } else { h[1] += atk; h[5] += atk; h[3] += hp; h[7] += hp; }
+  return h;
 }
 
 /** d.dat+0x2208c {first map, x, y} */
@@ -93,7 +115,8 @@ export function generateFloor(run: DimRun, f: number, field: Field, arrivals: [n
     for (const c of cells) { const dd = Math.min(...arrivals.map(([x, y]) => Math.hypot(x - c[0], y - c[1])), 1e9); if (dd > bd) { bd = dd; best = c; } }
     return [{ type: run.boss, x: best[0] * 16 + 8, y: best[1] * 16 + 8 }];
   }
-  const n = Math.min(MAX_PER_FLOOR, Math.max(4, Math.round(walk * cfg.density)), cells.length), out: DimRecord[] = [];
+  const dens = cfg.density * ((run.depth ?? 0) > 0 && abyssRule() === 2 ? 1.5 : 1);   // 심연 물량
+  const n = Math.min(MAX_PER_FLOOR, Math.max(4, Math.round(walk * dens)), cells.length), out: DimRecord[] = [];
   for (let i = 0; i < n; i++) {
     const k = pick(rng, cells.length), [cx, cy] = cells.splice(k, 1)[0];
     out.push({ type: cfg.pool[pick(rng, cfg.pool.length)], x: cx * 16 + 8, y: cy * 16 + 8 });
@@ -155,7 +178,8 @@ export function rollDimDrops(rng: Rng, db: ItemDb, m: { type: number; level: num
 /** result popup 100 values: elapsed h / m, equipment gained, kills, bonus exp, achievement points */
 export function resultValues(run: DimRun): number[] {
   const min = Math.floor((Date.now() - run.entry) / 60000);
-  return [Math.floor(min / 60), min % 60, run.equips, run.kills, run.cleared ? run.pool : 0, run.cleared ? 3 : 0];
+  const won = run.cleared || run.banked !== undefined;
+  return [Math.floor(min / 60), min % 60, run.equips, run.kills, (run.cleared ? run.pool : 0) + (run.banked ?? 0), won ? 3 : 0];
 }
 
 /** local daily free entry (net 0x2E replaced) */

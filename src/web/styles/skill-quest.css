@@ -87,8 +87,9 @@
 .qs-rule { flex: none; height: 1px; margin: 4px 0; background: #666; }
 .qs-lines { padding-left: 13px; }
 .qs-bar { flex: none; height: 28px; padding: 0 10px; justify-content: space-between; background: #171d24; border-radius: 3px; }
-.qs-bar.single { justify-content: center; }
 .qs-bar > .v-btn { width: 62px; }
+.qs-bar.triple { padding: 0 4px; }                 /* 확인 / 추적 / 포기 */
+.qs-bar .v-btn.qs-untracked { opacity: 0.7; }
 
 @media (prefers-reduced-motion: reduce) {
   .sk-qslot.cur .sk-qpad { animation: none; filter: brightness(1.2); }

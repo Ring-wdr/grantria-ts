@@ -9,6 +9,7 @@ import type { GameContext } from './scene';
 import { tri, type Ui } from '../render/ui';
 import { gt, h, sprite, TAB_BODY, type VChild, type VNode } from '../render/view';
 import '../styles/map-community.css';
+import '../styles/convenience.css';
 import { platform } from '../../core/platform';
 
 const SHAPE = 0x255a6, ROOM = 0x255c0, CORR = 0x2603a, FLOOR = 0x26766, NFLOOR = 0x26808, ARROW = 0x269b7;
@@ -119,6 +120,14 @@ export class MapTab {
       .map((q) => a.d16(0x221a2 + 2 * q)).filter((m) => m !== 1000);
   }
 
+  /** 편의 설정 퀘스트 위치 (not in the original): the same destination table for every other active quest */
+  private otherQuestMaps(): number[] {
+    if (!this.ctx.options.mapQuests) return [];
+    const a = this.ctx.assets, st = this.fs.story;
+    return st.active.map((s) => s.q).filter((q) => !(a.d8(0x2170c + 16 * q) === 3 && st.qs[q] === 3))
+      .map((q) => a.d16(0x221a2 + 2 * q)).filter((m) => m !== 1000);
+  }
+
   /**
    * The tab body as one view: the artwork, rooms and markers sit on a stage in the 220-window
    * coordinates of the original draw calls (that geometry is the map itself); the labels are CSS boxes.
@@ -155,7 +164,7 @@ export class MapTab {
     const t = this.t, f = v.f, [a7c, a80, a8a] = this.counts(f), text = this.ctx.assets.text;
     const nr = this.d8(FLOOR + f * 3), nc = this.d8(FLOOR + f * 3 + 1), na = this.d8(FLOOR + f * 3 + 2);
     const vbase = f > 0x13 ? 0x70 : 0, cbase = this.cur > 2 ? 0x70 : 0, hbase = this.fs.field.map.header.zone >= 3 ? 0x70 : 0;
-    const quest = this.questMaps(), mine = f === this.curFloor;
+    const quest = this.questMaps(), other = this.otherQuestMaps(), mine = f === this.curFloor;
     const out: VChild[] = [];
     const fill = (x: number, y: number, w: number, hh: number, rgb: number, extra = '') => {
       if (w > 0 && hh > 0) out.push(h('b.mc-abs', { style: `${rect(x, y, w, hh)}background:#${rgb.toString(16).padStart(6, '0')};${extra}` }));
@@ -176,6 +185,7 @@ export class MapTab {
         if (icon === 2) out.push(at(sprite('c', 111, 43, 16, 16), x + ((w - 16) >> 1), y + ((hh - 16) >> 1)));
         else if (icon === 4) out.push(at(sprite('c', 127, 43, 16, 16), x + ((w - 16) >> 1), y + ((hh - 16) >> 1)));
         else if (icon === 1) out.push(at(sprite('c', 121, 0, 9, 19), x + ((w - 10) >> 1), y + ((hh - 16) >> 1)));
+        else if (other.includes(cbase + mp)) out.push(at(sprite('c', 121, 0, 9, 19, { cls: 'mc-quest-other' }), x + ((w - 10) >> 1), y + ((hh - 16) >> 1)));
         if (mine && this.fs.field.mapId === hbase + mp) {
           const dot = sprite('c', 90, 17, 7, 8, { cls: 'mc-tint', style: tint('c', 90, 17, '255,255,255', tri(t, 16) * 2) });
           out.push(at(dot, x + ((w - 7) >> 1), y + ((hh - 8) >> 1)));

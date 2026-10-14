@@ -8,6 +8,12 @@ import type { Ui } from './ui';
 /** palette: 0 transparent, 1 white, 2 dark grey 0x3186, 3 green 0x67E0, 4 white */
 const PAL: (number[] | null)[] = [null, [255, 255, 255], [49, 48, 49], [99, 252, 0], [255, 255, 255]];
 
+const PLUS: [number, number][] = [[0, -1], [-1, 0], [0, 0], [1, 0], [0, 1]];
+const SQUARE: [number, number][] = [[-1, -1], [0, -1], [1, -1], [-1, 0], [0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+const DIAMOND: [number, number][] = [[0, -2], [-1, -1], [0, -1], [1, -1], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0], [-1, 1], [0, 1], [1, 1], [0, 2]];
+const MARK_SHAPE = { take: PLUS, report: SQUARE, busy: SQUARE, stone: DIAMOND };
+const MARK_COLOUR = { take: [255, 230, 0], report: [255, 140, 0], busy: [150, 150, 150], stone: [80, 230, 255] };
+
 export class Minimap {
   private bw = 0;
   private bh = 0;
@@ -75,8 +81,10 @@ export class Minimap {
     this.bits = b; this.bw = BW; this.bh = BH;
   }
 
-  /** §4.2: player at (px, py), objects as dots (monsters red, others yellow) */
-  draw(u: Ui, px: number, py: number, dots: { x: number; y: number; monster: boolean }[]): void {
+  /** §4.2: player at (px, py), objects as dots (monsters red, others yellow); `mark` (not in the original, 편의 설정
+   *  미니맵 아이콘): a 3×3 shape so the kinds differ by shape as well as colour — quest to take (yellow +),
+   *  quest to report (orange ■), quest in progress (grey ■), warp stone (cyan ◆) */
+  draw(u: Ui, px: number, py: number, dots: { x: number; y: number; monster: boolean; mark?: 'take' | 'report' | 'busy' | 'stone' }[]): void {
     if (!this.mask || !this.bw) return;
     const BW = this.bw, BH = this.bh, px8 = px >> 3, py8 = py >> 3;
     let srcX: number, offX: number, limX: number, srcY: number, offY: number, limY: number;
@@ -106,7 +114,10 @@ export class Minimap {
     for (const d of dots) {
       const ox = (d.x >> 3) - px8, oy = (d.y >> 3) + 2 - py8;
       if (ox < -29 || ox > 29 || oy < -26 || oy > 26) continue;
-      dot(60 + ox + offX, 54 + oy + offY, d.monster ? [255, 17, 0] : [255, 255, 0]);
+      const cx = 60 + ox + offX, cy = 54 + oy + offY;
+      if (!d.mark) { dot(cx, cy, d.monster ? [255, 17, 0] : [255, 255, 0]); continue; }
+      const c = MARK_COLOUR[d.mark];
+      for (const [ddx, ddy] of MARK_SHAPE[d.mark]) dot(cx + ddx, cy + ddy, c);
     }
     this.ctx2d.putImageData(img, 0, 0);
     this.tex.needsUpdate = true;

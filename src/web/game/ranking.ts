@@ -37,16 +37,17 @@ function saveRanking(list: RankEntry[]): void {
   saveJson(KEY, list);
 }
 
-/** FUN_00061864: Σ equipment (grade·10 + level) + 3·dimension clears + 3·Vermut kills + 10 per title + 100 on lap >= 2 (+300 above) */
+/** FUN_00061864: Σ equipment (grade·10 + level) + 3·dimension clears + 3·Vermut kills + 10 per title + 100 on lap >= 2 (+300 above: 3회차, lap 4) */
 export function rankScore(equip: (Item | null)[], lap: number, titles: number, clears = 0, vermut = 0): number {
   let s = 3 * clears + 3 * vermut;
   for (const it of equip) if (it) s += it.grade * 10 + it.level;
   if (lap >= 2) s += 100;
-  if (lap > 2) s += 300;
+  if (lap >= 4) s += 300;                                         // the original's lap > 2: here 3회차 (lap 3 = hard ending seen)
   return s + titles * 10;
 }
 
 export class RankingScene implements Scene {
+  readonly wide = true;                                               // over the title backdrop
   private state: 0x35 | 0x36 | 0x37 = 0x35;
   private cur = 0;
   private page = 0;
@@ -143,7 +144,7 @@ export class RankingScene implements Scene {
     }, corners(), sl && h('div.v-col.sm-slot-info', null,
       h('div.v-row', { style: 'gap:6px' },
         gt(t[0x3e1 + sl.cls] ?? ''),
-        (laps[i] ?? 0) === 2 && gt(t[6716] ?? '', { pen: 0xf800 }),
+        (laps[i] ?? 0) >= 2 && gt((laps[i] ?? 0) >= 4 ? '3회차' : t[6716] ?? '', { pen: 0xf800 }),
         h('span.v-grow'),
         gt(t[6717] ?? ''), h('span.sm-num', null, String(sl.level))),
       h('div.v-grow.v-center.v-row', null, gt(t[0x1d6 + (sl.zone ?? 0)] ?? '')),

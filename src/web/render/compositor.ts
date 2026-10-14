@@ -187,11 +187,14 @@ export class Compositor {
     return passes;
   }
 
-  /** Clear the internal target to black (a full-screen DOM menu covers the field). */
+  /** colour of clear() (the scene's backdrop, app.ts) */
+  clearColor = 0x000000;
+
+  /** Clear the internal target to black, or the scene's backdrop (a full-screen DOM menu covers the field). */
   clear(): void {
     if (this.rt.width !== this.width || this.rt.height !== VIEW_H) this.rt.setSize(this.width, VIEW_H);
     this.renderer.setRenderTarget(this.rt);
-    this.renderer.setClearColor(0x000000, 1);
+    this.renderer.setClearColor(this.clearColor, 1);
     this.renderer.clear();
     this.renderer.setRenderTarget(null);
   }

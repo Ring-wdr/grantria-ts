@@ -10,20 +10,21 @@ import type { FieldScene } from './fieldScene';
 import { Dialogue, HoldSkip, drawCaption, drawDialogueButtons } from './dialogue';
 import { readLog } from '../../core/save/readLog';
 import { addSeen } from '../../core/rules/records';
-import { backlog } from './backlog';
+import { backlog, replayLog } from './backlog';
 import { fxScale, optionFps } from '../../core/save/options';
 import { AVK } from '../input/input';
 import type { Ui } from '../render/ui';
 import { button, h, padBadge } from '../render/view';
 import { EvActor } from '../../core/world/actors';
+import { REPEATABLE } from '../../core/data/story';
+
+export { REPEATABLE };
 
 const W = 480, H = 320;
 export const PLAYER_ARG = 299;
 const PARTY_ALL = 0x120;
 const NO_SKIP = [0, 1, 4, 10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x27, 0x29, 0x2f, 0x30, 0x31, 0x32, 0x39];
 const FLASH = [32, 32, 32, 24, 24, 16, 8, 6, 24, 16, 8, 4, 2, 0, 0];
-/** repeatable hint events: the end handler clears their own flag again */
-export const REPEATABLE = [0x6e, 0x6f, 0x70, 0x71, 0x79, 0x7c, 0x7f, 0x80, 0x81, 0x82, 0x83, 0x8a, 0x8d, 0x8e, 0x90, 0x92, 0x93, 0x94, 0x96];
 /** end handler flag changes (FUN_0002cdc8) */
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[]; doors?: number[]; item?: [number, number] }> = {
@@ -125,6 +126,8 @@ export class EventRunner {
   private skipFade = 0;
   /** 회상 (not in the original): quests are not taken or completed and the end changes no flags */
   replay = false;
+  /** where the lines go: the play log, or the replay's own (회상) */
+  private get log() { return this.replay ? replayLog : backlog; }
   /** auto advance (편의 설정): ticks spent on a WAIT_KEY */
   private keyWaitTicks = 0;
   /** held fast-forward (편의 설정 빨리 넘기기) */
@@ -181,12 +184,12 @@ export class EventRunner {
 
   private rec(s: number) { return this.db.rec(this.id, s); }
 
-  /** resolveActor: an actor with that id (visible ones for 0x1a), else the leader (slot 0) */
+  /** resolveActor: an actor with that id (visible ones for 0x1a), the room's boss, else the leader (slot 0) */
   private actor(arg: number, cmd = 0): EvActor {
     const lead = this.fs.lead!;
     if (arg < 0 || arg === PLAYER_ARG) return lead;
     if (arg === lead.id) return lead;
-    return this.fs.actors.find((a) => a.id === arg && (cmd !== 0x1a || a.visible)) ?? lead;
+    return this.fs.actors.find((a) => a.id === arg && (cmd !== 0x1a || a.visible)) ?? this.fs.bossActor(arg) ?? lead;
   }
   private party(arg: number): EvActor[] {
     return arg === PARTY_ALL ? this.fs.partyActors() : [this.actor(arg)];
@@ -327,7 +330,7 @@ export class EventRunner {
     }
     if (cmd >= 0x16df && cmd < 0x17d4) {                       // PLACE
       const id = cmd - 0x16df;
-      const a = id === PLAYER_ARG || id === fs.lead!.id ? fs.lead! : fs.actors.find((x) => x.id === id) ?? fs.spawnActor(id) ?? fs.lead!;
+      const a = id === PLAYER_ARG || id === fs.lead!.id ? fs.lead! : fs.actors.find((x) => x.id === id) ?? fs.bossActor(id) ?? fs.spawnActor(id) ?? fs.lead!;
       this.place(a, arg);
       return;
     }
@@ -353,7 +356,7 @@ export class EventRunner {
         const a = this.actor(arg);
         const text = fs.ctx.assets.text[this.textId] ?? '', name = fs.ctx.assets.text[this.db.nameId(a.id)] ?? '';
         this.dialogue = new Dialogue(text, name, this.faceOf(a), cmd === 7, this.textId);
-        if (!this.replay) backlog.push({ name, text, textId: this.textId, kind: 'talk' });
+        this.log.push({ name, text, textId: this.textId, kind: 'talk' });
         this.wait = cmd === 5 ? 1 : 1;
         this.camTarget = a; this.camCell = null;
         break;
@@ -378,8 +381,10 @@ export class EventRunner {
           if (a && p) { a.x = p[0]; a.y = p[1]; a.face((p[2] & 3) as Dir); }
           break;
         }
-        const a = fs.actors.find((x) => x.id === arg && x.visible) ?? fs.spawnActor(arg, true);
+        // a boss standing in the room is the one brought in (event 8 King Dusty): a new one would stand beside it
+        const a = fs.actors.find((x) => x.id === arg && x.visible) ?? fs.bossActor(arg, true) ?? fs.spawnActor(arg, true);
         if (!a) break;
+        a.visible = true;
         if (p) { a.x = p[0]; a.y = p[1]; a.face((p[2] & 3) as Dir); }
         break;
       }
@@ -409,13 +414,13 @@ export class EventRunner {
         if (this.id === 0x6a) {                                // staff roll: [4,9,7,11,8,11,1] consecutive text ids
           const L = [4, 9, 7, 11, 8, 11, 1][++this.capIdx] ?? 1, lines: string[] = [];
           for (let i = 0; i < L; i++) lines.push(fs.ctx.assets.text[++this.textId] ?? '');
-          if (!fast) { this.caption = { text: lines, n: 0, id: this.textId }; this.wait = 4; if (!this.replay) backlog.push({ name: '', text: lines.join('@'), textId: -1, kind: 'caption' }); }
+          if (!fast) { this.caption = { text: lines, n: 0, id: this.textId }; this.wait = 4; this.log.push({ name: '', text: lines.join('@'), textId: -1, kind: 'caption' }); }
           break;
         }
         this.textId++;
         if (!fast) {
           this.caption = { text: fs.ctx.assets.text[this.textId] ?? '', n: 0, id: this.textId }; this.wait = 4;
-          if (!this.replay) backlog.push({ name: '', text: this.caption.text as string, textId: this.textId, kind: 'caption' });
+          this.log.push({ name: '', text: this.caption.text as string, textId: this.textId, kind: 'caption' });
         }
         break;
       case 0x1e: fs.partyJoin(); break;
@@ -548,7 +553,7 @@ export class EventRunner {
     }
     if (this.caption) drawCaption(u, this.caption.text, this.caption.n);
     if (this.active) u.hit(0, 0, W, H, () => [AVK.OK]);       // tap = next line
-    if (this.dialogue) { this.dialogue.draw(u, this.frame); if (!this.replay) drawDialogueButtons(u, !!this.fs.ctx.options.auto, this.fs.ctx.input); }
+    if (this.dialogue) { this.dialogue.draw(u, this.frame); drawDialogueButtons(u, !!this.fs.ctx.options.auto, this.fs.ctx.input); }
     if (this.active && this.clock >= 11 && this.skippable(this.lastCmd) && !this.skipFade) {
       // SKIP: the button at alpha 16 with the label blinking every 8 frames (CSS), centred in the button
       u.view('evSkip', W - 70 + this.fs.ctx.input.edge, 6, 50, 24,   // edge layout: at the right edge with the buttons

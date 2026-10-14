@@ -2,6 +2,7 @@
 // game-rules.md §3) and items (items.md: drops, pickup, potions, quick slots), started from a save slot.
 import type { Cmf } from '../../core/data/assets';
 import { DEFAULT_EQUIP, setDayShift, setGrey, type SpriteLayer } from '../render/sprites';
+import { equipLook } from '../../core/render';
 import { Buffs, buffItem, DAY_EVENTS, TINT_BASE, clockFrame, dayPhase, isSafeMap, returnPoint, tintRow } from '../../core/rules/buffs';
 import { boxEquipment } from '../../core/rules/boxes';
 import { Gimmick } from '../../core/world/gimmicks';
@@ -15,7 +16,7 @@ import { vibrate } from '../vibrate';
 import { GATHER_CAP, GatherRun, gatherExp, spawnNodes, type GatherNode } from './gather';
 import { genDarkStock } from '../../core/rules/shopRules';
 import type { Item } from '../../core/rules/items';
-import { EvActor } from '../../core/world/actors';
+import { BossProxy, EvActor } from '../../core/world/actors';
 import { pickGuide, type Guide } from '../../core/rules/guide';
 import { Dialogue, HoldSkip, drawDialogueButtons } from './dialogue';
 import { backlog } from './backlog';
@@ -27,7 +28,7 @@ import { extraCheck, extraKey, type ExtraChallenge } from '../../core/rules/extr
 import { attend, fortunePrize, GOLDEN_EGG } from '../../core/rules/attendance';
 import { untrackKey } from './questTab';
 import { QuestLog } from '../../core/rules/quests';
-import { Story, StoryDb } from '../../core/data/story';
+import { OPENING, Story, StoryDb } from '../../core/data/story';
 import { Field, VIEW_H, VIEW_W, type Drawable } from '../render/field';
 import { FIELD_ZONES, FieldHud, type HudState } from './fieldHud';
 import { GlUi } from '../render/ui';
@@ -54,8 +55,7 @@ const FIRST_NPC = 43;
 /** maps where flag 0x1e hides / flag 0x1f shows NPCs (FUN_0001bb8c) */
 const HIDE_1E = [0x46, 0x25, 0x51, 0x74, 0x76, 0x77, 0x7a];
 const SHOW_1F = [0x74, 0x76, 0x77, 0x7a];
-/** first event per class (FUN_00053510 case 2) */
-export const OPENING = [0, 10, 0x14];
+export { OPENING };
 /** FUN_0004618c: the map an opening starts on (검사 10, 마법사 0x2f, 격투가 0x62); the event places the player */
 const OPENING_MAP = [10, 0x2f, 0x62];
 /** the map event e plays on: its header's, or for an opening (header map -1, started by a new game) the class's first map;
@@ -276,6 +276,7 @@ export class FieldScene implements Scene {
     // new game: skill 0 at level 1, no skill points (FUN_0001a8d8)
     this.skillPoints = save.skillPoints ?? 0;
     this.player = new Player(playerCmf);
+    this.player.equip = equipLook(this.inv.equip);                   // preloaded with the first map
     this.player.cls = save.cls;
     this.player.dir = save.dir;
     this.player.actions = ctx.assets.tables.playerActions[save.cls];
@@ -789,6 +790,24 @@ export class FieldScene implements Scene {
     return a;
   }
 
+  /** an event record naming a boss of this room (ids 3..42 with a Boss on the map): the boss itself while it lives
+   *  (BossProxy), a hidden stand-in at its place after it fell (a later PLACE shows it); null when there is none */
+  bossActor(id: number, aliveOnly = false): EvActor | null {
+    if (id < 3 || id >= FIRST_NPC) return null;
+    const b = this.monsters.find((m): m is Boss => m instanceof Boss && m.type === id && !m.main);
+    if (!b || (aliveOnly && !b.alive)) return null;
+    if (b.alive) {
+      const have = this.actors.find((a) => a instanceof BossProxy && a.boss === b);
+      if (have) return have;
+      const p = new BossProxy(b);
+      this.actors.push(p);
+      return p;
+    }
+    const a = this.spawnActor(id, true);
+    if (a) { a.x = b.x; a.y = b.y; a.face(b.dir); a.visible = false; }
+    return a;
+  }
+
   partyActors(): EvActor[] { return [this.lead!, ...this.actors.filter((a) => a.party)]; }
 
   /** PARTY_JOIN: the two other heroes at the leader's position and facing */
@@ -810,6 +829,9 @@ export class FieldScene implements Scene {
     lead.face(p.dir);
     this.lead = lead;
     p.action = 0; p.attack = null;
+    // FUN_00034e24 first frame: every monster of type 3..0x2a leaves the scene, bosses too (events 0x66 / 0x56 / 0x4f
+    // / 0x50 keep them); the script's PLACE / SPAWN_TYPE brings a boss in, the end of the event restores them
+    if (!this.events.keepsMonsters) for (const m of this.monsters) if (m.isBoss) m.evHidden = true;
   }
 
   async eventMap(id: number): Promise<void> {
@@ -833,11 +855,15 @@ export class FieldScene implements Scene {
       this.player.frame = 0;
     }
     this.lead = null;
+    for (const a of this.actors) if (a instanceof BossProxy) a.sync();        // a skipped PLACE still moves the boss
+    for (const m of this.monsters) m.evHidden = false;
     this.actors = this.actors.filter((a) => !a.spawned && !a.party);
     for (const a of this.actors) { a.visible = this.appears(a.id); a.balloon = 0; a.anim = -1; a.path = []; a.face(a.homeDir as Dir); }
     this.rebuildCandidates();
     this.quests.refresh();
-    this.ctx.audio.playBgm(this.field.map.header.bgm);
+    // FUN_0002cdc8: the boss theme when the scene raised the danger state (DANGER_ON, the boss entrances), silence
+    // after the ending, else the map's music (events.md §0.6)
+    this.ctx.audio.playBgm(e === 0x6a ? 0 : this.mapType >= 2 ? 0x0c : this.field.map.header.bgm);
     this.updateGuide();                                               // FUN_0002cdc8
     void e;
   }
@@ -1088,10 +1114,21 @@ export class FieldScene implements Scene {
   }
 
   /** lit warp stone (oc 36) over the static grey one once registered */
-  private stoneDrawable(): Drawable | null {
-    const row = this.stoneRow(), r = this.stone(row);
-    if (r.map !== this.field.mapId || !this.story.stones.has(row) || [0x70, 0x71, 0x73].includes(r.map)) return null;
-    return { cmfName: 'cmf_oc', cmf: this.field.oc, frame: 36, x: r.x0, y: r.y0, depth: r.y0 + 1 };
+  /** warp stone objects (gimmicks.md §4.1 그리기): oc 36 lit or oc 35, one sprite each; rows 0..2 not before their flag */
+  private stoneDrawables(): Drawable[] {
+    const map = this.field.mapId, st = this.story, ev = this.events;
+    const need = map === 2 ? 63 : map === 0x3b || map === 0x3c ? 72 : map === 0x6b ? 143 : -1;
+    if (need >= 0 && !st.isDone(need)) return [];
+    let lit: boolean;
+    if (!ev.active) {
+      const row = this.stoneRow();
+      lit = need < 0 && this.stone(row).map === map && st.stones.has(row) && ![0x70, 0x71, 0x73].includes(map);
+    } else {
+      const id = ev.id, clock = ev.progress;
+      lit = map === 0x45 ? id === 0x48 || id === 0x13 : map === 0x26 ? id === 0x3f || id === 9
+        : map === 0x50 ? (id === 0x1d && clock >= 240) || id === 0x8f : map === 0x9b ? (id === 0x7b ? clock >= 0x72 : st.isDone(0x7b)) : false;
+    }
+    return this.field.stoneObjs().map((o) => ({ cmfName: 'cmf_oc', cmf: this.field.oc, frame: lit ? 36 : 35, x: o.x, y: o.y, depth: -1 }));   // objLow floor: under every actor
   }
 
   /** kind 5 barriers open by themselves; kind 6 chests give their reward (gimmicks.md §1.3 / §1.4) */
@@ -1537,12 +1574,22 @@ export class FieldScene implements Scene {
     }
   }
 
+  /** worn equipment -> sprite look (FUN_000385e0 runs inside the stat rebuild); new item sheets load in the background */
+  private updateLook(): void {
+    const p = this.player, look = equipLook(this.inv.equip), old = p.equip;
+    if (look.w === old.w && look.h === old.h && look.a === old.a && look.p === old.p) return;
+    p.equip = look;
+    if (this.lead?.party && this.lead.cls === this.model.cls) this.lead.equip = look;
+    void this.field.preloadSprite(p.cmfName, p.cmf, look);
+  }
+
   recompute(): void {
     this.model.buffs = this.buffs.effects(this.db.a);
     this.model.traits = traitStatBonus();
     this.model.titles = titleBonus(this.db.a, this.story.titles, this.story.title);
     this.stats = derive(this.model, this.tables);
     this.vitals.hp = Math.min(this.vitals.hp, this.stats.maxHp);
+    this.updateLook();
     this.vitals.mp = Math.min(this.vitals.mp, this.stats.maxMp);
   }
 
@@ -1906,9 +1953,9 @@ export class FieldScene implements Scene {
     this.projectiles = this.projectiles.filter((p) => !p.gone);
   }
 
-  /** Player attack box against monster bodies
-
-  /** Player attack box against monster bodies, nearest first; every overlap is a hit (FUN_0006e8a8). */
+  /** Player attack box against monster bodies, nearest first; every overlap is a hit (FUN_0006e8a8).
+   *  Not ported: the "+0x76 == 10" rule (skills.md §2.3) that turned c0 드릴소드 upward on first contact,
+   *  which made monsters below or beside the player hard to hit. The drill keeps its cast direction. */
   private resolvePlayerAttack(): void {
     const { player } = this;
     const atk = player.attack;
@@ -1918,8 +1965,6 @@ export class FieldScene implements Scene {
       .filter((t) => t.b && overlaps(atk, t.b))
       .sort((a, b) => a.d - b.d);
     for (const { m, b } of targets) {
-      // "+0x76 == 10" rule hits c0 drill sword: first contact turns the player up, no damage (§2.3)
-      if (player.action === 10 && this.model.cls === 0 && player.dir !== 2) { player.dir = 2; player.lastV = 2; return; }
       this.hitMonster(player.skillAid, m, b!, player.x, player.y, player.dir, true, { hitRect: atk });
     }
   }
@@ -2205,8 +2250,8 @@ export class FieldScene implements Scene {
     }
     for (const g of this.gimmicks) ents.push(...g.drawables(field.oc));
     for (const n of this.nodes) ents.push(...n.drawables(field, this.statusCmf, this.tick, this.run));
-    { const sd = this.stoneDrawable(); if (sd) ents.push(sd); }
-    // events hide normal monsters (except 0x66 / 0x56 / 0x4f / 0x50); bosses stay as part of the scene
+    ents.push(...this.stoneDrawables());
+    // events hide normal monsters (except 0x66 / 0x56 / 0x4f / 0x50); bosses are hidden by beginEvent until the script shows them
     for (const m of this.monsters.slice().reverse()) { if (ev && !m.isBoss && !this.events.keepsMonsters) continue; const d = m.drawable(); if (d) { d.shadow = m.type !== NO_SHADOW; ents.push(d); } }
     for (const it of this.eventItems) {                            // FUN_0002f184 id 200: the icon at (x-6, y-6), no sparkle
       const r = this.db.iconRect(this.db.icon(it.cat, it.sub));

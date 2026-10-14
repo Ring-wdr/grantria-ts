@@ -68,6 +68,7 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   -webkit-mask-size: var(--msize);
   mask-size: var(--msize);
 }
+.u-img.u-strip { background-repeat: repeat-x; }
 .u-tex { image-rendering: pixelated; }
 
 .u-rfill {
@@ -298,7 +299,9 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .t-pill.on { opacity: 1; border-color: var(--t-accent); color: #fff; transform: scale(0.95); box-shadow: 0 0 6px rgba(141, 241, 242, 0.6); }
 
 /* ---- declarative views (view.ts): menu and popup contents laid out by CSS ---- */
-.ui-view { pointer-events: none; }
+/* each view is its own stacking context: z-index inside a view (item counts, anchors, backdrops) orders things
+   within that view only, and views stack in draw order (a popup view drawn later is always on top) */
+.ui-view { pointer-events: none; isolation: isolate; }
 .ui-view .v-hit { pointer-events: auto; cursor: pointer; }
 .ui-view * { box-sizing: border-box; }
 .v-modal { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }

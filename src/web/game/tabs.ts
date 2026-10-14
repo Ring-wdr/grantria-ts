@@ -645,7 +645,7 @@ export class EquipTab {
     u.image('shadow', 120, 0, 36, 20, 92, 96, 14 << 8);           // multiply
     u.alpha = 32;
     const f = (Math.trunc(this.t / 2) % 6) + 0;                    // idle frames 0..5 (facing down)
-    u.frame(`cmf_c${fs.model.cls}`, this.playerCmf, f, 110, 102);
+    u.frame(`cmf_c${fs.model.cls}`, this.playerCmf, f, 110, 102, undefined, undefined, fs.player.equip);   // worn look (ui-tabs.md 캐릭터)
   }
 
   private mainView(): VNode {

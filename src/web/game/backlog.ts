@@ -20,17 +20,25 @@ export interface LogEntry {
   kind: 'talk' | 'caption';
 }
 
-const entries: LogEntry[] = [];
+export type Backlog = ReturnType<typeof makeLog>;
 
-export const backlog = {
-  entries: entries as readonly LogEntry[],
-  push(e: LogEntry): void {
-    if (!e.text) return;
-    entries.push(e);
-    if (entries.length > MAX) entries.splice(0, entries.length - MAX);
-  },
-  clear(): void { entries.length = 0; },
-};
+function makeLog() {
+  const entries: LogEntry[] = [];
+  return {
+    entries: entries as readonly LogEntry[],
+    push(e: LogEntry): void {
+      if (!e.text) return;
+      entries.push(e);
+      if (entries.length > MAX) entries.splice(0, entries.length - MAX);
+    },
+    clear(): void { entries.length = 0; },
+  };
+}
+
+/** the play session's log */
+export const backlog = makeLog();
+/** 회상: the lines of the scene being replayed (emptied when one starts), kept out of the play log */
+export const replayLog = makeLog();
 
 /** event text breaks lines with '@' (dialogue.ts); the view text uses '|@' */
 function viewText(s: string): string {
@@ -40,6 +48,8 @@ function viewText(s: string): string {
 export class BacklogView {
   /** starts at the newest entry (the browser clamps the overshoot) */
   private scroll: ScrollRef = { y: 1e6 };
+
+  constructor(private log: Backlog = backlog) {}
 
   /** false once closed */
   update(presses: number[]): boolean {
@@ -54,7 +64,7 @@ export class BacklogView {
   }
 
   draw(u: Ui, input: { device: string; padKind: PadKind }): void {
-    const rows = entries.map((e) => e.kind === 'caption'
+    const rows = this.log.entries.map((e) => e.kind === 'caption'
       ? h('div.log-entry.caption', null, gt(viewText(e.text), { pen: 0xc618 }))
       : h('div.log-entry', null,
         e.name && h('div.log-name', null, gt(e.name, { pen: 0xffe0 })),

@@ -333,10 +333,10 @@ export abstract class Ui {
   }
 
   /** Draw a cmf frame (UI animations such as the title logo); image overrides every clip's image. */
-  frame(cmfName: string, cmf: Cmf, fi: number, x: number, y: number, image?: string, fx?: SpriteFx): void {
+  frame(cmfName: string, cmf: Cmf, fi: number, x: number, y: number, image?: string, fx?: SpriteFx, equip = DEFAULT_EQUIP): void {
     for (const p of cmf.frames[fi]?.parts ?? []) {
       const c = cmf.clips[p.clip];
-      const img = image ?? clipImage(this.assets, cmfName, cmf, p.clip, 0, DEFAULT_EQUIP);
+      const img = image ?? clipImage(this.assets, cmfName, cmf, p.clip, 0, equip);
       if (!c || !img) continue;
       const flags = (p.hflip & 1) | ((p.rot & 3) << 2) | (((p.scale - 1) & 15) << 4) | ((p.blend & 31) << 8) | (((8 - p.alpha8) & 7) << 13);
       this.image(img, c[0], c[1], c[2], c[3], x + p.dx, y + p.dy, flags, fx);

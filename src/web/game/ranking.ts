@@ -9,6 +9,7 @@ import { SLOT_COUNT, loadGamedata, loadSlot, type SaveData } from '../../core/sa
 import type { GameContext, Scene } from './scene';
 import { frozenTitle, playTime, render, TitleScene } from './screens';
 import type { Ui } from '../render/ui';
+import { equipLook } from '../../core/render';
 import { button, gt, h, padBadge, sprite, type VNode } from '../render/view';
 import '../styles/screens-misc.css';
 import { loadJson, saveJson } from '../../core/platform';
@@ -159,7 +160,7 @@ export class RankingScene implements Scene {
       const y = 22 + 66 * i, sl = this.slots[i];
       if (!sl) { u.cfont('EMPTY SPACE', 0x56, y + 0x1b, 0); continue; }
       const cmfName = `cmf_c${sl.cls}`;
-      u.frame(cmfName, this.ctx.cmfs[cmfName], this.t % 6, sl.cls === 2 ? 0x23 : 0x26, y + (sl.cls === 2 ? 0x3a : 0x30));
+      u.frame(cmfName, this.ctx.cmfs[cmfName], this.t % 6, sl.cls === 2 ? 0x23 : 0x26, y + (sl.cls === 2 ? 0x3a : 0x30), undefined, undefined, equipLook(sl.inv?.equip));
     }
   }
 

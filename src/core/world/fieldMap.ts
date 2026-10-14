@@ -4,6 +4,8 @@ import type { Assets, Cmf, GameMap, MapObject } from '../data/assets';
 import { buildWalk, buildWalkLayers } from './world';
 
 export const TILE = 16;
+/** warp stone object id in objLow (cmf_oc frame 35, unlit) */
+export const STONE_OBJ = -35;
 
 export class FieldMap {
   map!: GameMap;
@@ -76,6 +78,9 @@ export class FieldMap {
 
   /** frame offset of midStatic[i] this frame (FUN_00032800: counter % length) */
   protected midOffset(i: number): number { const a = this.midAnim[i]; return a?.len ? a.cnt % a.len : 0; }
+
+  /** warp stones (objLow id −35 = oc 35): drawn by the scene as oc 35 or the lit oc 36, never both (gimmicks.md §4.1) */
+  stoneObjs(): MapObject[] { return this.map.objLow.filter((o) => o.obj === STONE_OBJ); }
 
   /** kind-0 portal markers (FUN_00025fe0: objMid entries with id 0xff90) for the minimap */
   kind0Markers(): { x: number; y: number }[] {

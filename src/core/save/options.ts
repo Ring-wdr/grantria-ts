@@ -41,6 +41,8 @@ export interface Options {
   autosaveMap: number;
   /** after a 차원의 문 clear, offer the 심연 (stronger floors below) before the result (off by default: the original result) */
   abyss: number;
+  /** 회상 이어서 보기: a scene that ends (or is skipped) goes on to the next one of the route (off by default) */
+  replayChain: number;
 }
 
 /** value counts per setting row (DAT_003ce20c) */
@@ -51,13 +53,13 @@ export const OPTION_KEYS: (keyof Options)[] = ['volume', 'vibration', 'speed', '
  *  but the HP / MP / EXP numbers only add information and start on) */
 export const EXTRA_COUNTS: Partial<Record<keyof Options, number>> = {
   fullscreen: 2, fullscreenSet: 2, bgm: 11, sfx: 11, textSpeed: 4, auto: 2, autoSpeed: 3, shake: 3, flash: 3,
-  skip: 3, hudNumbers: 2, hudBuffs: 2, hudBoss: 2, hudQuests: 2, minimapIcons: 2, mapQuests: 2, autosaveMap: 2, abyss: 2,
+  skip: 3, hudNumbers: 2, hudBuffs: 2, hudBoss: 2, hudQuests: 2, minimapIcons: 2, mapQuests: 2, autosaveMap: 2, abyss: 2, replayChain: 2,
 };
 
 export function defaultOptions(): Options {
   return { volume: 1, vibration: 1, speed: 2, minimap: 1, effects: 1, fullscreen: 0, fullscreenSet: 0,
     bgm: 10, sfx: 10, textSpeed: 0, auto: 0, autoSpeed: 1, shake: 0, flash: 0,
-    skip: 1, hudNumbers: 0, hudBuffs: 1, hudBoss: 1, hudQuests: 1, minimapIcons: 1, mapQuests: 1, autosaveMap: 0, abyss: 0 };
+    skip: 1, hudNumbers: 0, hudBuffs: 1, hudBoss: 1, hudQuests: 1, minimapIcons: 1, mapQuests: 1, autosaveMap: 0, abyss: 0, replayChain: 0 };
 }
 
 /** strength of screen shake / white flashes for an option value: 1, 0.5, 0 */

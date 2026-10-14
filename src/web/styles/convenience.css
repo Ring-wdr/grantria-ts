@@ -87,7 +87,6 @@
 .ar-head { color: #8df1f2; margin-top: 4px; }
 .ar-check { width: 10px; flex: none; color: #8df18d; }
 .ar-empty { color: #888; text-align: center; padding-top: 50px; }
-.rp-list { width: 100%; height: 100%; padding: 2px; background: rgba(0, 0, 0, 0.55); border-radius: 2px; }   /* 회상 list beside the portrait (replay.ts) */
 .ar-btn { width: 100%; }
 .ar-btn.off { opacity: 0.5; }
 .ar-days { gap: 3px; margin: 3px 0; }
@@ -98,3 +97,58 @@
 /* 회상 / 보스 러시 (sandbox.ts) */
 .sb-bar { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #ffe066;
   background: rgba(0, 0, 0, 0.6); border: 1px solid #5d7092; border-radius: 7px; white-space: nowrap; }
+
+/* 회상 story chart (replay.ts): three opening arcs merging into one route; class colours c0 러스티, c1 엘, c2 알피 */
+.rc-screen { padding: 6px 8px 8px; gap: 5px; background: rgba(0, 0, 0, 0.55); --c0: #ff8a6a; --c1: #8fe07a; --c2: #78b8ff; }
+.rc-top { gap: 8px; height: 16px; padding-right: 30px; }
+.rc-title { color: #ffe066; font-size: 12px; }
+.rc-sub { color: #9aa6bd; font-size: 9px; }
+.rc-body { gap: 6px; min-height: 0; align-items: stretch; }
+.rc-chart-box { width: 340px; height: 274px; flex: none; padding: 2px; background: rgba(0, 0, 0, 0.6); }
+.rc-scroll { width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; }
+.rc-chart { position: relative; width: 324px; }
+.rc-line { position: absolute; background: #5d7092; }
+.rc-line.down::after, .rc-line.right::after, .rc-line.left::after { content: ''; position: absolute; border: 3px solid transparent; }
+.rc-line.down::after { left: -2px; bottom: -1px; border-top-color: #5d7092; border-bottom-width: 0; }
+.rc-line.right::after { right: -1px; top: -2px; border-left-color: #5d7092; border-right-width: 0; }
+.rc-line.left::after { left: -1px; top: -2px; border-right-color: #5d7092; border-left-width: 0; }
+.rc-head { position: absolute; height: 14px; line-height: 14px; padding: 0 5px; font-size: 9px; color: #ffe066; white-space: nowrap;
+  background: rgba(8, 12, 22, 0.92); border-radius: 7px; box-shadow: 0 0 0 1px #3a4a66; }
+.rc-head.lane { width: 96px; text-align: center; font-size: 10px; color: var(--cc); box-shadow: 0 0 0 1px #3a4a66; pointer-events: auto; cursor: pointer; }
+.rc-head.lane.pov { box-shadow: 0 0 0 1px var(--cc); }
+.rc-head.c0, .rc-pov-btn.c0, .rc-who.c0 { --cc: var(--c0); }
+.rc-head.c1, .rc-pov-btn.c1, .rc-who.c1 { --cc: var(--c1); }
+.rc-head.c2, .rc-pov-btn.c2, .rc-who.c2 { --cc: var(--c2); }
+.rc-card { position: absolute; width: 96px; height: 22px; display: flex; align-items: center; gap: 3px; padding: 0 4px;
+  border: 1px solid #354e73; border-radius: 3px; background: #0b1424; pointer-events: auto; cursor: pointer;
+  transition: border-color var(--tick) ease-out, box-shadow var(--tick) ease-out; }
+.rc-card.locked { background: #0a0d14; border-style: dashed; border-color: #2a3346; }
+.rc-card.locked .rc-name { color: #4d566a; }
+.rc-card.pov:not(.locked) { border-color: #4f6a96; }
+.rc-card.boss { border-left: 3px solid #c8463c; padding-left: 2px; }
+.rc-card.cur { border-color: #8df1f2; box-shadow: 0 0 6px rgba(141, 241, 242, 0.45); }
+.rc-name { flex: 1 1 auto; min-width: 0; font-size: 9px; line-height: 11px; color: #e6efff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc-dots { display: flex; gap: 1px; flex: none; }
+.rc-dot { width: 4px; height: 4px; border-radius: 50%; background: #2a3346; }
+.rc-dot.on.c0 { background: var(--c0); }
+.rc-dot.on.c1 { background: var(--c1); }
+.rc-dot.on.c2 { background: var(--c2); }
+.rc-info { width: 118px; flex: none; gap: 4px; padding-top: 14px; }   /* under the close button (Ui.closeButton) */
+.rc-info-label { font-size: 9px; color: #9aa6bd; }
+.rc-pov { gap: 2px; align-items: center; }
+.ui-view .rc-pov-btn { flex: 1 1 0; min-width: 0; height: 18px; padding: 0; font-size: 9px; color: var(--cc); }
+.rc-detail { gap: 4px; padding: 6px; min-height: 0; overflow: hidden; }
+.rc-place { font-size: 9px; color: #ffe066; }
+.rc-map { font-size: 11px; line-height: 13px; color: #8df1f2; }
+.rc-line-text { font-size: 9px; line-height: 12px; color: #c9d3e6; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; }
+.rc-seen { gap: 4px; font-size: 9px; color: #9aa6bd; flex-wrap: wrap; margin-top: auto; }
+.rc-who { color: var(--cc); }
+.rc-locked { color: #6b7488; font-size: 10px; text-align: center; margin-top: 30px; }
+.ui-view .rc-play { width: 100%; height: 26px; font-size: 10px; position: relative; }
+.ui-view .rc-play.off { opacity: 0.5; }
+.rc-chain { gap: 5px; height: 18px; padding: 0 4px; font-size: 10px; color: #9aa6bd; border-radius: 3px; background: rgba(0, 0, 0, 0.6);
+  pointer-events: auto; cursor: pointer; }
+.rc-chain.on { color: #e6efff; }
+.rc-check { width: 10px; height: 10px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 9px;
+  line-height: 10px; color: #8df1f2; border: 1px solid #5d7092; border-radius: 2px; }
+.rc-chain.on .rc-check { border-color: #8df1f2; }

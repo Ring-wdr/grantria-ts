@@ -9,6 +9,13 @@ export const VIEW_H = 320;
 export type Equip = Record<'w' | 'h' | 'a' | 'p', number>;
 export const DEFAULT_EQUIP: Equip = { w: 0, h: 0, a: 0, p: 0 };
 
+/** FUN_000385e0: the look of equipment slots 0..3 (weapon, head, armour, pants) is the worn item's sub + 1, 0 when the
+ *  slot is empty (eq/<kind><class>_<look>; weapon look 0 draws as look 1, the others as nothing) */
+export function equipLook(equip: readonly ({ sub: number } | null | undefined)[] | undefined): Equip {
+  const look = (slot: number) => { const it = equip?.[slot]; return it ? it.sub + 1 : 0; };
+  return { w: look(0), h: look(1), a: look(2), p: look(3) };
+}
+
 /** per-sprite tint / fade */
 export interface SpriteFx {
   /** RGB tint mixed in by amount / 32 */

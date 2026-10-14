@@ -62,6 +62,8 @@ export class Monster {
   lastV: 2 | 3 = 3;
   state = 0;               // +0x79: 0 idle/wander, 1 attack, 2 chase, 4 return, 6 hurt, 7 knockback
   rec = 0;                 // +0x24 anim record index
+  /** HIDE by an event script (the boss slot itself, events.md §0.3); cleared when the event ends */
+  evHidden = false;
   t = 0;                   // +0x14
   phase = 0;               // +0x7f attack cycle: 2 attacking, 1 / 0 resting
   /** +0x81: wander time left (2-tick units); also read by the chase / return decisions */
@@ -418,7 +420,7 @@ export class Monster {
   }
 
   drawable(): Drawable | null {
-    if (!this.alive && this.deathT >= DEATH_TICKS) return null;
+    if (this.evHidden || (!this.alive && this.deathT >= DEATH_TICKS)) return null;
     let fx: SpriteFx | undefined;
     if (!this.alive) fx = { tint: [255, 255, 255], amount: Math.min(32, this.deathT + 16), alpha: Math.max(0, 32 - 3 * this.deathT) };
     else if (this.tint) fx = { tint: [255, 0, 0], amount: this.tint };

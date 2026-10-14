@@ -9,11 +9,13 @@ import type { PlayScene } from './screens';
 import { StoryDb, Story } from '../../core/data/story';
 import { newGame } from '../../core/save/save';
 import { seenEvents } from '../../core/rules/records';
+import { seenAlongRoute } from '../../core/data/storyChart';
 import { Popup } from './popup';
 import { countReplay, recordRush } from '../../core/rules/records';
 import { saveOptions } from '../../core/save/options';
 import { rushBosses, ticksText } from './archive';
 import { h } from '../render/view';
+import { BacklogView, replayLog } from './backlog';
 import { VIEW_H as H, VIEW_W as W } from '../render/field';
 import { fillScreen, render } from './screens';
 import '../styles/convenience.css';
@@ -21,11 +23,14 @@ import '../styles/convenience.css';
 type RushState = 'load' | 'fight' | 'clear' | 'over';
 
 /** the scene a sandbox returns to */
-export interface SandboxHost extends Scene { resume(): void }
+/** the scene a sandbox returns to; finished = the replayed event ran to its end (played or skipped, not Esc) */
+export interface SandboxHost extends Scene { resume(finished?: boolean): void }
 
 export class SandboxScene implements Scene {
   private fs: FieldScene | null = null;
   private popup: { p: Popup; then?: (r: 'yes' | 'no' | 'ok') => void } | null = null;
+  /** 회상: this scene's lines (LOG / pad □) */
+  private log: BacklogView | null = null;
   private started = false;
   /** rush: the boss list, the current one, its state and the clock */
   private stages: { type: number; map: number }[] = [];
@@ -42,14 +47,19 @@ export class SandboxScene implements Scene {
   /** replay event e as class cls: a new game of that class whose story has every event it has seen but e */
   static async replay(ctx: GameContext, back: SandboxHost, cls: 0 | 1 | 2, e: number): Promise<void> {
     const s = new SandboxScene(ctx, back, 'replay');
+    replayLog.clear();
     ctx.go(s);
     const save = newGame(cls), story = Story.fresh(cls);
-    for (const x of seenEvents(cls)) if (x !== e) story.set(x);
+    for (const x of seenAlongRoute(cls, seenEvents(cls))) if (x !== e) story.set(x);
     if (e !== OPENING[cls]) story.set(OPENING[cls]);               // else the class's opening would start instead
     save.story = story.toJSON();
-    save.map = eventMap(e, new StoryDb(ctx.assets).headers[e].map);
+    const hd = new StoryDb(ctx.assets).headers[e];
+    save.map = eventMap(e, hd.map);
     const fs = await s.load(save, 0, 'replay');
     if (!fs) return;
+    // kind 0 scenes start when the room's boss falls (events.md §0.5): it is gone, as in play, not standing beside
+    // the one the scene shows
+    if (hd.kind === 0 && !OPENING.includes(e)) fs.monsters = fs.monsters.filter((m) => !m.isBoss);
     if (!fs.events.active) fs.events.start(e);                     // the opening event may have started by itself
     s.fs = fs;
     s.started = true;
@@ -103,18 +113,19 @@ export class SandboxScene implements Scene {
     this.popup = { p: new Popup(this.ctx, 0x18, 0, () => body), then: () => this.leave() };
   }
 
-  /** back to the scene that started it; watched = a replay played to its end (Esc or SKIP do not count for 추억) */
-  private leave(watched = false): void {
+  /** back to the scene that started it; watched = a replay played to its end (Esc or SKIP do not count for 추억),
+   *  finished = its event ended (played or skipped), so 이어서 보기 may go on */
+  private leave(watched = false, finished = false): void {
     if (this.left) return;
     this.left = true;
     if (this.mode === 'replay' && this.started && watched) countReplay();
     this.ctx.go(this.back);
-    this.back.resume();
+    this.back.resume(finished);
   }
 
   update(presses: number[]): void {
     const fs = this.fs, input = this.ctx.input;
-    input.uiMode = !!(this.popup || fs?.popup || fs?.busyTalking || fs?.dead);
+    input.uiMode = !!(this.log || this.popup || fs?.popup || fs?.busyTalking || fs?.dead);
     input.padField = !input.uiMode;
     input.confirm = input.device === 'touch' && !!(this.popup || fs?.popup || fs?.busyTalking);
     for (const t of input.takeTaps()) {
@@ -123,14 +134,16 @@ export class SandboxScene implements Scene {
     }
     if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const t = this.popup.then; this.popup = null; t?.(r); } return; }
     if (!fs) { if (presses.includes(AVK.CLR)) this.leave(); return; }
-    // the dialogue's AUTO key works here too (no log: replay lines stay out of it)
-    if (presses.includes(AVK.AUTO) || (fs.dialogueShown && presses.includes(AVK.K3))) { this.ctx.options.auto ^= 1; saveOptions(this.ctx.options); }
-    if (fs.dialogueShown) presses = presses.filter((k) => k !== AVK.K1 && k !== AVK.K3);
+    if (this.log) { if (!this.log.update(presses)) this.log = null; return; }
+    // the dialogue's LOG / AUTO keys work here too (pad □ / △ while a page shows); a replay logs into its own list
+    if (fs.dialogueShown) presses = presses.map((k) => (k === AVK.K1 ? AVK.LOG : k === AVK.K3 ? AVK.AUTO : k));
+    if (presses.includes(AVK.AUTO)) { this.ctx.options.auto ^= 1; saveOptions(this.ctx.options); }
+    if (presses.includes(AVK.LOG) && this.mode === 'replay' && !fs.popupOpen) { this.log = new BacklogView(replayLog); return; }
     presses = presses.filter((k) => k !== AVK.LOG && k !== AVK.AUTO && k !== AVK.FAST);
     if (this.mode === 'replay') {
       if (presses.includes(AVK.CLR) && !fs.popupOpen) { this.leave(); return; }   // Esc: back at once
       fs.update(presses);
-      if (this.started && !fs.events.active && !fs.popupOpen) this.leave(!fs.events.skipped);
+      if (this.started && !fs.events.active && !fs.popupOpen) this.leave(!fs.events.skipped, true);
       return;
     }
     if (this.state === 'over') return;
@@ -154,10 +167,11 @@ export class SandboxScene implements Scene {
     fs.draw();
     const u = this.ctx.ui;
     u.begin();
-    const label = this.mode === 'replay' ? '회상 · Esc 나가기'
+    const label = this.mode === 'replay' ? `회상${this.ctx.options.replayChain ? ' · 이어서 보기' : ''} · Esc 나가기`
       : `보스 러시 ${Math.min(this.stage + 1, this.stages.length)} / ${this.stages.length} · ${ticksText(this.ticks)}${this.state === 'clear' ? ' · 격파!' : ''}`;
     // a replay is all dialogue (the box covers the bottom 89 px): the label goes to the top; the rush keeps it low
     u.view('sandboxBar', (W >> 1) - 90, this.mode === 'replay' ? 4 : H - 48, 180, 14, h('div.sb-bar', null, label));
+    if (this.log) this.log.draw(u, this.ctx.input);
     u.end();
     if (this.popup) { this.ctx.ui13.begin(); this.popup.p.draw(); this.ctx.ui13.end(); }
     this.ctx.compositor.show();

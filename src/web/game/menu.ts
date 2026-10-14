@@ -22,7 +22,10 @@ import { Popup } from './popup';
 import { button, cSprite, gt, h, menuList, padBadge, slot, sprite, win, type VChild, type VNode } from '../render/view';
 import { tabHint } from '../input/keyHints';
 
-const STAT_HELP = [0x1a18, 0x1a19, 0x1a1a, 0x1a1b, 0x1a1c];
+/** FUN_0005c560 help line per stat cursor: 0x1a18 공격력, 0x1a19 아무 효과 없음, 0x1a1a 적중·크리, 0x1a1b 체력, 0x1a1c 마력.
+ *  Class 1 (엘) attacks with INT, so its STR line is "no effect" and its INT line is the attack one. */
+const statHelp = (cur: number, cls: number): number =>
+  cur === 1 ? 0x1a1a : cur === 2 ? 0x1a1b : cur === 0 ? (cls === 1 ? 0x1a19 : 0x1a18) : cls === 1 ? 0x1a18 : 0x1a1c;
 
 export type MenuResult = 'close' | 'title' | 'save' | 'launch' | null;
 
@@ -503,6 +506,6 @@ export class GameMenu {
         h('div.v-col', { style: 'gap:6px;width:62px' },
           button(gt(t[0x1a16] ?? ''), { sel: true, glow: cf === 'release', on: () => [AVK.K7] }),   // 퀵슬롯해제 = '7' (d-pad: RIGHT)
           h('div.v-box.v-row.v-points', null, sprite('c', 0xb7, 0x58, 0xe, 0xe), h('span.v-grow', { style: 'text-align:right' }, String(fs.statPoints))))),
-      h('div.v-box.v-note', null, gt(t[STAT_HELP[c]] ?? ''))));
+      h('div.v-box.v-note', null, gt(t[statHelp(c, m.cls)] ?? ''))));
   }
 }

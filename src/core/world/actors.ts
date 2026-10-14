@@ -9,6 +9,7 @@ import type { Drawable } from '../render';
 import type { FieldMap as Field } from './fieldMap';
 import { LOCO, type Dir, type Rect } from '../combat/player';
 import type { Equip } from '../render';
+import type { Monster } from '../combat/monster';
 
 const FACING = [1, 1, 2, 0] as const;
 
@@ -156,4 +157,42 @@ export class EvActor {
       fx: this.alpha < 32 ? { alpha: this.alpha } : undefined,
     };
   }
+}
+
+/**
+ * A boss on the map as an event actor. The original keeps bosses in the actor slots, so PLACE / HIDE / SET_ACTION /
+ * TALK / camera records on the boss id act on the boss itself; here the boss is a Monster, and this handle (never
+ * drawn) forwards those changes to it and its parts (35 / 39). Without it the id fell back to the leader (HIDE hid
+ * the hero) and PLACE spawned a second, static copy of the boss.
+ */
+export class BossProxy extends EvActor {
+  private sx: number;
+  private sy: number;
+  private sAnim = -1;
+  private sDir: number;
+
+  constructor(readonly boss: Monster & { parts?: Monster[] }) {
+    super(boss.type, boss.cmfName, boss.cmf, boss.x, boss.y, false, 0, boss.typeRec, boss.dir);
+    this.spawned = true;
+    this.visible = !boss.evHidden;
+    this.sx = boss.x; this.sy = boss.y; this.sDir = boss.dir;
+  }
+
+  /** push what the script changed (position, facing, visibility, animation), otherwise follow the boss (eventTick
+   *  moves it) */
+  sync(): void {
+    const b = this.boss, all = [b, ...(b.parts ?? [])];
+    if (this.x !== this.sx || this.y !== this.sy) {
+      const dx = this.x - b.x, dy = this.y - b.y;
+      for (const m of all) { m.x += dx; m.y += dy; }
+    } else { this.x = b.x; this.y = b.y; }
+    this.sx = this.x; this.sy = this.y;
+    if (this.dir !== this.sDir) { b.dir = this.dir; b.lastH = this.lastH; b.lastV = this.lastV; } else this.face(b.dir);
+    this.sDir = this.dir;
+    for (const m of all) m.evHidden = !this.visible;
+    if (this.anim !== this.sAnim) { if (this.anim >= 0) { b.rec = this.anim; b.t = 0; } this.sAnim = this.anim; }
+  }
+
+  override update(): void { if (this.balloon) this.balloonT++; this.sync(); }
+  override drawable(): Drawable | null { return null; }
 }

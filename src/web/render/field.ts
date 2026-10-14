@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import type { Cmf, MapObject } from '../../core/data/assets';
 import { VIEW_H, VIEW_W, type Drawable } from '../../core/render';
-import { FieldMap } from '../../core/world/fieldMap';
+import { FieldMap, STONE_OBJ } from '../../core/world/fieldMap';
 import { actorDepth, depthSort, objDepth, type DepthItem } from '../../core/world/world';
 import type { WebAssets } from '../assets';
 import { Compositor, createTarget } from './compositor';
@@ -46,7 +46,7 @@ export class Field extends FieldMap {
       const t = v - 1;
       U.quad(`t${hd.tileset}`, (t & 7) * TILE, (t >> 3) * TILE, TILE, TILE, c * TILE, r * TILE);
     }));
-    for (const o of [...m.objBg, ...m.objLow]) this.drawObj(U, o);
+    for (const o of [...m.objBg, ...m.objLow]) if (o.obj !== STONE_OBJ) this.drawObj(U, o);   // stones: the scene draws them
     this.mapTarget.setSize(this.width, this.height);
     this.mapCam.right = this.width;
     this.mapCam.bottom = this.height;

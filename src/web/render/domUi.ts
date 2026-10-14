@@ -75,7 +75,38 @@ class DomShared {
     this.images.set(name, img);
     return img;
   }
+
+  private composites = new Map<string, string | null>();
+  /** CSS class of an image baked once from pieces of a sheet, each placed with image()'s flip / turn flags; null while
+   *  the sheet loads. Seamless where the separate (transformed) pieces would show their edges when scaled. */
+  composite(key: string, name: string, w: number, h: number, pieces: Piece[]): string | null {
+    if (this.composites.has(key)) return this.composites.get(key)!;
+    this.composites.set(key, null);
+    void this.loadImage(name).then((img) => {
+      if (!img) return;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const g = c.getContext('2d')!;
+      for (const [sx, sy, pw, ph, x, y, flags = 0] of pieces) {
+        const rot = (flags >> 2) & 3, dw = rot & 1 ? ph : pw, dh = rot & 1 ? pw : ph;
+        g.setTransform(1, 0, 0, 1, x + dw / 2, y + dh / 2);           // turn, then mirror (as image()'s transform list)
+        if (flags & 1) g.scale(-1, 1);
+        g.rotate((rot * Math.PI) / 2);
+        g.drawImage(img, sx, sy, pw, ph, -pw / 2, -ph / 2, pw, ph);
+      }
+      c.toBlob((b) => {
+        if (!b) return;
+        const cls = `im-${key}`;
+        this.addRule(`.${cls}{background-image:url("${URL.createObjectURL(b)}")}`);
+        this.composites.set(key, cls);
+      });
+    });
+    return null;
+  }
 }
+
+/** composite() piece: source rect, place in the baked image and image() flags (bit 0 mirror, bits 2-3 turns) */
+export type Piece = [sx: number, sy: number, w: number, h: number, x: number, y: number, flags?: number];
 
 let shared: DomShared | null = null;
 
@@ -390,6 +421,20 @@ export class DomUi extends Ui {
       if (!node.el.classList.contains('tinted')) node.el.classList.add('tinted');
     } else if (node.el.classList.contains('tinted')) node.el.classList.remove('tinted');
     DomUi.set(node, s);
+  }
+
+  /** a composite() image repeated along x over (x, y, w, h), one copy starting at x0 (screen x); blend as image() */
+  strip(key: string, name: string, iw: number, ih: number, pieces: Piece[], x: number, y: number, w: number, x0: number, blend = 0): boolean {
+    const img = this.shared.composite(key, name, iw, ih, pieces);
+    if (!img) return false;
+    const cls = `u-img u-strip ${img}`;
+    const node = this.node('strip', DomUi.div(cls));
+    if (node.el.className !== cls) node.el.className = cls;
+    x += this.ox; y += this.oy;
+    let s = `left:${px(x)};top:${px(y)};width:${w}px;height:${ih}px;background-position:${px((((x0 + this.ox - x) % iw) + iw) % iw)} 0;`;
+    if (BLEND[blend]) s += `mix-blend-mode:${BLEND[blend]};`;
+    DomUi.set(node, s + this.opacity());
+    return true;
   }
 
   texture(tex: THREE.Texture, w: number, h: number, x: number, y: number): void {

@@ -4,6 +4,10 @@ import type { Assets } from './assets';
 export const EVENT_COUNT = 164;
 export const QUEST_COUNT = 152;
 export const NO_ID = 1000;
+/** new-game opening event per class (FUN_00053510 case 2, events.md §0.10) */
+export const OPENING = [0, 10, 0x14];
+/** repeatable hint events: the end handler clears their own flag again */
+export const REPEATABLE = [0x6e, 0x6f, 0x70, 0x71, 0x79, 0x7c, 0x7f, 0x80, 0x81, 0x82, 0x83, 0x8a, 0x8d, 0x8e, 0x90, 0x92, 0x93, 0x94, 0x96];
 
 export interface EventHeader { map: number; kind: number; p1: number; p2: number; textBase: number; }
 export interface EventRec { time: number; cmd: number; arg: number; }

@@ -17,6 +17,8 @@ import { SLOT_COUNT, deleteSlot, loadGamedata, loadSlot, newGame, saveSlot, setL
 import { Story } from '../../core/data/story';
 import type { GameContext, Scene } from './scene';
 import { tri, type Ui } from '../render/ui';
+import type { Piece } from '../render/domUi';
+import { equipLook } from '../../core/render';
 import { button, gt, h, slot, win } from '../render/view';
 import { greyUniform, setGrey } from '../render/sprites';
 import { RankingScene } from './ranking';
@@ -34,6 +36,12 @@ export const MENU_CMFS = ['cmf_title', 'cmf_c0', 'cmf_c1', 'cmf_c2'];
 export function fillScreen(u: Ui, rgb: number): void {
   u.fill(0, 0, W, H, rgb);
 }
+
+/** title clouds: the 0xf0 × 0x77 tile and its mirror on top, both turned upside down below (flags as image()) */
+const CLOUD_PIECES: Piece[] = [
+  [0, 0x69, 0xf0, 0x77, 0, 0x77, 0x09], [0, 0x69, 0xf0, 0x77, 0, 0, 0x00],
+  [0, 0x69, 0xf0, 0x77, 0xf0, 0x77, 0x08], [0, 0x69, 0xf0, 0x77, 0xf0, 0, 0x01],
+];
 
 /** FUN_0002df9c title background (states 8/9); t = frame counter. */
 function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
@@ -55,12 +63,13 @@ function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
     const bob = Math.abs(5 - Math.trunc(t / 12) % 10);
     u.image('title_bg2', 0, 0, 0x17c, 0x104, W / 2 - 0xbe, H - rise + bob);   // island
     // clouds, blend 1 (lighten): two 0xf0 tiles every 0x1e0, from past the left edge to past the right one (in
-    // fullscreen the title reaches u.bleed into the side margins)
-    for (let ox = cx - Math.ceil((cx + u.bleed) / 0x1e0) * 0x1e0; ox < W + u.bleed; ox += 0x1e0) {
-      u.image('title_bg', 0, 0x69, 0xf0, 0x77, ox, H + 0x77 - cy, 0x109);
-      u.image('title_bg', 0, 0x69, 0xf0, 0x77, ox, H - cy, 0x100);
-      u.image('title_bg', 0, 0x69, 0xf0, 0x77, ox + 0xf0, H + 0x77 - cy, 0x108);
-      u.image('title_bg', 0, 0x69, 0xf0, 0x77, ox + 0xf0, H - cy, 0x101);
+    // fullscreen the title reaches u.bleed into the side margins). The four mirrored / turned quarters are baked into
+    // one image and drawn as a single repeating strip: as separate transformed elements their edges showed as a grid
+    // once scaled. The loop is the fallback while it is being made.
+    if (!u.strip('title-clouds', 'title_bg', 0x1e0, 0xee, CLOUD_PIECES, -u.bleed, H - cy, W + 2 * u.bleed, cx, 1)) {
+      for (let ox = cx - Math.ceil((cx + u.bleed) / 0x1e0) * 0x1e0; ox < W + u.bleed; ox += 0x1e0) {
+        for (const [sx, sy, w, h, x, y, f] of CLOUD_PIECES) u.image('title_bg', sx, sy, w, h, ox + x, H - cy + y, 0x100 | f!);
+      }
     }
   }
   const f = (t >> 2) % cyc;
@@ -143,10 +152,14 @@ export class LogoScene implements Scene {
   }
 }
 
+const RATING_BG = 0xfff7ff;
+
 /** State 0x06: rating notice (h_logo lower half), 80 frames (FUN_00035c4c). */
 class RatingScene implements Scene {
   readonly wide = true;
-  readonly backdrop = 0xffffff;
+  /** the notice's own paper colour (h_logo is #FFF7FF, not white): on a wider screen a white page around it showed
+   *  the 480 × 320 middle as a pink box */
+  readonly backdrop = RATING_BG;
   private t = 0;
   constructor(private ctx: GameContext) {}
   update(presses: number[]): void {
@@ -154,7 +167,7 @@ class RatingScene implements Scene {
   }
   draw(): void {
     render(this.ctx, () => {
-      fillScreen(this.ctx.ui, 0xffffff);
+      fillScreen(this.ctx.ui, RATING_BG);
       this.ctx.ui.image('h_logo', 0, 320, 480, 320, 0, 0);
     });
   }
@@ -200,7 +213,7 @@ export class TitleScene implements Scene {
     if (presses.includes(TITLE_OPTION)) { this.ctx.go(new TitleOptionScene(this.ctx, 'settings')); return; }   // state 0x0C
     if (presses.includes(TITLE_HELP)) { this.ctx.go(new TitleOptionScene(this.ctx, 'help')); return; }         // state 0x0D
     if (presses.includes(TITLE_RANKING) || (presses.includes(AVK.OK) && this.sel === 1)) { this.ctx.go(new RankingScene(this.ctx)); return; }
-    if (presses.includes(TITLE_REPLAY) || (presses.includes(AVK.OK) && this.sel === 2)) { this.ctx.go(new CharSelectScene(this.ctx, -1, true)); return; }
+    if (presses.includes(TITLE_REPLAY) || (presses.includes(AVK.OK) && this.sel === 2)) { this.ctx.go(new ReplayListScene(this.ctx)); return; }
     if (presses.includes(AVK.OK)) this.ctx.go(new SlotScene(this.ctx));
   }
   draw(): void {
@@ -323,7 +336,7 @@ export class SlotScene implements Scene {
         u.window(0x45, y, 0x96, 0x3f);
         if (this.cur === i) { u.slotGlow(2, iy + 5, 0x42, 0x39, t); u.slotGlow(0x46, iy + 5, 0x92, 0x39, t); } else u.alpha = 16;
         const cmfName = `cmf_c${sl.cls}`;
-        u.frame(cmfName, this.ctx.cmfs[cmfName], t % 6, sl.cls === 2 ? 0x23 : 0x26, iy + (sl.cls === 2 ? 0x3a : 0x30));
+        u.frame(cmfName, this.ctx.cmfs[cmfName], t % 6, sl.cls === 2 ? 0x23 : 0x26, iy + (sl.cls === 2 ? 0x3a : 0x30), undefined, undefined, equipLook(sl.inv?.equip));
         u.textId(0x3e1 + sl.cls, 0x4d, iy + 8);
         u.textId(0x1a3d, 0xac, iy + 8);
         u.number(sl.level, 0xbb, iy + 8, 1);
@@ -348,13 +361,12 @@ export class SlotScene implements Scene {
   }
 }
 
-/** State 0x0B character select (FUN_0002eef8), confirmation popup 0. With replay (not in the original, title 회상)
- *  the chosen class opens its 회상 list instead, without the popup, and Esc goes back to the title. */
+/** State 0x0B character select (FUN_0002eef8), confirmation popup 0. */
 export class CharSelectScene implements Scene {
   readonly wide = true;
   private t = 0;
   private popup: Popup | null = null;
-  constructor(private ctx: GameContext, private slot: number, private replay = false, private cls = 0) {
+  constructor(private ctx: GameContext, private slot: number, private cls = 0) {
     // touch (C220 + (80,40)): arrows (99,165) / (178,165) 39x23, 3 cards (49,33,223,130), close
     ctx.input.uiMode = false; ctx.input.zones = [
       { x: 179, y: 205, w: 39, h: 23, key: AVK.LEFT },
@@ -381,12 +393,11 @@ export class CharSelectScene implements Scene {
       else if (k === AVK.LEFT) this.cls = (this.cls + 2) % 3;
       else if (k === AVK.RIGHT) this.cls = (this.cls + 1) % 3;
       else if (k === AVK.OK) { this.choose(); return; }
-      else if (k === AVK.CLR) { this.ctx.go(this.replay ? new TitleScene(this.ctx) : new SlotScene(this.ctx)); return; }
+      else if (k === AVK.CLR) { this.ctx.go(new SlotScene(this.ctx)); return; }
     }
   }
   private choose(): void {
-    if (this.replay) this.ctx.go(new ReplayListScene(this.ctx, this.cls as 0 | 1 | 2));
-    else this.popup = new Popup(this.ctx, 0, this.cls);
+    this.popup = new Popup(this.ctx, 0, this.cls);
   }
   draw(): void {
     render(this.ctx, () => {

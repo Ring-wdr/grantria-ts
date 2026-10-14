@@ -112,7 +112,8 @@ export class ShopScreen {
   }
   private get inv() { return this.fs.inv; }
   private get region(): number { return shopRegion(this.fs.field.map.header.zone, this.fs.field.mapId); }
-  private get bags(): number { return this.action === 1 || this.action === 2 ? 3 : Math.max(1, Math.ceil(this.stock.length / 16)); }
+  /** sell / enhance list the player's bags (3 + purchased, up to 5), buy lists the stock pages */
+  private get bags(): number { return this.action === 1 || this.action === 2 ? this.inv.bags + 3 : Math.max(1, Math.ceil(this.stock.length / 16)); }
   private get idx(): number { return this.bag * 16 + this.sel; }
   private listItem(): Item | undefined { return this.action === 1 || this.action === 2 ? this.inv.items[this.idx] : this.stock[this.idx]; }
 
@@ -734,7 +735,7 @@ export class ShopScreen {
     const price = this.focus === 1 && cur && (this.action === 0
       ? this.gold(this.kind === 3 ? priceOf(this.a, cur) * (cur.type < 0x10 ? 15 : 10) : shownBuyPrice(this.a, cur))
       : this.action === 1 ? this.gold(shownSellPrice(this.a, cur)) : null);
-    const bags = Array.from({ length: Math.min(this.bags, 4) }, (_, i) => button(sprite('t', 15, 24, 16, 16), {
+    const bags = Array.from({ length: this.bags }, (_, i) => button(sprite('t', 15, 24, 16, 16), {
       sel: i === this.bag, glow: this.focus === 0, cls: 'shop-bag',
       on: () => { this.focus = 0; if (this.bag !== i) { this.bag = i; this.sel = 0; } },
     }));

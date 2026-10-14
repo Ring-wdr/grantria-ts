@@ -7,7 +7,8 @@ import { cfmt } from '../../core/data/skillDetail';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { BAG_COUNT, BAG_MAX, UNLOCK_1B, type Item } from '../../core/rules/items';
-import { Popup } from './popup';
+import { Popup, openPopup } from './popup';
+import { OverlayStack } from './overlays';
 import { Rng } from '../../core/rules/rules';
 import { loadWarehouse, saveWarehouse } from '../../core/save/save';
 import type { GameContext } from './scene';
@@ -41,7 +42,6 @@ const PREMIUM_ROW = 30;
 export const BAG_PRICE = 25;
 export const WAREHOUSE_SIZE = 48;
 
-type PopupState = { p: Popup; yes?: () => void; ok?: () => void };
 
 export function coupons(fs: FieldScene): number { return countOf(fs.inv, COUPON[0], COUPON[1]); }
 
@@ -82,14 +82,16 @@ export function buyBag(ctx: GameContext, fs: FieldScene): Popup {
 export class CouponShop {
   private sel = 0;
   private t = 0;
-  popup: PopupState | null = null;
+  /** popups over the screen (read by the game over screen: no close button while one is open) */
+  readonly overlays = new OverlayStack();
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
   /** 'close' on CLR */
   update(presses: number[]): 'close' | null {
     this.t++;
-    if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); else if (r === 'ok') p.ok?.(); } return null; }
+    if (this.overlays.update(presses)) return null;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (k === AVK.UP) this.sel = (this.sel + 4) % 5;
       else if (k === AVK.DOWN) this.sel = (this.sel + 1) % 5;
       else if (k === AVK.CLR) return 'close';
@@ -100,13 +102,13 @@ export class CouponShop {
 
   private buy(): void {
     const fs = this.fs, i = this.sel, t = this.ctx.assets.text;
-    if (coupons(fs) + COUPON_CAP_CHECK[i] >= COUPON_MAX + 1) { this.popup = { p: new Popup(this.ctx, 0x7a) }; return; }
-    this.popup = { p: new Popup(this.ctx, 0x74), yes: () => {
-      if (coupons(fs) === 0 && fs.inv.items.length >= fs.inv.cap) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
+    if (coupons(fs) + COUPON_CAP_CHECK[i] >= COUPON_MAX + 1) { openPopup(this.overlays, new Popup(this.ctx, 0x7a)); return; }
+    openPopup(this.overlays, new Popup(this.ctx, 0x74), () => {
+      if (coupons(fs) === 0 && fs.inv.items.length >= fs.inv.cap) { openPopup(this.overlays, new Popup(this.ctx, 0x52)); return; }
       fs.inv.gain(COUPON[0], COUPON[1], 0, COUPON_PACK[i], fs.rng);
       grantSave(fs);
-      this.popup = { p: new Popup(this.ctx, 0x75, 0, (s) => s.replace('%s', t[0x1bbe + i] ?? '')) };
-    } };
+      openPopup(this.overlays, new Popup(this.ctx, 0x75, 0, (s) => s.replace('%s', t[0x1bbe + i] ?? '')));
+    });
   }
 
   /** FUN_000597d8: five package buttons (coupon icon, name, price) and the footer note 0x1bbd */
@@ -120,7 +122,7 @@ export class CouponShop {
       ], { sel: i === this.sel, cls: 'mc-row', on: () => { if (this.sel === i) return [AVK.OK]; this.sel = i; } }))),
       h('div.v-box.v-note', null, gt(t[0x1bbd] ?? ''))));
   }
-  drawPopups(): void { this.popup?.p.draw(); }
+  drawPopups(): void { this.overlays.draw(); }
 }
 
 /**
@@ -143,7 +145,8 @@ export function couponCard(ctx: GameContext, fs: FieldScene, id: 0x4c | 0x4d, su
 class PremiumShop {
   private cur = 0;
   private t = 0;
-  popup: PopupState | null = null;
+  /** popups over the screen (read by the game over screen: no close button while one is open) */
+  readonly overlays = new OverlayStack();
   /** '#' bag view / '*' warehouse requested, or the coupon shop after popup 0x7D */
   request: 'bag' | 'warehouse' | 'coupon' | null = null;
   private names = new Map<number, string>();
@@ -161,9 +164,10 @@ class PremiumShop {
 
   update(presses: number[]): 'close' | null {
     this.t++;
-    if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); else if (r === 'ok') p.ok?.(); } return null; }
+    if (this.overlays.update(presses)) return null;
     const n = PREMIUM.length, cur0 = this.cur;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (this.btn !== null && (k === AVK.LEFT || k === AVK.RIGHT || k === AVK.UP || k === AVK.OK)) {
         if (k === AVK.LEFT) this.btn = (this.btn + 2) % 3;
         else if (k === AVK.RIGHT) this.btn = (this.btn + 1) % 3;
@@ -195,27 +199,27 @@ class PremiumShop {
     const packCount = id === 0x2f ? account().traitBought : id === 0x31 ? fs.packs[0] : fs.packs[1];
     const capped = POINT_PACKS.has(id) ? packCount > 9
       : id === 8 ? fs.inv.bags >= BAG_MAX : unlock ? fs.inv.unlocked(id) : STACKED.has(id) && countOf(fs.inv, 0x1b, id) + qty > COUPON_MAX;
-    if (capped) { this.popup = { p: new Popup(this.ctx, 0x65) }; return; }
-    if (coupons(fs) < price) { this.popup = { p: new Popup(this.ctx, 0x7d), ok: () => { this.request = 'coupon'; } }; return; }
-    this.popup = { p: couponCard(this.ctx, fs, 0x4c, id, price, qty > 1 ? `${this.name(id)} x${qty}` : this.name(id)), yes: () => {
+    if (capped) { openPopup(this.overlays, new Popup(this.ctx, 0x65)); return; }
+    if (coupons(fs) < price) { openPopup(this.overlays, new Popup(this.ctx, 0x7d), () => { this.request = 'coupon'; }); return; }
+    openPopup(this.overlays, couponCard(this.ctx, fs, 0x4c, id, price, qty > 1 ? `${this.name(id)} x${qty}` : this.name(id)), () => {
       if (POINT_PACKS.has(id)) {                                     // FUN_000752bc: points at once, nothing in the bag
         consume(fs.inv, COUPON[0], COUPON[1], price);
         if (id === 0x2f) { const a = account(); a.traitBought++; a.traitPoints++; saveAccount(); }
         else if (id === 0x31) { fs.packs[0]++; fs.statPoints += 30; }
         else { fs.packs[1]++; fs.skillPoints += 5; }
         grantSave(fs);
-        this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4ea] ?? '') };
+        openPopup(this.overlays, new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4ea] ?? ''));
         return;
       }
       if (id === 8) { consume(fs.inv, COUPON[0], COUPON[1], price); fs.inv.setBags(fs.inv.bags + 1); grantSave(fs);
-        this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4e9] ?? '') }; return; }
-      if (!unlock && fs.inv.items.length >= fs.inv.cap && !(STACKED.has(id) && countOf(fs.inv, 0x1b, id))) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
+        openPopup(this.overlays, new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4e9] ?? '')); return; }
+      if (!unlock && fs.inv.items.length >= fs.inv.cap && !(STACKED.has(id) && countOf(fs.inv, 0x1b, id))) { openPopup(this.overlays, new Popup(this.ctx, 0x52)); return; }
       consume(fs.inv, COUPON[0], COUPON[1], price);
       fs.inv.gain(0x1b, id, 0, qty, fs.rng);
       grantSave(fs);
       // FUN_000752bc: permanent unlock items (1 / 9 / 10 / 13) point to the character page (0x506), the rest 0x4EA
-      this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[unlock ? 0x506 : 0x4ea] ?? '') };
-    } };
+      openPopup(this.overlays, new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[unlock ? 0x506 : 0x4ea] ?? ''));
+    });
   }
 
   /**
@@ -251,7 +255,7 @@ class PremiumShop {
           sel: b === 1 || this.btn === b, glow: this.btn === b, on: () => [key],
         })))));
   }
-  drawPopups(): void { this.popup?.p.draw(); }
+  drawPopups(): void { this.overlays.draw(); }
 }
 
 /** State 0x29 (FUN_0002b774 / keys FUN_000442f4): the inventory grid FUN_00058890 over the own bag (mode 0)
@@ -268,7 +272,8 @@ class Storage {
   private focus: 0 | 1 | 2 = 1;
   private btn = 0;
   private t = 0;
-  popup: PopupState | null = null;
+  /** popups over the screen (read by the game over screen: no close button while one is open) */
+  readonly overlays = new OverlayStack();
   request: 'premium' | null = null;
   /** 골드전송 input (DAT_00403420, thousands) while the pad is open (DAT_003b3c6e) */
   private goldPad: string | null = null;
@@ -295,15 +300,15 @@ class Storage {
   /** '*': 0 -> popup 0x0D, more than held -> 0x4B, else a 0x1C record of n into the warehouse (text 0x4EC) */
   private sendGold(): void {
     const fs = this.fs, n = Number(this.goldPad || '0'), t = this.ctx.assets.text;
-    if (n * 1000 === 0) { this.popup = { p: new Popup(this.ctx, 0x0d) }; return; }
-    if (n * 1000 > fs.inv.gold) { this.popup = { p: new Popup(this.ctx, 0x4b) }; return; }
+    if (n * 1000 === 0) { openPopup(this.overlays, new Popup(this.ctx, 0x0d)); return; }
+    if (n * 1000 > fs.inv.gold) { openPopup(this.overlays, new Popup(this.ctx, 0x4b)); return; }
     const wh = loadWarehouse();
-    if (wh.length >= WAREHOUSE_SIZE) { this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => t[0x4f8] ?? '') }; return; }
+    if (wh.length >= WAREHOUSE_SIZE) { openPopup(this.overlays, new Popup(this.ctx, 0x6a, 0, () => t[0x4f8] ?? '')); return; }
     wh.push(goldRecord(fs, n));
     saveWarehouse(wh);
     fs.inv.gold -= n * 1000;
     grantSave(fs);
-    this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => t[0x4ec] ?? '') };
+    openPopup(this.overlays, new Popup(this.ctx, 0x6a, 0, () => t[0x4ec] ?? ''));
   }
 
   private list(): (Item | undefined)[] { return this.mode === 0 ? this.fs.inv.items : loadWarehouse(); }
@@ -311,8 +316,9 @@ class Storage {
 
   update(presses: number[]): 'close' | null {
     this.t++;
-    if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); } return null; }
+    if (this.overlays.update(presses)) return null;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (this.goldPad !== null) { this.goldKey(k); continue; }
       if (k === AVK.POUND) { if (this.mode === 1) { this.mode = 0; this.bag = 0; } else this.request = 'premium'; }
       else if (k === AVK.STAR) { if (this.mode === 0) { this.mode = 1; this.bag = 0; } else this.request = 'premium'; }
@@ -357,9 +363,9 @@ class Storage {
     if (this.mode === 0) {
       const it = fs.inv.items[idx];
       if (!it) return;
-      if (it.type === 0x1b || it.type === 0x18) { this.popup = { p: new Popup(this.ctx, 0x7c) }; return; }   // not storable
+      if (it.type === 0x1b || it.type === 0x18) { openPopup(this.overlays, new Popup(this.ctx, 0x7c)); return; }   // not storable
       const wh = loadWarehouse();
-      if (wh.length >= WAREHOUSE_SIZE) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
+      if (wh.length >= WAREHOUSE_SIZE) { openPopup(this.overlays, new Popup(this.ctx, 0x52)); return; }
       fs.inv.remove(idx);
       wh.push(it);
       saveWarehouse(wh);
@@ -371,10 +377,10 @@ class Storage {
         wh.splice(idx, 1);
         saveWarehouse(wh);
         grantSave(fs);
-        this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4ec] ?? '') };
+        openPopup(this.overlays, new Popup(this.ctx, 0x6a, 0, () => this.ctx.assets.text[0x4ec] ?? ''));
         return;
       }
-      if (!fs.inv.gain(it.type, it.sub, it.grade, it.count, fs.rng, it)) { this.popup = { p: new Popup(this.ctx, 0x52) }; return; }
+      if (!fs.inv.gain(it.type, it.sub, it.grade, it.count, fs.rng, it)) { openPopup(this.overlays, new Popup(this.ctx, 0x52)); return; }
       wh.splice(idx, 1);
       saveWarehouse(wh);
     }
@@ -440,7 +446,7 @@ class Storage {
           button(gt(t[0x19ed] ?? ''), { glow: false, on: () => [AVK.POUND] }),                     // 수 정
           button(gt('X'), { glow: false, on: () => [AVK.CLR] }))));
   }
-  drawPopups(): void { this.popup?.p.draw(); }
+  drawPopups(): void { this.overlays.draw(); }
 }
 
 /** gold pad digit keys (not AVK: the AVK digit codes double as arrows and quick-slot keys) */
@@ -468,7 +474,7 @@ function goldRecord(fs: FieldScene, n: number): Item {
 export class CommunityTab {
   private sel = 0;
   private t = 0;
-  private popup: PopupState | null = null;
+  private readonly overlays = new OverlayStack();
   private screen: CouponShop | PremiumShop | Storage | DimensionScreen | null = null;
   /** the screen a coupon shop opened by popup 0x7D returns to */
   private back: PremiumShop | DimensionScreen | null = null;
@@ -478,14 +484,14 @@ export class CommunityTab {
 
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
-  get busy(): boolean { return !!this.popup || !!this.screen; }
+  get busy(): boolean { return this.overlays.size > 0 || !!this.screen; }
 
   /** open a screen directly (HUD SHOP / coupon button) */
   open(screen: 'premium' | 'coupon' | 'dimension', backTab: number | null = null): void {
     this.back = null;
     this.backTab = backTab;
     // the coupon shop opens anywhere (HUD coupon button FUN_00047488, popup 0x7D close FUN_0005de24)
-    if (screen !== 'coupon' && (!this.fs.canSave || (screen === 'dimension' && this.fs.gardenMode !== 0))) { this.popup = { p: new Popup(this.ctx, 0x6d) }; return; }
+    if (screen !== 'coupon' && (!this.fs.canSave || (screen === 'dimension' && this.fs.gardenMode !== 0))) { openPopup(this.overlays, new Popup(this.ctx, 0x6d)); return; }
     this.sel = 4;
     this.screen = screen === 'premium' ? new PremiumShop(this.ctx, this.fs) : screen === 'coupon' ? new CouponShop(this.ctx, this.fs) : new DimensionScreen(this.ctx, this.fs);
   }
@@ -494,7 +500,7 @@ export class CommunityTab {
 
   update(presses: number[]): boolean {
     this.t++;
-    if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); else if (r === 'ok') p.ok?.(); } return true; }
+    if (this.overlays.update(presses)) return true;
     const s = this.screen;
     if (s) {
       if (s.update(presses) === 'close') {
@@ -513,6 +519,7 @@ export class CommunityTab {
       return true;
     }
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (k === AVK.UP) this.sel = (this.sel + 4) % 5;
       else if (k === AVK.DOWN) this.sel = (this.sel + 1) % 5;
       else if (k === AVK.OK) this.choose();
@@ -523,11 +530,11 @@ export class CommunityTab {
 
   private choose(): void {
     const i = this.sel;
-    if (!this.usable(i)) { this.popup = { p: new Popup(this.ctx, 0x6d) }; return; }
+    if (!this.usable(i)) { openPopup(this.overlays, new Popup(this.ctx, 0x6d)); return; }
     if (i === 0) this.screen = new CouponShop(this.ctx, this.fs);
-    else if (i === 1) this.popup = { p: new Popup(this.ctx, 0x03), yes: () => { this.screen = new PremiumShop(this.ctx, this.fs); } };
+    else if (i === 1) openPopup(this.overlays, new Popup(this.ctx, 0x03), () => { this.screen = new PremiumShop(this.ctx, this.fs); });
     else if (i === 2) this.screen = new Storage(this.ctx, this.fs, 0);
-    else if (i === 3) this.popup = { p: new Popup(this.ctx, 0x68), yes: () => { this.screen = new Storage(this.ctx, this.fs, 1); } };
+    else if (i === 3) openPopup(this.overlays, new Popup(this.ctx, 0x68), () => { this.screen = new Storage(this.ctx, this.fs, 1); });
     else this.screen = new DimensionScreen(this.ctx, this.fs);
   }
 
@@ -541,5 +548,5 @@ export class CommunityTab {
     })), gt(t[!ok ? 0x1a24 : this.sel === 0 ? 0x1bbd : 0x157 + this.sel] ?? '')));
   }
   drawOverlay(_u: Ui): void { /* none */ }
-  drawPopups(): void { this.screen?.drawPopups(); this.popup?.p.draw(); }
+  drawPopups(): void { this.screen?.drawPopups(); this.overlays.draw(); }
 }

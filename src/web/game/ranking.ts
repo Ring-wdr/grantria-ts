@@ -3,7 +3,8 @@
 // slot and ranked by the original score formula FUN_00061864.
 import { AVK } from '../input/input';
 import { ItemDb, type Item } from '../../core/rules/items';
-import { Popup } from './popup';
+import { Popup, openPopup } from './popup';
+import { OverlayStack } from './overlays';
 import { derive, type Derived } from '../../core/rules/rules';
 import { SLOT_COUNT, loadGamedata, loadSlot, type SaveData } from '../../core/save/save';
 import type { GameContext, Scene } from './scene';
@@ -56,7 +57,8 @@ export class RankingScene implements Scene {
   private t = 0;
   private slots: (SaveData | null)[] = [];
   private list: RankEntry[] = loadRanking();
-  private popup: { p: Popup; yes?: () => void } | null = null;
+  /** popup 0x4F (empty slot) and popup 2 (register this slot?) */
+  private readonly overlays = new OverlayStack();
   private mine = false;
   private eq = 0;
   private skillView = false;
@@ -90,16 +92,17 @@ export class RankingScene implements Scene {
   update(presses: number[]): void {
     this.t++;
     for (const tap of this.ctx.input.takeTaps()) { const k = this.ctx.ui.tapAt(tap.x, tap.y); if (k) presses = [...presses, ...k]; }
-    if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const p = this.popup; this.popup = null; if (r === 'yes') p.yes?.(); } return; }
+    if (this.overlays.update(presses)) return;
     const rows = this.sorted(), pages = Math.max(1, Math.ceil(rows.length / 3));
     // '0' (list / 1위부터·내랭킹 / skill view) has no pad button: △ / Y stands in for it on these screens
     for (const k of presses.map((k) => (k === AVK.K3 ? AVK.K0 : k))) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (this.state === 0x35) {                                      // FUN_00041b20
         if (k === AVK.UP) this.cur = (this.cur + 2) % 3;
         else if (k === AVK.DOWN) this.cur = (this.cur + 1) % 3;
         else if (k === AVK.OK && this.ready) {
-          if (!this.slots[this.cur]) this.popup = { p: new Popup(this.ctx, 0x4f) };
-          else { const i = this.cur; this.popup = { p: new Popup(this.ctx, 2), yes: () => this.register(i) }; }
+          if (!this.slots[this.cur]) openPopup(this.overlays, new Popup(this.ctx, 0x4f));
+          else { const i = this.cur; openPopup(this.overlays, new Popup(this.ctx, 2), () => this.register(i)); }
         } else if (k === AVK.K0) { this.state = 0x36; this.page = 0; this.sel = 0; }
         else if (k === AVK.CLR) this.ctx.go(new TitleScene(this.ctx));
       } else if (this.state === 0x36) {                               // FUN_00043b04
@@ -133,7 +136,7 @@ export class RankingScene implements Scene {
       else u.view('rank-detail', 0, 0, 0xdc, 0xd4, this.detailView());
       u.pop();
       u.closeButton();
-    }, this.popup ? () => this.popup!.p.draw() : undefined);
+    }, this.overlays.size ? () => this.overlays.draw() : undefined);
   }
 
   /** FUN_00034028 / FUN_00033dcc: three slot cards (class, lap mark, level, zone, play time); the

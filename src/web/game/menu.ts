@@ -18,7 +18,8 @@ import { QuestTab } from './questTab';
 import { MapTab } from './mapTab';
 import { CommunityTab } from './community';
 import type { Ui } from '../render/ui';
-import { Popup } from './popup';
+import { Popup, popupOverlay } from './popup';
+import { OverlayStack } from './overlays';
 import { button, cSprite, gt, h, menuList, padBadge, slot, sprite, win, type VChild, type VNode } from '../render/view';
 import { tabHint } from '../input/keyHints';
 
@@ -53,8 +54,8 @@ export class GameMenu {
   private charFocus: 'stats' | 'title' | 'release' = 'stats';
   /** stats and points before the first point spent here (DAT_0041596c / DAT_003b3c7e, flag DAT_003b3c7c) */
   private statBackup: { stats: number[]; points: number } | null = null;
-  /** popup 0x73 "설정한 스탯을 저장하시겠습니까?" and the key or tab it was raised by (DAT_003b3c78) */
-  private statAsk: { p: Popup; replay: () => void } | null = null;
+  /** popup 0x73 "설정한 스탯을 저장하시겠습니까?" (askStats) */
+  private readonly overlays = new OverlayStack();
 
   private inventory: InventoryTab;
   private equipment: EquipTab;
@@ -111,17 +112,7 @@ export class GameMenu {
       }
       return null;
     }
-    if (this.statAsk) {                                                // FUN_0005e23c popup 0x73: yes keeps, no restores; then the key runs
-      const r = this.statAsk.p.handle(presses);
-      if (r) {
-        const b = this.statBackup!, replay = this.statAsk.replay;
-        if (r === 'no') { this.field.model.stats.splice(0, 4, ...b.stats); this.field.statPoints = b.points; this.field.recompute(); }
-        this.statBackup = null;
-        this.statAsk = null;
-        replay();
-      }
-      return null;
-    }
+    if (this.overlays.update(presses)) return null;
     if (paging) {
       // from anywhere inside a tab, sub screens and popups included: those are dropped
       for (const k of presses) if (k === AVK.TAB_L || k === AVK.TAB_R) this.goTab((this.type + (k === AVK.TAB_L ? 7 : 1)) & 7);
@@ -153,13 +144,24 @@ export class GameMenu {
       // FUN_000573c8: after a point was spent, any key but '5' on the stats and the arrows asks first
       const statKey = k === AVK.UP || k === AVK.DOWN || k === AVK.LEFT || k === AVK.RIGHT || (k === AVK.OK && this.charFocus === 'stats');
       if (this.statBackup && this.type === 0 && this.page === 0 && !statKey) {
-        this.statAsk = { p: new Popup(this.ctx, 0x73), replay: () => this.tabKey(k) };
+        this.askStats(() => this.tabKey(k));
         break;
       }
       this.tabKey(k);
     }
     if (this.type !== 5 || !this.inTab) this.map.leaveFloor();
     return null;
+  }
+
+  /** FUN_0005e23c popup 0x73 (DAT_003b3c78): yes keeps the points spent here, no restores them; then the key or tab
+   *  that raised it runs */
+  private askStats(replay: () => void): void {
+    this.overlays.open(popupOverlay(new Popup(this.ctx, 0x73)), { on: { close: (r) => {
+      const b = this.statBackup!;
+      if (r === 'no') { this.field.model.stats.splice(0, 4, ...b.stats); this.field.statPoints = b.points; this.field.recompute(); }
+      this.statBackup = null;
+      replay();
+    } } });
   }
 
   private tabKey(k: number): void {
@@ -191,7 +193,7 @@ export class GameMenu {
   /** L1 / R1 or a tab click: go to tab `type` from anywhere; a tab left in a sub screen or popup starts fresh */
   private goTab(type: number): void {
     if (type === this.type) return;
-    if (this.statBackup && this.statAsk === null) { this.statAsk = { p: new Popup(this.ctx, 0x73), replay: () => this.goTab(type) }; return; }   // FUN_000425bc
+    if (this.statBackup && !this.overlays.size) { this.askStats(() => this.goTab(type)); return; }   // FUN_000425bc
     const ctx = this.ctx, fs = this.field;
     if (this.body?.busy) {
       if (this.type === 1) { this.inventory = new InventoryTab(ctx, fs); fs.recompute(); }
@@ -293,7 +295,7 @@ export class GameMenu {
   drawOverlay(): void {
     const u = this.ctx.ui13;
     if (this.inTab) this.drawTab(u); else this.drawRing(u);
-    this.statAsk?.p.draw();
+    this.overlays.draw();
   }
 
   private drawRing(u: Ui): void {

@@ -8,7 +8,8 @@ import { dropGrade, dropSub } from '../../core/rules/drops';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import type { ItemDb } from '../../core/rules/items';
-import { Popup } from './popup';
+import { Popup, openPopup } from './popup';
+import { OverlayStack } from './overlays';
 import { idiv, rdiv, type Rng } from '../../core/rules/rules';
 import type { GameContext } from './scene';
 import { consume, countOf } from '../../core/rules/shopRules';
@@ -193,7 +194,8 @@ export class DimensionScreen {
   private confirm = false;
   private btn = 1;                                                    // 0 입 장, 1 취 소 (DAT_003b3acc = 0 → 취소 first)
   private t = 0;
-  popup: Popup | null = null;
+  /** popups over the screen */
+  private readonly overlays = new OverlayStack();
   /** the chosen dungeon once paid for */
   enter: number | null = null;
   /** popup 0x7D confirmed: the owner opens the coupon shop and comes back here */
@@ -208,11 +210,9 @@ export class DimensionScreen {
 
   update(presses: number[]): 'close' | null {
     this.t++;
-    if (this.popup) {
-      if (this.popup.handle(presses)) { if (this.popup.id === 0x7d) this.toCoupons = true; this.popup = null; }
-      return null;
-    }
+    if (this.overlays.update(presses)) return null;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (!this.confirm) {
         if (k === AVK.LEFT) this.cur = (this.cur + 8) % 9;
         else if (k === AVK.RIGHT) this.cur = (this.cur + 1) % 9;
@@ -236,7 +236,7 @@ export class DimensionScreen {
     if (!freeUsedToday()) useFree();
     else if (countOf(inv, 0x1b, 0x1c) > 0) consume(inv, 0x1b, 0x1c, 1);
     else if (countOf(inv, 0x1b, 0x1b) >= 3) consume(inv, 0x1b, 0x1b, 3);
-    else { this.popup = new Popup(this.ctx, 0x7d); return; }
+    else { openPopup(this.overlays, new Popup(this.ctx, 0x7d), undefined, { on: { close: () => { this.toCoupons = true; } } }); return; }
     this.enter = this.cur;
   }
 
@@ -276,5 +276,5 @@ export class DimensionScreen {
         sel: this.btn === b, cls: 'sm-wide', on: () => { if (this.btn === b) return [AVK.OK]; this.btn = b; },
       }))));
   }
-  drawPopups(): void { this.popup?.draw(); }
+  drawPopups(): void { this.overlays.draw(); }
 }

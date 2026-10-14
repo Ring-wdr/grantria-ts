@@ -12,7 +12,10 @@ import '../styles/convenience.css';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { BAG_COUNT, type Item } from '../../core/rules/items';
-import { Popup } from './popup';
+import { Popup, openPopup, popupOverlay } from './popup';
+import { OverlayStack } from './overlays';
+import { flowOverlay, type Step } from './flow';
+import { quantityFlow, type QuantityEvent } from './flows/quantityFlow';
 import type { GameContext } from './scene';
 import {
   auxNeeded, buyCost, combine, combineNeeds, countOf, craftPotion, decompose, decomposeCost, enhBonus,
@@ -70,9 +73,8 @@ export class ShopScreen {
   private detail: Item | null = null;
   private qty = 0;
   private qtyMax = 0;
-  private qtyOpen = false;
-  private popup: { p: Popup; yes?: () => void; ok?: () => void; no?: () => void } | null = null;
-  private progress: { p: Popup; n: number; run: () => void } | null = null;
+  /** popups, "제작중..." progress and the buy / sell quantity flow over the shop */
+  private readonly overlays = new OverlayStack();
   /** 0x2B: combine (recipes), decompose (equipment) or the potion detail */
   private c2b = { list: [] as number[], cur: 0, focus: 0 as 0 | 1, scroll: { y: 0 } as ScrollRef, potion: -1 };
   /** 0x2C */
@@ -119,13 +121,19 @@ export class ShopScreen {
   private get idx(): number { return this.bag * 16 + this.sel; }
   private listItem(): Item | undefined { return this.action === 1 || this.action === 2 ? this.inv.items[this.idx] : this.stock[this.idx]; }
 
-  private msg(id: number, body?: string, ok?: () => void): void {
-    this.popup = { p: new Popup(this.ctx, id, 0, body !== undefined ? () => josa(body) : undefined), ok };
+  private msg(id: number, body?: string, ok?: () => void): Popup {
+    return openPopup(this.overlays, new Popup(this.ctx, id, 0, body !== undefined ? () => josa(body) : undefined), ok);
   }
-  private ask(id: number, body: string, yes: () => void): void {
-    this.popup = { p: new Popup(this.ctx, id, 0, () => josa(body)), yes };
+  /** a yes / no question; no clears the amount */
+  private ask(id: number, body: string, yes: () => void, no?: () => void): void {
+    this.overlays.open(popupOverlay(new Popup(this.ctx, id, 0, () => josa(body))), { on: { yes, no: () => { this.qty = 0; no?.(); } } });
   }
-  private run(id: number, f: () => void): void { this.progress = { p: new Popup(this.ctx, id), n: 0, run: f }; }
+  /** "제작중..." etc.: popup id for 20 frames (keys ignored), then f */
+  private run(id: number, f: () => void): void {
+    const p = new Popup(this.ctx, id);
+    let n = 0;
+    this.overlays.open({ handle: () => (++n > 0x13 ? 'yes' : null), draw: () => p.draw() }, { on: { yes: f } });
+  }
 
   /** inventory decompose: popup 0x12, no fee, result window, back to the inventory */
   private startInvDecompose(idx: number): void {
@@ -136,8 +144,7 @@ export class ShopScreen {
       this.fs.achieve({ k: 'dismantle' });
       this.fs.recompute(); this.fs.autosave();
       this.result = { gains: g };
-    }));
-    this.popup!.no = () => { this.closed = true; };
+    }), () => { this.closed = true; });
     void it;
   }
 
@@ -145,21 +152,7 @@ export class ShopScreen {
   update(presses: number[]): 'close' | null {
     if (this.closed) return 'close';
     this.t++;
-    if (this.progress) {                                   // "제작중..." etc.: 20 frames, then the action
-      if (++this.progress.n > 0x13) { const r = this.progress.run; this.progress = null; r(); }
-      return null;
-    }
-    if (this.popup) {
-      const r = this.popup.p.handle(presses);
-      if (r) {
-        const { yes, ok, no } = this.popup;
-        this.popup = null;
-        if (r === 'yes') yes?.(); else if (r === 'ok') ok?.();
-        if (r === 'no') { this.qty = 0; no?.(); }
-      }
-      return null;
-    }
-    if (this.qtyOpen) { this.qtyKeys(presses); return null; }
+    if (this.overlays.update(presses)) return null;
     if (this.result) { if (presses.includes(AVK.OK) || presses.includes(AVK.CLR)) { this.result = null; if (this.fromInv) return 'close'; this.build2B(); } return null; }
     if (this.detail) { if (presses.includes(AVK.OK) || presses.includes(AVK.CLR)) this.detail = null; return null; }
     if (this.actionPopup) {
@@ -182,6 +175,7 @@ export class ShopScreen {
   private menuKeys(presses: number[]): 'close' | null {
     const menu = this.menu;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (k === AVK.UP || k === AVK.DOWN) {
         this.menuCur = (this.menuCur + (k === AVK.DOWN ? 1 : menu.length - 1)) % menu.length;
         this.action = menu[this.menuCur];
@@ -217,6 +211,7 @@ export class ShopScreen {
   private bulkPicks(): number[] { return bulkSellPick(this.inv.items, this.bulk.grade); }
   private bulkKeys(presses: number[]): void {
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (k === AVK.UP || k === AVK.DOWN) this.bulk.grade = (this.bulk.grade + (k === AVK.UP ? 1 : 4)) % 5;
       else if (k === AVK.LEFT || k === AVK.RIGHT) this.bulk.focus ^= 1;
       else if (k === AVK.CLR || (k === AVK.OK && this.bulk.focus === 1)) this.screen = 'menu';
@@ -243,7 +238,7 @@ export class ShopScreen {
   }
   private remember(it: Item, qty: number, value: number): void {
     const stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;   // a pickaxe keeps its uses
-    // the sale takes qty off a counted item instead of removing it (confirmSell): only that much comes back
+    // the sale takes qty off a counted item instead of removing it (commitSell): only that much comes back
     const partial = it.type >= 0x10 && it.type !== 0x18 && it.count - qty > 0;
     const copy: Item = { ...it, count: stack || partial ? qty : it.count, options: it.options.map((o) => [...o] as [number, number]), sockets: [...it.sockets] };
     this.sold.unshift({ it: copy, qty, value });
@@ -252,6 +247,7 @@ export class ShopScreen {
   private buybackKeys(presses: number[]): void {
     const n = this.sold.length;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (k === AVK.UP && n) this.bbSel = (this.bbSel + n - 1) % n;
       else if (k === AVK.DOWN && n) this.bbSel = (this.bbSel + 1) % n;
       else if (k === AVK.CLR) this.screen = 'menu';
@@ -277,6 +273,7 @@ export class ShopScreen {
   // ---- 0x15 ----
   private listKeys(presses: number[]): void {
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (this.focus === 0) {
         if (k === AVK.UP || k === AVK.DOWN) { this.bag = (this.bag + (k === AVK.DOWN ? 1 : this.bags - 1)) % this.bags; this.sel = 0; }
         else if (k === AVK.OK) this.focus = 1;
@@ -320,19 +317,38 @@ export class ShopScreen {
     const stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
     if (v === 10) {                                          // buy
       if (it.type === 0x18 && countOf(this.inv, 0x18, it.sub) > 0) { this.msg(0x56); return; }
-      if (stack && this.kind !== 3) this.openQty(9999); else { this.qty = 1; this.confirmBuy(it); }
+      this.trade(it, true, stack && this.kind !== 3);
     } else if (v === 11) {                                   // sell
-      if (stack) this.openQty(it.count); else { this.qty = 1; this.confirmSell(it); }
+      this.trade(it, false, stack);
     } else if (v === 12) {                                   // enhance -> 0x2C
       this.enh = { idx: this.idx, focus: 0, aux: false, protect: false };
       this.screen = 'enhance';
     }
   }
 
-  // ---- quantity popup 0x0C ----
-  private openQty(max: number): void { this.qty = 0; this.qtyMax = max; this.qtyOpen = true; }
-  private qtyKeys(presses: number[]): void {
-    const it = this.listItem();
+  // ---- buy / sell flow: quantity popup 0x0C, then confirm 0x0E / 0x0F (flows/quantityFlow.ts) ----
+  /** a stack asks the amount first (0 -> 0x0D, back to the amount; selling more than held -> 0x58, out); the amount
+   *  is this.qty, cleared when the flow ends without a sale */
+  private trade(it: Item, buy: boolean, stack: boolean): void {
+    this.qty = stack ? 0 : 1;
+    this.qtyMax = buy ? 9999 : it.count;
+    const idx = this.idx, u = this.ctx.ui13;
+    const message = (id: number) => (): Step<QuantityEvent> => {
+      const p = new Popup(this.ctx, id);
+      return { handle: (k) => (p.handle(k) ? { type: 'ok' } : null), draw: () => p.draw() };
+    };
+    this.overlays.open(flowOverlay(quantityFlow, { held: buy ? Infinity : it.count, stack, tooManyBack: false }, {
+      qty: () => ({ handle: (k) => this.qtyKeys(k, it), draw: () => u.view('shopQty', 0, 0, 480, 320, this.qtyView()) }),
+      none: message(0x0d),
+      tooMany: message(0x58),
+      confirm: (): Step<QuantityEvent> => {
+        const p = new Popup(this.ctx, buy ? 0x0e : 0x0f, 0, () => josa(buy ? this.buyBody(it) : this.sellBody(it)));
+        return { handle: (k) => { const r = p.handle(k); return r === 'yes' ? { type: 'yes' } : r ? { type: 'no' } : null; }, draw: () => p.draw() };
+      },
+    }), { on: { yes: () => (buy ? this.commitBuy(it) : this.commitSell(it, idx)), close: (r) => { if (r !== 'yes') this.qty = 0; } } });
+  }
+
+  private qtyKeys(presses: number[], it: Item): QuantityEvent | null {
     for (const k of presses) {
       if (k === AVK.RIGHT) this.qty = (this.qty + 1) % (this.qtyMax + 1);
       else if (k === AVK.LEFT) this.qty = (this.qty + this.qtyMax) % (this.qtyMax + 1);
@@ -340,17 +356,11 @@ export class ShopScreen {
       else if (k === AVK.DOWN) this.qty = this.qty < 100 ? 0 : this.qty - 100;
       else if (k === AVK.K9) this.qty = Math.min(this.qty + 10, this.qtyMax);          // 편의: ±10, 최대
       else if (k === AVK.K7) this.qty = Math.max(0, this.qty - 10);
-      else if (k === AVK.STAR && it) this.qty = this.qtyLimit(it);
-      else if (k === AVK.CLR) { this.qty = 0; this.qtyOpen = false; }
-      else if (k === AVK.OK && it) {
-        if (this.qty === 0) { this.msg(0x0d); return; }
-        this.qtyOpen = false;
-        if (this.action === 0) this.confirmBuy(it);
-        else if (it.count < this.qty) this.msg(0x58);
-        else this.confirmSell(it);
-        return;
-      }
+      else if (k === AVK.STAR) this.qty = this.qtyLimit(it);
+      else if (k === AVK.CLR) return { type: 'cancel' };
+      else if (k === AVK.OK) return { type: 'qty', n: this.qty };
     }
+    return null;
   }
 
   /** 최대: what the gold and the stack (9999) allow when buying, the whole stack when selling */
@@ -394,17 +404,18 @@ export class ShopScreen {
     return unit;
   }
 
-  private confirmBuy(it: Item): void {
+  private buyBody(it: Item): string {
     const stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
     const verb = `${this.verb()}${this.text(0x19f).replace(/^%s %s/, '')}`;
-    const body = stack
+    return stack
       ? this.text(0x1b1).replace('%s', it.name).replace('%d', String(this.qty)).replace('%d', String(this.shownUnit(it) * this.qty)) + verb
       : this.text(0x1b0).replace('%s', it.name).replace(/\|b$/, '|b ') + verb;
-    this.ask(0x0e, body, () => {
-      const c = this.precheck(0, it);
-      if (c !== 8) { this.fail(c, it, 1); return; }
-      this.buy(it);
-    });
+  }
+
+  private commitBuy(it: Item): void {
+    const c = this.precheck(0, it);
+    if (c !== 8) { this.fail(c, it, 1); return; }
+    this.buy(it);
   }
 
   private buy(it: Item): void {
@@ -433,24 +444,24 @@ export class ShopScreen {
     }
   }
 
-  private confirmSell(it: Item): void {
+  private sellBody(it: Item): string {
     const stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
     const verb = `${this.verb()}${this.text(0x19f).replace(/^%s %s/, '')}`;
-    const body = stack
+    return stack
       ? this.text(0x1b1).replace('%s', it.name).replace('%d', String(this.qty)).replace('%d', String(Math.trunc(priceOf(this.a, it) / 5) * this.qty)) + verb
       : this.text(0x1b0).replace('%s', it.name).replace(/\|b$/, '|b ') + verb;
-    const idx = this.idx;
-    this.ask(0x0f, body, () => {
-      const c = this.precheck(1, it);
-      if (c !== 8) { this.fail(c, it); return; }
-      const inv = this.inv, v = sellValue(this.fs.db, it, this.qty);
-      inv.gain(0x1c, v, 0, 1, this.fs.rng);
-      this.remember(it, this.qty, v);
-      if (it.type >= 0x10 && it.type !== 0x18 && it.count - this.qty > 0) it.count -= this.qty; else inv.remove(idx);
-      this.qty = 0;
-      this.fs.quests.onItems();
-      this.fs.recompute();
-    });
+  }
+
+  private commitSell(it: Item, idx: number): void {
+    const c = this.precheck(1, it);
+    if (c !== 8) { this.fail(c, it); return; }
+    const inv = this.inv, v = sellValue(this.fs.db, it, this.qty);
+    inv.gain(0x1c, v, 0, 1, this.fs.rng);
+    this.remember(it, this.qty, v);
+    if (it.type >= 0x10 && it.type !== 0x18 && it.count - this.qty > 0) it.count -= this.qty; else inv.remove(idx);
+    this.qty = 0;
+    this.fs.quests.onItems();
+    this.fs.recompute();
   }
 
   // ---- 0x2C enhance ----
@@ -460,6 +471,7 @@ export class ShopScreen {
     const N = enhStones(this.a, it), ok = it.enh < 20 && (this.fromInv === 'enhance' || countOf(this.inv, 0x16, 0) >= N);
     if (!ok) this.enh.focus = 1;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (k === AVK.LEFT || k === AVK.RIGHT) this.enh.focus = ok ? ((this.enh.focus ^ 1) as 0 | 1) : 1;
       else if (k === AVK.STAR) {
         if (this.enh.aux) this.enh.aux = false;
@@ -481,11 +493,11 @@ export class ShopScreen {
           this.fs.recompute();
           this.fs.autosave();
           const after = () => { if (this.fromInv) this.closed = true; else this.screen = 'list'; };
-          this.msg(r.ok ? 0x2f : 0x30, undefined, after);
+          const p = this.msg(r.ok ? 0x2f : 0x30, undefined, after);
           // type 10 layout (FUN_0005f948 case 10): item cell (41,65), name, red "파괴되었습니다." when destroyed
           const shown = { ...it }, destroyed = !r.ok && r.destroyed;
           // the cell, then the name (wraps) and the red line beside it, above the body text
-          this.popup!.p.content = () => h('div.v-row.v-center.shop-enh-res', null,
+          p.content = () => h('div.v-row.v-center.shop-enh-res', null,
             this.cell(shown, { plain: true }),
             h('div.v-col.shop-enh-res-text', null,
               gt(shown.name),
@@ -521,6 +533,7 @@ export class ShopScreen {
       if (this.c2b.potion >= 0) { this.c2b.potion = -1; this.screen = 'list'; } else if (this.fromInv) this.closed = true; else this.screen = 'menu';
     };
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if ((k === AVK.K1 || k === AVK.K3) && this.c2b.potion < 0) {
         const n = this.c2b.list.length;
         if (n) this.c2b.cur = (this.c2b.cur + (k === AVK.K3 ? 1 : n - 1)) % n;
@@ -594,16 +607,15 @@ export class ShopScreen {
     u.pop();
     u.closeButton(26);
     if (this.actionPopup) this.actionPopup.draw(u);
-    if (this.qtyOpen) u.view('shopQty', 0, 0, 480, 320, this.qtyView());
     if (this.result) u.view('shopResult', 0, 0, 480, 320, this.resultView());
-    (this.progress?.p ?? this.popup?.p)?.draw();
+    this.overlays.draw();
   }
 
   // ---- view helpers ----
 
   /** an overlay (action popup, quantity, result, popups) owns the input: the screen below is inert */
   private get covered(): boolean {
-    return !!(this.actionPopup || this.qtyOpen || this.result || this.popup || this.progress);
+    return !!(this.actionPopup || this.result || this.overlays.size);
   }
 
   /**

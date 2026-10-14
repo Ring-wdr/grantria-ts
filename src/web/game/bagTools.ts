@@ -5,7 +5,8 @@
 // coupons first, as the single decompose does (tabs.ts askCoupon).
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { Popup } from './popup';
+import { Popup, openPopup } from './popup';
+import { OverlayStack } from './overlays';
 import { coupons } from './community';
 import { josa } from './shop';
 import { cfmt } from '../../core/data/skillDetail';
@@ -55,7 +56,8 @@ export class BagTools {
   /** bulk screen buttons: 0 run, 1 back */
   private focus: 0 | 1 = 0;
   private list: ScrollRef = { y: 0 };
-  private popup: { p: Popup; yes?: () => void; ok?: () => void } | null = null;
+  /** popups over the panel */
+  private readonly overlays = new OverlayStack();
   /** 0x7D (too few coupons) was confirmed: the menu owner opens the coupon shop */
   toCoupons = false;
 
@@ -65,17 +67,9 @@ export class BagTools {
 
   /** false once closed */
   update(presses: number[]): boolean {
-    if (this.popup) {
-      const r = this.popup.p.handle(presses);
-      if (r) {
-        const p = this.popup;
-        this.popup = null;
-        if (r === 'yes') p.yes?.();
-        else if (r === 'ok') { if (p.p.id === 0x7d) this.toCoupons = true; p.ok?.(); }
-      }
-      return !this.toCoupons;
-    }
+    if (this.overlays.update(presses)) return !this.toCoupons;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (this.screen === 'menu') {
         if (k === AVK.UP) this.cur = (this.cur + MENU.length - 1) % MENU.length;
         else if (k === AVK.DOWN) this.cur = (this.cur + 1) % MENU.length;
@@ -92,27 +86,32 @@ export class BagTools {
     return true;
   }
 
+  /** popup p (yes: its affirmative answer); 0x7D once closed sends the panel back for the coupon shop */
+  private say(p: Popup, yes?: () => void): void {
+    openPopup(this.overlays, p, yes, { on: { close: () => { if (p.id === 0x7d) this.toCoupons = true; } } });
+  }
+
   private choose(): void {
     const fs = this.fs;
     const open = (s: 'drop' | 'decompose') => { this.screen = s; this.grade = 0; this.focus = 0; this.list.y = 0; };
     if (this.cur === 1) { open('drop'); return; }
     if (fs.inv.unlocked(9)) { open('decompose'); return; }
-    if (!fs.canSave) { this.popup = { p: new Popup(this.ctx, 0x6d) }; return; }   // the coupon offer only where saving is allowed
-    this.popup = { p: couponToolPopup(this.ctx, fs, 4), yes: () => {
+    if (!fs.canSave) { this.say(new Popup(this.ctx, 0x6d)); return; }   // the coupon offer only where saving is allowed
+    this.say(couponToolPopup(this.ctx, fs, 4), () => {
       const refused = buyCouponTool(this.ctx, fs, 4);
-      if (refused) this.popup = { p: refused };
+      if (refused) this.say(refused);
       else open('decompose');
-    } };
+    });
   }
 
-  private msg(body: string): void { this.popup = { p: new Popup(this.ctx, 0x18, 0, () => josa(body)) }; }
+  private msg(body: string): void { this.say(new Popup(this.ctx, 0x18, 0, () => josa(body))); }
 
   private confirm(): void {
     const picks = this.picks(), drop = this.screen === 'drop', verb = drop ? '버리' : '분해하';
     if (!picks.length) { this.msg(`${drop ? '버릴' : '분해할'} 장비가 없습니다.`); return; }
     const p = new Popup(this.ctx, 0x0f, 0, () => josa(`장비 ${picks.length}개를 ${verb}시겠습니까?`));
     p.sel = 1;                                                         // a bulk order starts on 아니오
-    this.popup = { p, yes: () => (drop ? this.dropAll(picks) : this.decomposeAll(picks)) };
+    this.say(p, () => (drop ? this.dropAll(picks) : this.decomposeAll(picks)));
   }
 
   private dropAll(picks: number[]): void {
@@ -127,7 +126,7 @@ export class BagTools {
     const fs = this.fs, t = this.ctx.assets.text;
     const r = decomposeMany(fs.db, fs.inv, picks, fs.rng, () => fs.achieve({ k: 'dismantle' }));
     if (r.done) { fs.quests.onItems(); fs.recompute(); fs.autosave(); }
-    if (!r.done) { this.popup = { p: new Popup(this.ctx, 0x6a, 0, () => t[fs.inv.bags < BAG_MAX ? 0x4f7 : 0x507] ?? '') }; return; }
+    if (!r.done) { this.say(new Popup(this.ctx, 0x6a, 0, () => t[fs.inv.bags < BAG_MAX ? 0x4f7 : 0x507] ?? '')); return; }
     const got = r.gains.map(([ty, s, c]) => `${t[0x7fc + fs.db.model(ty, s, 0)] ?? ''} ${c}개`).join('|@');
     this.msg(`장비 ${r.done}개를 분해했습니다.${r.full ? `|@가방이 부족해 ${picks.length - r.done}개는 남겼습니다.` : ''}|@${got}`);
   }
@@ -160,5 +159,5 @@ export class BagTools {
         button(gt('취소'), { cls: 'tb-wide', sel: f === 1, on: () => { this.focus = 1; return [AVK.OK]; } })));
   }
 
-  drawPopup(): void { this.popup?.p.draw(); }
+  drawPopup(): void { this.overlays.draw(); }
 }

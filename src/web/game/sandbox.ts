@@ -10,7 +10,8 @@ import { StoryDb, Story } from '../../core/data/story';
 import { newGame } from '../../core/save/save';
 import { seenEvents } from '../../core/rules/records';
 import { seenAlongRoute } from '../../core/data/storyChart';
-import { Popup } from './popup';
+import { Popup, openPopup } from './popup';
+import { OverlayStack } from './overlays';
 import { countReplay, recordRush } from '../../core/rules/records';
 import { saveOptions } from '../../core/save/options';
 import { rushBosses, ticksText } from './archive';
@@ -28,7 +29,8 @@ export interface SandboxHost extends Scene { resume(finished?: boolean): void }
 
 export class SandboxScene implements Scene {
   private fs: FieldScene | null = null;
-  private popup: { p: Popup; then?: (r: 'yes' | 'no' | 'ok') => void } | null = null;
+  /** the rush's result popup and "quit the rush?" over the field */
+  private readonly overlays = new OverlayStack();
   /** 회상: this scene's lines (LOG / pad □) */
   private log: BacklogView | null = null;
   private started = false;
@@ -110,7 +112,7 @@ export class SandboxScene implements Scene {
     this.state = 'over';
     const fs = this.fs!, best = this.beaten > 0 && recordRush(this.ticks, this.beaten, fs.model.cls, Date.now(), all && this.beaten === this.stages.length);
     const body = `${all ? '보스 러시 완주!' : '보스 러시 종료'}|@보스 ${this.beaten} / ${this.stages.length}마리 · ${ticksText(this.ticks)}${best ? '|@새 기록입니다.' : ''}`;
-    this.popup = { p: new Popup(this.ctx, 0x18, 0, () => body), then: () => this.leave() };
+    openPopup(this.overlays, new Popup(this.ctx, 0x18, 0, () => body), undefined, { on: { close: () => this.leave() } });
   }
 
   /** back to the scene that started it; watched = a replay played to its end (Esc or SKIP do not count for 추억),
@@ -125,14 +127,14 @@ export class SandboxScene implements Scene {
 
   update(presses: number[]): void {
     const fs = this.fs, input = this.ctx.input;
-    input.uiMode = !!(this.log || this.popup || fs?.popup || fs?.busyTalking || fs?.dead);
+    input.uiMode = !!(this.log || this.overlays.size || fs?.busyTalking || fs?.dead);
     input.padField = !input.uiMode;
-    input.confirm = input.device === 'touch' && !!(this.popup || fs?.popup || fs?.busyTalking);
+    input.confirm = input.device === 'touch' && !!(this.overlays.size || fs?.busyTalking);
     for (const t of input.takeTaps()) {
       const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? this.ctx.hud.tapAt(t.x, t.y);
       if (keys) presses = [...presses, ...keys];
     }
-    if (this.popup) { const r = this.popup.p.handle(presses); if (r) { const t = this.popup.then; this.popup = null; t?.(r); } return; }
+    if (this.overlays.update(presses)) return;
     if (!fs) { if (presses.includes(AVK.CLR)) this.leave(); return; }
     if (this.log) { if (!this.log.update(presses)) this.log = null; return; }
     // the dialogue's LOG / AUTO keys work here too (pad □ / △ while a page shows); a replay logs into its own list
@@ -149,7 +151,7 @@ export class SandboxScene implements Scene {
     if (this.state === 'over') return;
     if (fs.dead) { this.finishRush(false); return; }
     if (presses.includes(AVK.CLR) && !fs.busyTalking) {
-      this.popup = { p: new Popup(this.ctx, 0x0e, 0, () => '보스 러시를 그만두시겠습니까?'), then: (r) => { if (r === 'yes') this.finishRush(false); } };
+      openPopup(this.overlays, new Popup(this.ctx, 0x0e, 0, () => '보스 러시를 그만두시겠습니까?'), () => this.finishRush(false));
       return;
     }
     if (this.state === 'load') return;
@@ -163,7 +165,7 @@ export class SandboxScene implements Scene {
   draw(): void {
     const fs = this.fs;
     if (!fs) { render(this.ctx, () => fillScreen(this.ctx.ui, 0)); return; }
-    fs.showButtons = !this.popup;
+    fs.showButtons = !this.overlays.size;
     fs.draw();
     const u = this.ctx.ui;
     u.begin();
@@ -173,7 +175,7 @@ export class SandboxScene implements Scene {
     u.view('sandboxBar', (W >> 1) - 90, this.mode === 'replay' ? 4 : H - 48, 180, 14, h('div.sb-bar', null, label));
     if (this.log) this.log.draw(u, this.ctx.input);
     u.end();
-    if (this.popup) { this.ctx.ui13.begin(); this.popup.p.draw(); this.ctx.ui13.end(); }
+    if (this.overlays.size) { this.ctx.ui13.begin(); this.overlays.draw(); this.ctx.ui13.end(); }
     this.ctx.compositor.show();
   }
 

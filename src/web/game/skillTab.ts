@@ -4,7 +4,8 @@
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
-import { Popup } from './popup';
+import { Popup, openPopup } from './popup';
+import { OverlayStack } from './overlays';
 import { account, traitCheck, traitCommit } from '../../core/rules/account';
 import { effectiveSkillLevel, rdiv } from '../../core/rules/rules';
 import { cfmt, skillDetail, skillReqLevel } from '../../core/data/skillDetail';
@@ -36,7 +37,8 @@ export class SkillTab {
   private sel = 0;              // 1-based, 0 = none
   private f = 0;
   private t = 0;
-  private popup: { p: Popup; idx: number } | null = null;
+  /** popups over the tab */
+  private readonly overlays = new OverlayStack();
   private quick: { cur: number; action: number } | null = null;
 
   constructor(private ctx: GameContext, private fs: FieldScene) {}
@@ -44,7 +46,7 @@ export class SkillTab {
   /** skill detail MENUPOP 2 ('*' with a cell selected, FUN_0002daec) */
   private detail = false;
 
-  get busy(): boolean { return !!(this.popup || this.quick || this.detail); }
+  get busy(): boolean { return !!(this.overlays.size || this.quick || this.detail); }
   /** the quick-slot picker is open (its slot keys must not page the menu) */
   get picking(): boolean { return !!this.quick; }
 
@@ -55,12 +57,7 @@ export class SkillTab {
   update(presses: number[]): boolean {
     this.t++;
     if (this.f < 15) this.f++;
-    if (this.popup) {
-      const r = this.popup.p.handle(presses);
-      if (r === 'yes' && this.popup.p.id === 0x26) this.invest(this.popup.idx);
-      if (r) this.popup = null;
-      return true;
-    }
+    if (this.overlays.update(presses)) return true;
     if (this.detail) {
       if (presses.some((k) => k === AVK.OK || k === AVK.CLR || k === AVK.STAR)) this.detail = false;
       return true;
@@ -76,6 +73,7 @@ export class SkillTab {
     }
     const n = CELLS[this.sub], cols = this.sub === 2 ? 4 : 3;
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (this.focus === 0) {
         if (k === AVK.LEFT) this.sub = (this.sub + 2) % 3;
         else if (k === AVK.RIGHT) this.sub = (this.sub + 1) % 3;
@@ -99,23 +97,26 @@ export class SkillTab {
     return true;
   }
 
+  /** popup p for skill idx: only the confirmation 0x26 invests on yes, the checks' popups are messages */
+  private ask(p: Popup, idx: number): void { openPopup(this.overlays, p, p.id === 0x26 ? () => this.invest(idx) : undefined); }
+
   /** Checks of the investment (popups 0x28 / 0x27 / 0x2A / 0x29), then confirmation 0x26. */
   private tryInvest(idx: number): void {
     const fs = this.fs, ctx = this.ctx, t = ctx.assets.text;
-    if (this.sub === 2) { this.popup = { p: new Popup(ctx, traitCheck(idx + 1)), idx }; return; }   // 0x28 / 0x27 / 0x26
+    if (this.sub === 2) { this.ask(new Popup(ctx, traitCheck(idx + 1)), idx); return; }   // 0x28 / 0x27 / 0x26
     const lv = this.learned(idx);
-    if (lv > 9) { this.popup = { p: new Popup(ctx, 0x28), idx }; return; }
+    if (lv > 9) { this.ask(new Popup(ctx, 0x28), idx); return; }
     const cost = this.sub === 0 ? fs.db.a.d8(0x24695 + Math.trunc(idx / 3) * 10 + lv) : 1;
-    if (fs.skillPoints < cost) { this.popup = { p: new Popup(ctx, 0x27), idx }; return; }
+    if (fs.skillPoints < cost) { this.ask(new Popup(ctx, 0x27), idx); return; }
     if (this.sub === 0) {
-      if (fs.model.level < skillReqLevel(fs.db.a, fs.model.cls, idx)) { this.popup = { p: new Popup(ctx, 0x2a), idx }; return; }
+      if (fs.model.level < skillReqLevel(fs.db.a, fs.model.cls, idx)) { this.ask(new Popup(ctx, 0x2a), idx); return; }
       if (idx >= 3 && fs.skills[idx - 3] < 5) {
         const name = t[0xc9c + fs.model.cls * 9 + idx - 3] ?? '';
-        this.popup = { p: new Popup(ctx, 0x29, 0, (s) => s.replace('%s', name).replace('%d', '5')), idx };
+        this.ask(new Popup(ctx, 0x29, 0, (s) => s.replace('%s', name).replace('%d', '5')), idx);
         return;
       }
     }
-    this.popup = { p: new Popup(ctx, 0x26), idx };
+    this.ask(new Popup(ctx, 0x26), idx);
   }
 
   private invest(idx: number): void {
@@ -221,7 +222,7 @@ export class SkillTab {
     return h(`div.v-row.sk-cell${lv === 0 && !sel ? '.off' : ''}${sel ? '.cur' : ''}`, {
       on: () => { if (this.focus === 1 && this.sel === idx + 1) return [AVK.OK]; this.focus = 1; this.sel = idx + 1; this.f = 0; },
     },
-      h(`span.sk-icon${sel && !this.popup ? '.v-sel' : ''}`, null, sprite(img, sx, sy, 24, 24)),
+      h(`span.sk-icon${sel && !this.overlays.size ? '.v-sel' : ''}`, null, sprite(img, sx, sy, 24, 24)),
       h('span.sk-lv', null, lv ? `${this.ctx.assets.text[0x12] ?? 'LV'}${lv}` : ''));
   }
 
@@ -255,5 +256,5 @@ export class SkillTab {
 
   drawOverlay(): void { /* no absolute-coordinate overlays */ }
 
-  drawPopups(): void { this.popup?.p.draw(); }
+  drawPopups(): void { this.overlays.draw(); }
 }

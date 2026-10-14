@@ -3,7 +3,8 @@
 // location string are not drawn; the body (clip 7,57,204,120) is an HTML view clipped by CSS.
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { Popup } from './popup';
+import { Popup, openPopup } from './popup';
+import { OverlayStack } from './overlays';
 import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
 import { button, gt, h, sprite, type ScrollRef, type VChild } from '../render/view';
@@ -22,30 +23,27 @@ export class QuestTab {
   private t = 0;
   /** focus: 0 확인, 1 추적 켬 / 끔 (not in the original), 2 포기 (side quests) */
   private detail: { q: number; scroll: ScrollRef; focus: number } | null = null;
-  private popup: Popup | null = null;
+  /** popups over the tab */
+  private readonly overlays = new OverlayStack();
 
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
-  get busy(): boolean { return !!(this.detail || this.popup); }
+  get busy(): boolean { return !!(this.detail || this.overlays.size); }
 
   update(presses: number[]): boolean {
     this.t++;
     const active = this.fs.story.active;
-    if (this.popup) {
-      const r = this.popup.handle(presses);
-      if (r === 'yes' && this.detail) this.abandon(this.detail.q);
-      if (r) { this.popup = null; if (r === 'yes') this.detail = null; }
-      return true;
-    }
+    if (this.overlays.update(presses)) return true;
     if (this.detail) {
       const d = this.detail, n = this.fs.sdb.mainQuest(d.q) ? 2 : 3;
       for (const k of presses) {
+        if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
         if (k === AVK.LEFT) d.focus = (d.focus + n - 1) % n;
         else if (k === AVK.RIGHT) d.focus = (d.focus + 1) % n;
         else if (k === AVK.UP) d.scroll.y = Math.max(0, d.scroll.y - 15);
         else if (k === AVK.DOWN) d.scroll.y += 15;                     // the browser clamps at the end
         else if (k === AVK.OK) {
-          if (d.focus === 2) this.popup = new Popup(this.ctx, 0x51);
+          if (d.focus === 2) openPopup(this.overlays, new Popup(this.ctx, 0x51), () => { if (this.detail) this.abandon(this.detail.q); this.detail = null; });
           else if (d.focus === 1) this.toggleTracked(d.q);
           else this.detail = null;
         }
@@ -136,7 +134,7 @@ export class QuestTab {
       this.drawDetail(u, d);
       u.pop();
     }
-    this.popup?.draw();
+    this.overlays.draw();
   }
 
   /**

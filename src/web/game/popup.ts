@@ -3,6 +3,7 @@ import { VIEW_H as H, VIEW_W as W } from '../render/field';
 import { AVK } from '../input/input';
 import { button, gt, h, sprite, type VChild } from '../render/view';
 import type { GameContext } from './scene';
+import { popupRole, type OpenOpts, type Overlay, type OverlayStack } from './overlays';
 
 /** Popup (FUN_0005f948 + FUN_0005f4f8) on the 1.3x layer: definition d.dat 0x4009d7 + id*6. */
 let serial = 0;
@@ -73,6 +74,16 @@ export class Popup {
   }
 }
 
+/** a Popup as an overlay of an OverlayStack (ok answers as 'yes'); the owner's drawing pass wraps its draw */
+export function popupOverlay(p: Popup): Overlay {
+  return { handle: (presses) => popupRole(p.handle(presses)), draw: () => p.draw() };
+}
+
+/** open a Popup on a stack; yes runs on its affirmative answer (yes / ok) */
+export function openPopup(stack: OverlayStack, p: Popup, yes?: () => void, opts: OpenOpts = {}): Popup {
+  stack.open(popupOverlay(p), { ...opts, on: { yes, ...opts.on } });
+  return p;
+}
 
 /** Quantity popup 0x0C (type 7, as in shop.ts): ◀ ▶ ±1 (wrapping), +100 / -100, OK; CLR cancels. */
 export class QtyPopup {

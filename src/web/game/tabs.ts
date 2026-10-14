@@ -8,7 +8,10 @@ import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
 import { BAG_COUNT, type Item } from '../../core/rules/items';
-import { Popup, QtyPopup } from './popup';
+import { Popup, QtyPopup, popupOverlay } from './popup';
+import { OverlayStack } from './overlays';
+import { flowOverlay, type Step } from './flow';
+import { quantityFlow, type QuantityEvent } from './flows/quantityFlow';
 import { buyBag } from './community';
 import { BagTools, buyCouponTool, couponToolPopup } from './bagTools';
 import { ShopScreen } from './shop';
@@ -220,10 +223,8 @@ export class InventoryTab {
   private action: ActionPopup | null = null;
   private detail: Item | null = null;
   private quick: { cur: number; idx: number } | null = null;
-  private confirm: { popup: Popup; idx: number; yes?: () => void } | null = null;
-  /** drop quantity popup 0x0C for a stack (FUN_0005e23c case 4), then 0xB for that many */
-  private qty: { popup: QtyPopup; idx: number } | null = null;
-  private message: Popup | null = null;
+  /** messages, confirmations and the drop flow over the tab */
+  private readonly overlays = new OverlayStack();
   /** popup 0x7D (bag expansion without coupons) confirmed: the menu opens the coupon shop */
   toCoupons = false;
   /** shop screen opened from the inventory (enhance / decompose / combine) */
@@ -237,7 +238,7 @@ export class InventoryTab {
 
   constructor(private ctx: GameContext, private fs: FieldScene) {}
 
-  get busy(): boolean { return !!(this.action || this.detail || this.quick || this.confirm || this.qty || this.message || this.shop || this.tools); }
+  get busy(): boolean { return !!(this.action || this.detail || this.quick || this.overlays.size || this.shop || this.tools); }
   /** the quick-slot picker is open (its slot keys must not page the menu) */
   get picking(): boolean { return !!this.quick; }
 
@@ -252,38 +253,12 @@ export class InventoryTab {
       if (!this.tools.update(presses)) { if (this.tools.toCoupons) this.toCoupons = true; this.tools = null; this.sel = Math.min(this.sel, 15); }
       return true;
     }
-    if (this.message) {
-      if (this.message.handle(presses)) { if (this.message.id === 0x7d) this.toCoupons = true; this.message = null; }   // 쿠폰 부족 → 쿠폰 구매
-      return true;
-    }
-    if (this.qty) {
-      const q = this.qty, r = q.popup.handle(presses), it = inv.items[q.idx];
-      if (r === 'cancel') this.qty = null;
-      else if (r === 'ok' && it) {                                     // FUN_0005f4f8: 0 -> 0x0D, more than held -> 0x58, else 0xB
-        const n = q.popup.qty;
-        if (n === 0) this.message = new Popup(this.ctx, 0x0d);
-        else if (it.count < n) this.message = new Popup(this.ctx, 0x58);
-        else {
-          this.qty = null;
-          this.confirm = { popup: new Popup(this.ctx, 0xb), idx: q.idx, yes: () => {
-            if (it.count > n) it.count -= n; else inv.remove(q.idx);
-            inv.remapQuick();
-            this.fs.recompute();
-          } };
-        }
-      }
-      return true;
-    }
-    if (this.confirm) {
-      const r = this.confirm.popup.handle(presses);
-      if (r === 'yes') { if (this.confirm.yes) this.confirm.yes(); else { inv.remove(this.confirm.idx); this.fs.recompute(); } }
-      if (r) this.confirm = null;
-      return true;
-    }
+    if (this.overlays.update(presses)) return true;
     if (this.gems) { this.gemKeys(presses); return true; }
     if (this.detail) {
       const it = this.detail;
       for (const k of presses) {
+        if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
         if (k === AVK.OK || k === AVK.CLR) { this.detail = null; break; }
         if ((k === AVK.K0 || k === AVK.STAR) && it.type < 0x10) this.openGems(it);   // '0' (pad: L2)
         else if (k === AVK.POUND && it.type < 0x10) this.extractGems(it);
@@ -305,6 +280,7 @@ export class InventoryTab {
       return true;
     }
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       if (this.focus === 0) {
         // the cursor also reaches the first locked bag (BAG_COUNT at most), where OK asks to buy it (popup 0x7E)
         if (k === AVK.UP || k === AVK.DOWN) { const n = Math.min(BAG_COUNT, inv.bags + 4); this.bag = (this.bag + (k === AVK.UP ? n - 1 : 1)) % n; this.sel = 0; this.f = 0; }
@@ -325,6 +301,36 @@ export class InventoryTab {
       }
     }
     return true;
+  }
+
+  /** a message popup; 0x7D (쿠폰 부족) once confirmed opens the coupon shop from the menu */
+  private say(p: Popup): void {
+    this.overlays.open(popupOverlay(p), { on: { close: () => { if (p.id === 0x7d) this.toCoupons = true; } } });
+  }
+  private ask(p: Popup, yes: () => void): void { this.overlays.open(popupOverlay(p), { on: { yes } }); }
+
+  /** DROP (FUN_0005e23c case 4): the quantity flow (flows/quantityFlow.ts) over popups 0x0C, 0x0D, 0x58 and 0xB */
+  private dropItem(idx: number): void {
+    const inv = this.fs.inv, it = inv.items[idx], stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
+    const qty = new QtyPopup(this.ctx, it.count);
+    const machine = quantityFlow.provide({ actions: { commit: (_, { n }) => {
+      if (!stack) inv.remove(idx);
+      else { if (it.count > n) it.count -= n; else inv.remove(idx); inv.remapQuick(); }
+      this.fs.recompute();
+    } } });
+    const popup = (id: number, answer: (r: 'yes' | 'no' | 'ok') => QuantityEvent) => (): Step<QuantityEvent> => {
+      const p = new Popup(this.ctx, id);
+      return { handle: (k) => { const r = p.handle(k); return r && answer(r); }, draw: () => p.draw() };
+    };
+    this.overlays.open(flowOverlay(machine, { held: it.count, stack, tooManyBack: true }, {
+      qty: () => ({
+        handle: (k): QuantityEvent | null => { const r = qty.handle(k); return r === 'cancel' ? { type: 'cancel' } : r === 'ok' ? { type: 'qty', n: qty.qty } : null; },
+        draw: () => qty.draw(),
+      }),
+      none: popup(0x0d, () => ({ type: 'ok' })),
+      tooMany: popup(0x58, () => ({ type: 'ok' })),
+      confirm: popup(0xb, (r) => ({ type: r === 'yes' ? 'yes' : 'no' })),
+    }));
   }
 
   private openActions(): void {
@@ -358,30 +364,27 @@ export class InventoryTab {
       if (inv.unlocked(9)) this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: 'decompose', idx });
       else this.askCoupon(4, idx);
     } else if (action === ACTION.SOCKET) {                                   // socket scroll (0x1b, 0x21)
-      if (!has(0x1b, 0x21)) { this.message = new Popup(this.ctx, 0x77); return; }
-      this.confirm = { popup: new Popup(this.ctx, 0x76), idx, yes: () => {
+      if (!has(0x1b, 0x21)) { this.say(new Popup(this.ctx, 0x77)); return; }
+      this.ask(new Popup(this.ctx, 0x76), () => {
         const r = this.fs.rng.rand(1000);
         it.sockets = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         it.count = r > 500 ? 3 : r > 150 ? 4 : 5;                          // 49.9 % / 35 % / 15.1 %
         consume(inv, 0x1b, 0x21, 1);
         this.fs.recompute();
         this.fs.autosave();
-      } };
+      });
     }
     else if (action === ACTION.EQUIP) {
-      if (!inv.usable(it, this.fs.model.level, this.fs.model.cls)) this.message = new Popup(this.ctx, 0x2b);
+      if (!inv.usable(it, this.fs.model.level, this.fs.model.cls)) this.say(new Popup(this.ctx, 0x2b));
       else { inv.equipFrom(idx); this.fs.recompute(); }
     } else if (action === ACTION.QUICK) this.quick = { cur: Math.max(0, inv.quick.findIndex((q) => q.kind === 0)), idx };
-    else if (action === ACTION.DROP) {
-      if (this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18) this.qty = { popup: new QtyPopup(this.ctx, it.count), idx };
-      else this.confirm = { popup: new Popup(this.ctx, 0xb), idx };
-    }
+    else if (action === ACTION.DROP) this.dropItem(idx);
   }
 
   /** '0' in the detail: gem list (FUN_000441e4) when an empty socket exists */
   private openGems(it: Item): void {
     const used = it.sockets.filter((g) => g !== 0xff).length;
-    if (used >= it.count) { this.message = new Popup(this.ctx, 0x44); return; }
+    if (used >= it.count) { this.say(new Popup(this.ctx, 0x44)); return; }
     const list = this.fs.inv.items.map((x, i) => [x, i] as const).filter(([x]) => x.type === 0x10).map(([, i]) => i);
     this.gems = { list, cur: 0 };
   }
@@ -393,7 +396,7 @@ export class InventoryTab {
       else if (k === AVK.CLR) { this.gems = null; return; }
       else if (k === AVK.OK && g.list.length) {
         const gi = g.list[g.cur];
-        this.confirm = { popup: new Popup(this.ctx, 0x43), idx: gi, yes: () => {       // FUN_0003dcd0
+        this.ask(new Popup(this.ctx, 0x43), () => {                                    // FUN_0003dcd0
           const gem = inv.items[gi], slot = it.sockets.findIndex((v, i) => i < it.count && v === 0xff);
           if (!gem || slot < 0) return;
           while (it.sockets.length < 6) it.sockets.push(0xff);
@@ -403,7 +406,7 @@ export class InventoryTab {
           this.gems = null;
           this.fs.recompute();
           this.fs.autosave();
-        } };
+        });
         return;
       }
     }
@@ -415,12 +418,12 @@ export class InventoryTab {
    * granted (server op 0x30, FUN_00076398, done locally) and the action continues as with the tool (op 0x32, FUN_000752bc).
    */
   private askCoupon(act: 2 | 3 | 4, idx: number): void {
-    if (!this.fs.canSave) { this.message = new Popup(this.ctx, 0x6d); return; }
-    this.confirm = { popup: couponToolPopup(this.ctx, this.fs, act), idx, yes: () => {
+    if (!this.fs.canSave) { this.say(new Popup(this.ctx, 0x6d)); return; }
+    this.ask(couponToolPopup(this.ctx, this.fs, act), () => {
       const refused = buyCouponTool(this.ctx, this.fs, act);
-      if (refused) { this.message = refused; return; }
+      if (refused) { this.say(refused); return; }
       this.shop = new ShopScreen(this.ctx, this.fs, 2, { mode: act === 2 ? 'enhance' : act === 3 ? 'combine' : 'decompose', idx });
-    } };
+    });
   }
 
   /** '#' (FUN_00044564 -> FUN_00040320): the bag check first (0x61), then no gems 0x63 / no extractor 0x62. One
@@ -429,8 +432,8 @@ export class InventoryTab {
    *  detail window closes. */
   private extractGems(it: Item): void {
     const inv = this.fs.inv, gems = it.sockets.filter((v) => v !== 0xff).length;   // FUN_000395a4
-    if (inv.items.length + gems > inv.cap) { this.message = new Popup(this.ctx, 0x61); return; }
-    if (countOf(inv, 0x1b, 0x0b) === 0 || gems === 0) { this.message = new Popup(this.ctx, gems === 0 ? 0x63 : 0x62); return; }
+    if (inv.items.length + gems > inv.cap) { this.say(new Popup(this.ctx, 0x61)); return; }
+    if (countOf(inv, 0x1b, 0x0b) === 0 || gems === 0) { this.say(new Popup(this.ctx, gems === 0 ? 0x63 : 0x62)); return; }
     consume(inv, 0x1b, 0x0b, 1);
     for (let s = 0; s < 5; s++) {
       const v = it.sockets[s];
@@ -501,7 +504,7 @@ export class InventoryTab {
 
   /** locked bag: popup 0x7E (25 coupons, FUN_00047488) */
   private askBag(): void {
-    this.confirm = { popup: new Popup(this.ctx, 0x7e), idx: -1, yes: () => { this.message = buyBag(this.ctx, this.fs); } };
+    this.ask(new Popup(this.ctx, 0x7e), () => this.say(buyBag(this.ctx, this.fs)));
   }
 
   /** item detail with the gem buttons ('0' attach, '#' extract) and the gem list (FUN_000441e4) */
@@ -559,8 +562,7 @@ export class InventoryTab {
   drawPopups(): void {
     if (this.shop) { this.shop.drawOverlay(); return; }
     this.tools?.drawPopup();
-    if (this.qty && !this.message) this.qty.popup.draw();
-    (this.message ?? this.confirm?.popup)?.draw();
+    this.overlays.draw();
   }
 }
 
@@ -572,11 +574,11 @@ export class EquipTab {
   private detail: Item | null = null;
   private pick: { cands: number[]; cur: number } | null = null;
   /** not in the original: DROP of a worn item asks first (popup 0xB, as for a bag item) */
-  private confirmDrop: Popup | null = null;
+  private readonly overlays = new OverlayStack();
 
   constructor(private ctx: GameContext, private fs: FieldScene, private playerCmf: Cmf) {}
 
-  get busy(): boolean { return !!(this.action || this.detail || this.pick || this.confirmDrop); }
+  get busy(): boolean { return !!(this.action || this.detail || this.pick || this.overlays.size); }
 
   private slotOf(it: Item): number { return it.type === 15 ? 5 : Math.trunc(it.type / 3); }
 
@@ -584,14 +586,7 @@ export class EquipTab {
     this.t++;
     const inv = this.fs.inv;
     if (this.detail) { if (presses.includes(AVK.OK) || presses.includes(AVK.CLR)) this.detail = null; return true; }
-    if (this.confirmDrop) {
-      const r = this.confirmDrop.handle(presses);
-      if (r) {
-        this.confirmDrop = null;
-        if (r === 'yes' && inv.equip[this.slot]) { inv.equip[this.slot] = null; this.fs.recompute(); }
-      }
-      return true;
-    }
+    if (this.overlays.update(presses)) return true;
     if (this.pick) {
       const p = this.pick;
       for (const k of presses) {
@@ -633,7 +628,11 @@ export class EquipTab {
       const cands = inv.items.map((x, i) => [x, i] as const).filter(([x]) => x.type < 0x10 && this.slotOf(x) === this.slot).map(([, i]) => i);
       this.pick = { cands, cur: 0 };
     } else if (action === ACTION.UNEQUIP) { inv.unequip(this.slot); this.fs.recompute(); }
-    else if (action === ACTION.DROP && it) this.confirmDrop = new Popup(this.ctx, 0xb);   // the original drops at once
+    else if (action === ACTION.DROP && it) {                                   // the original drops at once
+      this.overlays.open(popupOverlay(new Popup(this.ctx, 0xb)), { on: { yes: () => {
+        if (inv.equip[this.slot]) { inv.equip[this.slot] = null; this.fs.recompute(); }
+      } } });
+    }
   }
 
   /** FUN_0005b4b8: six slots around the character preview, the slot's item name, stats */
@@ -711,5 +710,5 @@ export class EquipTab {
     this.action?.draw(u);
   }
 
-  drawPopups(): void { this.confirmDrop?.draw(); }
+  drawPopups(): void { this.overlays.draw(); }
 }

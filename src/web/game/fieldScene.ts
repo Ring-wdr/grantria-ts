@@ -22,7 +22,8 @@ import { Dialogue, HoldSkip, drawDialogueButtons } from './dialogue';
 import { backlog } from './backlog';
 import { fxScale, optionFps } from '../../core/save/options';
 import { EventRunner } from './events';
-import { Popup } from './popup';
+import { Popup, popupOverlay } from './popup';
+import { OverlayStack, type OpenOpts, type Overlay, type Role } from './overlays';
 import { deepestAbyss, extraPaid, itemKinds, markExtraPaid, records, recordAbyss, recordBoss, recordItem } from '../../core/rules/records';
 import { dropMul, killMul } from '../../core/rules/dev';
 import { extraCheck, extraKey, type ExtraChallenge } from '../../core/rules/extraChallenges';
@@ -68,6 +69,13 @@ export function eventMap(e: number, headerMap: number): number {
 }
 /** FUN_00032800 32218: every actor in slots 0..40 gets a shadow except type 0x13 */
 const NO_SHADOW = 0x13;
+
+/** OverlayStack.enqueue priorities: challenge rewards first (FUN_0001f17c), then the added ones, the day's fortune
+ *  and 출석 보상 */
+const QUEUE = { challenge: 3, extra: 2, fortune: 1, attendance: 0 } as const;
+
+/** the warp stone move list (state 0x17) */
+interface WarpList { rows: number[]; cur: number }
 
 export class FieldScene implements Scene {
   readonly field: Field;
@@ -131,10 +139,8 @@ export class FieldScene implements Scene {
   /** c71: a '5' pickup is under way (cleared by a pickup or an attack start) */
   private picking = false;
   /** warp stone move list (menu 0x17): registered rows and the cursor */
-  warpList: { rows: number[]; cur: number } | null = null;
-  popup: { p: Popup; onYes?: () => void; onNo?: () => void; onCancel?: () => void } | null = null;
-  /** a new day: the fortune popup 0x54 opens on the first field frame (FUN_0001a494 / FUN_000200b8) */
-  private fortunePending = false;
+  /** popups and the warp stone list, top-most last; challenge / fortune / attendance popups queue on it */
+  readonly overlays = new OverlayStack();
   /** save once the pending warp has loaded (garden entry) */
   private saveAfterWarp = false;
   /** shop kind requested by NPC talk (the play scene opens the shop screen) */
@@ -186,17 +192,15 @@ export class FieldScene implements Scene {
   sandbox: 'replay' | 'rush' | null = null;
   /** tick the player last lost HP (boss records: a kill without being hit) */
   private lastHurt = -1;
-  /** 출석 보상 waiting for the first free field frame, and the extra challenges waiting for their popup */
-  private attendPending = false;
-  private extraQueue: ExtraChallenge[] = [];
   /** bind to a slot: account day counter and book, reload prevention (FUN_0001a494) */
   bindSlot(slot: number): void {
     this.slot = slot;
     this.dayCounter = accountDay(slot, this.dayCounter);
     if (this.dayCounter >= 10000) { this.darkStock = genDarkStock(this.db, this.rng, this.field.mapId); this.darkState = 2; }   // load (FUN_0001a494)
     this.story.book = accountBook(this.story.book);
-    if (this.story.fortuneDay !== today()) { this.story.fortuneDay = today(); this.fortunePending = true; }
-    this.attendPending = (this.story.counters.attendDay ?? 0) !== today();
+    // a new day: the fortune popup 0x54 opens on the first free field frame (FUN_0001a494 / FUN_000200b8), then 출석 보상
+    if (this.story.fortuneDay !== today()) { this.story.fortuneDay = today(); this.overlays.enqueue(() => this.openFortune(), QUEUE.fortune); }
+    if ((this.story.counters.attendDay ?? 0) !== today()) this.overlays.enqueue(() => this.openAttendance(), QUEUE.attendance);
     this.inv.onGot = (it) => { if (it.type !== 0x1a) recordItem(it.type, it.sub, it.grade); };   // 아이템 도감
     for (const sub of takeUnsavedUses(slot)) {
       const i = this.inv.items.findIndex((it) => it.type === 0x1b && it.sub === sub);
@@ -296,19 +300,22 @@ export class FieldScene implements Scene {
   private makeQuests(): QuestLog {
     return new QuestLog(this.sdb, this.story, {
       inv: this.inv, rng: this.rng, hard: () => this.hard, level: () => this.model.level, eventId: () => this.events.id,
-      questPopup: (id, q) => { this.popup = { p: new Popup(this.ctx, id, 0, (t) => t.replace('%s', this.quests.name(q))) }; },
+      questPopup: (id, q) => this.ask(new Popup(this.ctx, id, 0, (t) => t.replace('%s', this.quests.name(q)))),
       message: (t) => this.hud.message(t),
       grantExp: (e) => this.grantExp(e),
       sfx: (n) => this.ctx.audio.playSfx(n),
     });
   }
 
-  get popupOpen(): boolean { return !!this.popup; }
+  /** open a Popup over the field: on its roles' handlers (ok answers 'yes') */
+  ask(p: Popup, opts: OpenOpts = {}): void { this.overlays.open(popupOverlay(p), { kind: 'popup', ...opts }); }
+  get popupOpen(): boolean { return this.overlays.kindOpen('popup'); }
+  get warpListOpen(): boolean { return this.overlays.kindOpen('warps'); }
   /** an event or NPC dialogue page is on screen (LOG / AUTO keys) */
-  get dialogueShown(): boolean { return !this.popup && (!!this.talk || (this.events.active && !!this.events.dialogue)); }
+  get dialogueShown(): boolean { return !this.popupOpen && (!!this.talk || (this.events.active && !!this.events.dialogue)); }
   get inEvent(): boolean { return this.events.active; }
   /** events and NPC talk (states 0x12 / 0x11) take every key; menu and SAVE are refused */
-  get busyTalking(): boolean { return this.events.active || !!this.talk || !!this.popup || !!this.warpList; }
+  get busyTalking(): boolean { return this.events.active || !!this.talk || this.overlays.size > 0; }
 
   static async create(ctx: GameContext, save: SaveData, lap = 0, sandbox: FieldScene['sandbox'] = null): Promise<FieldScene> {
     const db = new ItemDb(ctx.assets);
@@ -346,8 +353,6 @@ export class FieldScene implements Scene {
     return s;
   }
 
-  /** challenges waiting for popup 0x79 */
-  private achQueue: number[] = [];
   /** frames without moving (title 50), last skill use (title 21 / 22), a kill on this map (title 35) */
   private idleFrames = 0;
   private lastSkillTick = -1000;
@@ -358,10 +363,10 @@ export class FieldScene implements Scene {
 
   private grantAwards(a: Awards): void {
     for (const n of a.titles) this.awardTitle(n);
-    for (const n of a.challenges) if (!this.story.challenges.has(n)) { this.story.challenges.add(n); this.achQueue.push(n); }
+    for (const n of a.challenges) if (!this.story.challenges.has(n)) { this.story.challenges.add(n); this.overlays.enqueue(() => this.openChallenge(n), QUEUE.challenge); }
   }
 
-  /** polled state conditions (every 20 field frames) and the challenge popup queue */
+  /** polled state conditions (every 20 field frames); their popups queue on the overlays */
   private achTick(): void {
     if (this.tick % 20 === 0) {
       const st = this.story, eq = this.inv.equip.map((it) => (it ? it.grade : -1));
@@ -381,20 +386,25 @@ export class FieldScene implements Scene {
         bossKinds: Object.values(r.bosses).filter((b) => b.k > 0).length, cleanBoss: Object.values(r.bosses).some((b) => b.clean),
         itemKinds: itemKinds(), rushBosses: r.rush?.bosses ?? 0, rushAll: !!r.rush?.all, abyss: deepestAbyss(),
         attendance: c.attendStreak ?? 0, replays: r.replays, lap: this.lap,
-      })) { c[extraKey(x.id)] = 1; if (!extraPaid(x.id)) this.extraQueue.push(x); }   // done on this slot; gold once an account
+      })) { c[extraKey(x.id)] = 1; if (!extraPaid(x.id)) this.overlays.enqueue(() => this.openExtra(x), QUEUE.extra); }   // done on this slot; gold once an account
     }
-    if (!this.popup && !this.achQueue.length && this.extraQueue.length) {   // the same popup 0x79 with the new challenge's name
-      const x = this.extraQueue.shift()!, t = this.db.a.text;
-      const body = (s: string) => `${s.replace('%s', x.name)}|@${x.desc}|@${(t[0x1c25] ?? '%d').replace('%d', String(x.gold))}`;
-      const give = () => { if (!extraPaid(x.id)) { markExtraPaid(x.id); this.inv.gain(0x1c, x.gold, 0, 1, this.rng); } this.autosave(); };
-      this.popup = { p: new Popup(this.ctx, 0x79, 0, body), onYes: give, onNo: give };
-    }
-    if (!this.popup && this.achQueue.length) {                       // FUN_0001f17c: popup 0x79 + reward gold
-      const n = this.achQueue.shift()!, t = this.db.a.text, gold = challengeGold(this.db.a, n);
-      const body = (s: string) => `${s.replace('%s', t[0x1bcf + n] ?? '')}|@${(t[0x1c25] ?? '%d').replace('%d', String(gold))}`;
-      const give = () => { this.inv.gain(0x1c, gold, 0, 1, this.rng); this.autosave(); };
-      this.popup = { p: new Popup(this.ctx, 0x79, 0, body), onYes: give, onNo: give };
-    }
+  }
+
+  /** FUN_0001f17c: popup 0x79 + reward gold */
+  private openChallenge(n: number): void {
+    const t = this.db.a.text, gold = challengeGold(this.db.a, n);
+    const body = (s: string) => `${s.replace('%s', t[0x1bcf + n] ?? '')}|@${(t[0x1c25] ?? '%d').replace('%d', String(gold))}`;
+    this.ask(new Popup(this.ctx, 0x79, 0, body), { on: { close: () => { this.inv.gain(0x1c, gold, 0, 1, this.rng); this.autosave(); } } });
+  }
+
+  /** 추가 도전과제: the same popup 0x79 with the new challenge's name, after the original challenges */
+  private openExtra(x: ExtraChallenge): void {
+    const t = this.db.a.text;
+    const body = (s: string) => `${s.replace('%s', x.name)}|@${x.desc}|@${(t[0x1c25] ?? '%d').replace('%d', String(x.gold))}`;
+    this.ask(new Popup(this.ctx, 0x79, 0, body), { on: { close: () => {
+      if (!extraPaid(x.id)) { markExtraPaid(x.id); this.inv.gain(0x1c, x.gold, 0, 1, this.rng); }
+      this.autosave();
+    } } });
   }
 
   /** 출석 보상 (not in the original, rules/attendance.ts): message popup 0x18 with the day's prizes; a prize that does
@@ -412,7 +422,7 @@ export class FieldScene implements Scene {
     }
     const streak = this.story.counters.attendStreak ?? 1;
     const body = `출석 ${r.day}일째 보상${streak > 1 ? ` (${streak}일 연속)` : ''}|@${r.gold} 골드|@${names.join('|@')}`;
-    this.popup = { p: new Popup(this.ctx, 0x18, 0, () => body) };
+    this.ask(new Popup(this.ctx, 0x18, 0, () => body));
     this.quests.onItems();
     this.autosave();
   }
@@ -424,7 +434,7 @@ export class FieldScene implements Scene {
     void this.ctx.ui13.preload(['c72', 'shadow']);
     const p = new Popup(this.ctx, 0x54);
     p.content = () => fortuneAskView(this.db.a.text, this.fortuneArt());
-    this.popup = { p, onYes: () => this.runFortune(), onCancel: () => this.autosave() };
+    this.ask(p, { closedby: 'cancel', on: { yes: () => this.runFortune(), cancel: () => this.autosave() } });
   }
 
   /** the portrait cmf once loaded; its frame counter advances once per popup draw (one tick), frame % 6 */
@@ -437,7 +447,7 @@ export class FieldScene implements Scene {
   /** a fortune prize that did not fit (the original loses it): kept until the bag has room, then given */
   private fortuneHoldTick(): void {
     const h = this.story.fortuneHold;
-    if (!h || this.popup || this.events.active || this.talk) return;
+    if (!h || this.overlays.size || this.events.active || this.talk) return;
     if (!this.inv.gain(h.type, h.sub, 0, h.count, this.rng)) return;
     this.story.fortuneHold = undefined;
     this.hud.message(this.db.a.text[0x1b5f] ?? '');
@@ -466,7 +476,7 @@ export class FieldScene implements Scene {
     const p = new Popup(this.ctx, 0x55);
     p.content = () => fortuneResultView(t, ok ? res : null, item, this.fortuneArt(), held);
     p.hideBody = true;
-    this.popup = { p };
+    this.ask(p);
     this.autosave();
   }
 
@@ -935,13 +945,13 @@ export class FieldScene implements Scene {
   /** popup 0x60 "휴식을 취하시겠습니까?" (+ "50골드가 소비됩니다." at the inn), FUN_00053510 case 0x39 */
   private innPopup(free: boolean): void {
     const cost = free ? '' : (this.db.a.text[0x4d3] ?? '').replace('%d', '50');
-    this.popup = { p: new Popup(this.ctx, 0x60, 0, (t) => t.replace('%s', cost)), onYes: () => {
+    this.ask(new Popup(this.ctx, 0x60, 0, (t) => t.replace('%s', cost)), { on: { yes: () => {
       if (!free) { if (this.inv.gold < 50) { this.hud.message(this.db.a.text[0x1af8] ?? ''); return; } this.inv.gold -= 50; }
       this.vitals.hp = this.stats.maxHp; this.vitals.mp = this.stats.maxMp;           // FUN_0001ead0
       this.achieve({ k: 'inn' });
       this.hud.message(this.db.a.text[0x1a62] ?? '');
       this.flash = 0;
-    } };
+    } } });
   }
 
   /** free rest points in the heroes' homes (d+0x22146 rows 1..3: maps 18 / 54 / 94) */
@@ -1057,7 +1067,7 @@ export class FieldScene implements Scene {
     if (r.map === this.field.mapId && (r.flag === -1 || this.story.isDone(r.flag))
       && p.x >= r.x0 && p.x <= r.x0 + 50 && p.y >= r.y0 && p.y <= r.y0 + 50) {
       if (this.story.stones.has(row)) {
-        this.warpList = { rows: Array.from({ length: 11 }, (_, i) => i), cur: row };   // state 0x17: all 11 rows
+        this.openWarpList(row);
       } else {
         this.story.stones.add(row); this.story.stones.add(3);           // row 3 (초원마을) is always registered too
         this.hud.message('공간이동석이 등록되었습니다.');
@@ -1065,7 +1075,7 @@ export class FieldScene implements Scene {
       return true;
     }
     if (this.field.mapId === 152 && this.story.isDone(54) && this.story.isDone(0x35) && Math.abs(p.x - 256) <= 35 && Math.abs(p.y - 352) <= 35) {
-      this.popup = { p: new Popup(this.ctx, 0x50), onYes: () => { this.pendingWarp = { map: 179, x: 784, y: 160 }; } };
+      this.ask(new Popup(this.ctx, 0x50), { on: { yes: () => { this.pendingWarp = { map: 179, x: 784, y: 160 }; } } });
       return true;
     }
     return false;
@@ -1076,29 +1086,36 @@ export class FieldScene implements Scene {
     return this.db.a.text[row < 4 ? 0x1d6 + row : row === 4 ? 0x1db : 0x1d8 + row] ?? '';
   }
 
+  /** state 0x17: the move list over all 11 rows, the cursor on this stone's */
+  private openWarpList(row: number): void {
+    const w = { rows: Array.from({ length: 11 }, (_, i) => i), cur: row };
+    const o: Overlay = { handle: (presses) => this.warpKeys(o, w, presses), draw: () => this.drawWarpList(w) };
+    this.overlays.open(o, { kind: 'warps' });
+  }
+
   /** move list keys (FUN_00043f3c): up / down, '5' asks with popup 0x19 for a registered row (0x1A otherwise), CLR closes */
-  private warpKeys(presses: number[]): void {
-    const w = this.warpList!;
+  private warpKeys(o: Overlay, w: WarpList, presses: number[]): Role | null {
     for (const k of presses) {
       if (k === AVK.UP) { if (w.cur > 0) w.cur--; }
       else if (k === AVK.DOWN) { if (w.cur < 10) w.cur++; }
-      else if (k === AVK.CLR) { this.warpList = null; return; }
+      else if (k === AVK.CLR) return 'cancel';
       else if (k === AVK.OK) {
         const row = w.rows[w.cur];
-        if (!this.story.stones.has(row)) { this.popup = { p: new Popup(this.ctx, 0x1a) }; return; }
-        this.popup = { p: new Popup(this.ctx, 0x19, 0, (t) => t.replace('%s', this.stoneName(row))), onYes: () => {
+        if (!this.story.stones.has(row)) { this.ask(new Popup(this.ctx, 0x1a)); return null; }
+        this.ask(new Popup(this.ctx, 0x19, 0, (t) => t.replace('%s', this.stoneName(row))), { on: { yes: () => {
           const r = this.stone(row);                                   // FUN_000619a0
-          this.warpList = null;
+          this.overlays.close(o, 'yes');
           if (r.map !== this.field.mapId) this.pendingWarp = { map: r.map, x: r.wx, y: r.wy };
-        } };
-        return;
+        } } });
+        return null;
       }
     }
+    return null;
   }
 
   /** FUN_0002a908: 11 rows, registered ones white (the cursor row yellow), the rest grey */
-  private drawWarpList(): void {
-    const w = this.warpList!, u = this.ctx.ui13;
+  private drawWarpList(w: WarpList): void {
+    const u = this.ctx.ui13;
     u.begin();
     u.pushCenter220();
     u.view('warps', 20, 8, 180, 204, win('.v-col.v-fill.v-center', { style: 'gap:2px;padding:6px 10px' },
@@ -1189,14 +1206,14 @@ export class FieldScene implements Scene {
     const qx = p.x + off[0], qy = p.y + off[1];
     const g = this.gimmicks.find((c) => c.kind === 6 && !c.gone && !c.timer && qx >= c.x && qx <= c.x + 28 && qy >= c.y && qy <= c.y + 28);
     if (!g || this.pendingChest) return false;
-    this.popup = { p: new Popup(this.ctx, 0x5f), onYes: () => {
+    this.ask(new Popup(this.ctx, 0x5f), { on: { yes: () => {
       const need = g.b3 === 0 ? 0 : ((g.b3 - 1) % 3) + 1;
       if (need && !this.story.collect.has(need)) {
         this.hud.message((this.db.a.text[0x3cd] ?? '%s').replace('%s', this.db.a.text[0xa46 + need] ?? ''));
         return;
       }
       this.pendingChest = g;
-    } };
+    } } });
     return true;
   }
 
@@ -1305,7 +1322,7 @@ export class FieldScene implements Scene {
             if (!path) { this.gardenFlag = 0; p.x = 160; p.y = 400; return; }
             p.startAutoWalk(path, () => { this.gardenFlag = 0; });
           };
-          this.popup = { p: new Popup(this.ctx, 0x5e), onYes: () => this.enterGarden(), onNo: no };
+          this.ask(new Popup(this.ctx, 0x5e), { on: { yes: () => this.enterGarden(), no } });
           return;
         }
       }
@@ -1378,16 +1395,16 @@ export class FieldScene implements Scene {
   /** boss down -> 200 frames -> result popup 100; its confirm (or leaving from the game over) ends the run */
   private dimTick(): void {
     const run = this.dim;
-    if (!run || !run.clearT || this.popup) return;
+    if (!run || !run.clearT || this.overlays.size) return;
     if (--run.clearT > 0) return;
     run.cleared = true;
-    const result = () => { this.popup = { p: this.dimResult(), onYes: () => this.leaveDimension(), onNo: () => this.leaveDimension() }; };
+    const result = () => this.ask(this.dimResult(), { on: { close: () => this.leaveDimension() } });
     // 심연 (not in the original, 편의 설정): go on below the boss with stronger floors, or leave with the result as before
     if (!this.ctx.options.abyss) { recordAbyss(run.d, run.depth ?? 0); result(); return; }
     const deeper = (run.depth ?? 0) + 1, rule = ABYSS_RULES[abyssRule()];
     recordAbyss(run.d, run.depth ?? 0);
     const body = `심연 ${deeper}단계로 내려가시겠습니까?|@몬스터 HP·공격력 +${(run.d === 0 ? 25 : 30) * deeper}%, 경험치 +${10 * deeper}%|@이번 주 규칙: ${rule.name} (${rule.desc})|@아니오를 고르면 결과를 받고 나갑니다.`;
-    this.popup = { p: new Popup(this.ctx, 0x0e, 0, () => body), onYes: () => this.descend(), onNo: result };
+    this.ask(new Popup(this.ctx, 0x0e, 0, () => body), { on: { yes: () => this.descend(), no: result } });
   }
 
   /** 심연 n: the same dungeon from floor 1, every floor generated again from the stronger header */
@@ -1765,9 +1782,9 @@ export class FieldScene implements Scene {
     }
     const box = boxEquipment(this.db, this.inv, it.sub, m.level, m.cls, this.rng);   // equipment boxes and packages (§3)
     if (box !== null) {
-      if (box === 'full') { this.popup = { p: new Popup(this.ctx, 0x78) }; return false; }
-      if (box === 'slots') { this.hud.message(this.db.a.text[0x1ac1] ?? ''); this.popup = { p: new Popup(this.ctx, 0x52) }; return false; }
-      if (box === 'gold') { this.hud.message(this.db.a.text[0x1abc] ?? ''); this.popup = { p: new Popup(this.ctx, 0x5a) }; return false; }
+      if (box === 'full') { this.ask(new Popup(this.ctx, 0x78)); return false; }
+      if (box === 'slots') { this.hud.message(this.db.a.text[0x1ac1] ?? ''); this.ask(new Popup(this.ctx, 0x52)); return false; }
+      if (box === 'gold') { this.hud.message(this.db.a.text[0x1abc] ?? ''); this.ask(new Popup(this.ctx, 0x5a)); return false; }
       this.consume(idx); this.autosave(); return true;
     }
     switch (it.sub) {
@@ -2078,13 +2095,7 @@ export class FieldScene implements Scene {
     this.tick++;
     if (this.busy || this.dead) return;
     this.field.animateObjects();                                      // FUN_00034e24 -> FUN_00063640
-    if (this.popup) {
-      const r = this.popup.p.handle(presses);
-      if (this.popup.onCancel && presses.includes(AVK.CLR)) { const c = this.popup.onCancel; this.popup = null; c(); return; }
-      if (r) { const { onYes, onNo } = this.popup; this.popup = null; if (r === 'yes' || r === 'ok') onYes?.(); else onNo?.(); }
-      return;
-    }
-    if (this.warpList) { this.warpKeys(presses); return; }
+    if (this.overlays.update(presses)) return;
     if (this.events.active) {
       this.events.update(presses);
       if (this.events.active) {
@@ -2125,9 +2136,7 @@ export class FieldScene implements Scene {
     if (this.warpT >= 0 && this.warpWarp()) return;
     if (this.arriveT >= 0 && ++this.arriveT >= 18) this.arriveT = -1;
     this.dimTick();
-    if (!this.sandbox) this.achTick();
-    if (this.fortunePending && !this.popup && !this.events.active && !this.talk) { this.fortunePending = false; this.openFortune(); }
-    if (this.attendPending && !this.fortunePending && !this.popup && !this.events.active && !this.talk) { this.attendPending = false; this.openAttendance(); }
+    if (!this.sandbox) { this.achTick(); this.overlays.drain(); }   // queued challenge / fortune / attendance popups
     this.fortuneHoldTick();
     if (this.bannerT >= 0 && ++this.bannerT >= 32) this.bannerT = -1;
     this.checkRestPoint();
@@ -2149,7 +2158,7 @@ export class FieldScene implements Scene {
       else { this.player.startAttack(); this.picking = false; }
     }
     const QUICK: number[] = [AVK.K1, AVK.K3, AVK.K7, AVK.K9, AVK.STAR, AVK.POUND];
-    for (const k of presses) { const i = QUICK.indexOf(k); if (i >= 0) this.useQuick(i); }
+    for (const k of presses) { if (this.overlays.size) break; const i = QUICK.indexOf(k); if (i >= 0) this.useQuick(i); }
     this.updateCamera();
     const blockers: Blockers = {
       solid: [...this.actors.filter((a) => a.visible).map((a) => a.rect()), ...this.gimmicks.filter((g) => g.solid).map((g) => g.body())],
@@ -2427,10 +2436,9 @@ export class FieldScene implements Scene {
   }
 
   private drawPopup(): void {
-    if (this.warpList) this.drawWarpList();
-    if (!this.popup) return;
+    if (!this.overlays.size) return;
     this.ctx.ui13.begin();
-    this.popup.p.draw();
+    this.overlays.draw();
     this.ctx.ui13.end();
   }
 

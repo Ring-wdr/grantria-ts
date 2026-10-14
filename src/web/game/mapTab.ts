@@ -4,7 +4,8 @@
 // which matches the original draw calls in all 296 emulated cases.
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { Popup } from './popup';
+import { Popup, openPopup } from './popup';
+import { OverlayStack } from './overlays';
 import type { GameContext } from './scene';
 import { tri, type Ui } from '../render/ui';
 import { gt, h, sprite, TAB_BODY, type VChild, type VNode } from '../render/view';
@@ -20,7 +21,8 @@ interface FloorView { f: number; grid: number[]; cell: number; sel: number; }
 export class MapTab {
   private cur: number;
   private t = 0;
-  private popup: Popup | null = null;
+  /** popups over the tab */
+  private readonly overlays = new OverlayStack();
   /** depth1 = 1: the floor view of region cur */
   private floor: FloorView | null = null;
 
@@ -28,7 +30,7 @@ export class MapTab {
     this.cur = Math.min(13, fs.field.map.header.zone);
   }
 
-  get busy(): boolean { return !!this.popup; }
+  get busy(): boolean { return this.overlays.size > 0; }
 
   private row(r: number, i: number): number { return this.ctx.assets.dd(0x4016d2, r * 6 + i); }
   private d8(o: number): number { return this.ctx.assets.d8(o); }
@@ -78,13 +80,14 @@ export class MapTab {
   update(presses: number[]): boolean {
     this.t++;
     if (this.fs.gardenMode === 2) return presses.every((k) => k !== AVK.UP && k !== AVK.DOWN && k !== AVK.LEFT && k !== AVK.RIGHT && k !== AVK.OK) ? false : true;   // map keys ignored
-    if (this.popup) { if (this.popup.handle(presses)) this.popup = null; return true; }
+    if (this.overlays.update(presses)) return true;
     if (this.floor) { for (const k of presses) this.floorKey(k); return true; }
     for (const k of presses) {
+      if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
       const i = k === AVK.UP ? 2 : k === AVK.DOWN ? 3 : k === AVK.LEFT ? 4 : k === AVK.RIGHT ? 5 : -1;
       if (i >= 0) { const n = this.row(this.cur, i); if (n !== 0x0f && n < 14) { this.cur = n; this.ctx.audio.playSfx(0x2f); } continue; }
       if (k === AVK.OK) {
-        if (!this.fs.story.zones.has(this.cur)) { this.popup = new Popup(this.ctx, 0x5b); continue; }
+        if (!this.fs.story.zones.has(this.cur)) { openPopup(this.overlays, new Popup(this.ctx, 0x5b)); continue; }
         const mine = this.cur === this.here;
         if (mine) this.ctx.audio.playSfx(0x2f);
         this.floor = this.open(mine ? this.curFloor : this.firstFloor(this.cur), 0);
@@ -239,7 +242,7 @@ export class MapTab {
   }
 
   drawOverlay(): void { /* no absolute-coordinate overlays */ }
-  drawPopups(): void { this.popup?.draw(); }
+  drawPopups(): void { this.overlays.draw(); }
 }
 
 const rect = (x: number, y: number, w: number, hh: number) => `left:${x}px;top:${y}px;width:${w}px;height:${hh}px;`;

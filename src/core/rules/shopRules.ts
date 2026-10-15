@@ -200,18 +200,24 @@ export function enhEffect(it: Item, d = 0): { value: number; opt: number } | nul
  *   raised it, else 0x1AFE / 0x1B00; accessories "모든저항력" 0x1B01 / 0x1B02 without an enhancement part.
  * - enh: text 0x1C65 "|e+%d강:%s" around the option text of enhEffect.
  */
+/** main stat of gear (FUN_0004eea0 / FUN_00039820): base plus the options that raise it (weapon 0x1b / 0, armour
+ *  0x21 / 2: base·v/100; accessory 0x24: v), and the enhancement bonus FUN_00037238 (none on accessories) */
+export function mainStat(it: Item): { value: number; bonus: number } {
+  const ids = it.type < 3 ? [0x1b, 0] : it.type < 15 ? [0x21, 2] : [0x24];
+  let value = it.base;
+  for (const [id, val] of it.options) {
+    if (id === 0xff) break;
+    if (ids.includes(id)) value += it.type === 15 ? val : Math.trunc((val * it.base) / 100);
+  }
+  return { value, bonus: it.type < 15 ? enhBonus(it, 0) : 0 };
+}
+
 export function detailLines(a: Assets, it: Item): { stat: string | null; enh: string | null } {
   const t = a.text;
   if (it.type >= 0x10) return { stat: null, enh: null };
-  const ids = it.type < 3 ? [0x1b, 0] : it.type < 15 ? [0x21, 2] : [0x24];
-  let v = it.base;
-  for (const [id, val] of it.options) {
-    if (id === 0xff) break;
-    if (ids.includes(id)) v += it.type === 15 ? val : Math.trunc((val * it.base) / 100);
-  }
-  const up = v > it.base;
+  const { value: v, bonus } = mainStat(it), up = v > it.base;
   const stat = it.type === 15 ? cfmt(t[up ? 0x1b01 : 0x1b02] ?? '', v)
-    : cfmt(t[it.type < 3 ? (up ? 0x1afd : 0x1afe) : (up ? 0x1aff : 0x1b00)] ?? '', v, enhBonus(it, 0));
+    : cfmt(t[it.type < 3 ? (up ? 0x1afd : 0x1afe) : (up ? 0x1aff : 0x1b00)] ?? '', v, bonus);
   const fx = enhEffect(it);
   const enh = fx ? cfmt(t[0x1c65] ?? '', it.enh, cfmt(cfmt(t[0x1acf] ?? '', t[fx.opt + 0x7b4] ?? ''), fx.value)) : null;
   return { stat, enh };

@@ -28,6 +28,15 @@ test('gear comparison: main stat, summed options, sockets', () => {
   assert.deepEqual(d.socketsOld, [1, 3]);
   assert.equal(compareGear(it, null).base, 42);
   assert.deepEqual([equipSlot(gear({ type: 0 })), equipSlot(gear({ type: 7 })), equipSlot(gear({ type: 15 }))], [0, 2, 5]);
+  assert.equal(d.enh, null);
+});
+
+test('gear comparison counts the % option and the enhancement bonus, and the armour enhancement effect', () => {
+  // weapon: 100 +10% option +3 (bonus 12) = 122 against a plain 110 -> +12
+  assert.equal(compareGear(gear({ base: 100, enh: 3, options: [[0x1b, 10]] }), gear({ base: 110 })).base, 12);
+  // armour type 3: +5 (crit 1) against +10 (crit round(1000 / 580) + 1 = 3) -> crit -2
+  assert.deepEqual(compareGear(gear({ type: 3, base: 20, enh: 5 }), gear({ type: 3, base: 20, enh: 10 })).enh, [0x1a, -2]);
+  assert.deepEqual(compareGear(gear({ type: 3, base: 20, enh: 5 }), null).enh, [0x1a, 1]);
 });
 
 test('bulk sell takes plain gear up to the grade only', async () => {

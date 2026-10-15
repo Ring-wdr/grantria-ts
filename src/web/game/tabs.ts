@@ -89,6 +89,7 @@ export function compareView(fs: FieldScene, it: Item): VChild {
     h('div.v-rule'),
     gt(worn ? `착용 중: ${worn.name}` : '착용 중인 장비 없음', { pen: 0xc618, cls: 'tb-ellipsis' }),
     gt(`${t[label] ?? ''} ${d.base === 0 ? '±0' : `${sign(d.base)} ${d.base > 0 ? '▲' : '▼'}`}`, { pen: d.base === 0 ? 0xc618 : pen(d.base) }),
+    d.enh && d.enh[1] !== 0 && gt(`강화 ${optionDiffText(t, d.enh[0], d.enh[1])} ${d.enh[1] > 0 ? '▲' : '▼'}`, { pen: pen(d.enh[1]) }),
     d.options.map(([id, v]) => gt(`${optionDiffText(t, id, v)} ${v > 0 ? '▲' : '▼'}`, { pen: pen(v) })),
     (d.gems[1] || d.socketsOld[1]) ? gt(`소켓 ${d.gems[0]}/${d.gems[1]} (착용 중 ${d.socketsOld[0]}/${d.socketsOld[1]})`, { pen: 0xc618 }) : null,
   ];

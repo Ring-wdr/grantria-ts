@@ -18,7 +18,8 @@ import { ShopScreen } from './shop';
 import { combineNeeds, countOf, consume, detailLines } from '../../core/rules/shopRules';
 import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
-import { button, cSprite, gt, h, padBadge, sprite, type KeyAct, type ScrollRef, type VChild, type VNode } from '../render/view';
+import { button, cmfFrame, cSprite, gt, h, padBadge, sprite, TAB_BODY, type KeyAct, type ScrollRef, type VChild, type VNode } from '../render/view';
+import { clipImage } from '../render/sprites';
 import '../styles/tabs.css';
 import { compareGear, equipSlot } from '../../core/rules/compare';
 import '../styles/convenience.css';
@@ -641,12 +642,17 @@ export class EquipTab {
     if (this.detail) { drawItemDetail(u, fs, this.detail); u.hit(-200, -200, 700, 700, () => [AVK.OK]); return; }
     if (this.pick) { this.drawPick(u); return; }
     u.mount('tab', 'equip', this.mainView());
-    // the animated character preview stays a cmf frame (with its multiply shadow), between the slot columns
-    u.alpha = 20;
-    u.image('shadow', 120, 0, 36, 20, 92, 96, 14 << 8);           // multiply
-    u.alpha = 32;
-    const f = (Math.trunc(this.t / 2) % 6) + 0;                    // idle frames 0..5 (facing down)
-    u.frame(`cmf_c${fs.model.cls}`, this.playerCmf, f, 110, 102, undefined, undefined, fs.player.equip);   // worn look (ui-tabs.md 캐릭터)
+  }
+
+  /** the animated character preview between the slot columns (multiply shadow, idle frames 0..5 facing down, worn
+   *  look: ui-tabs.md 캐릭터). In the view, under the action menu: drawn on the canvas it covered the menu. Window
+   *  (110, 102) / shadow (92, 96) less the tab body origin. */
+  private figureView(): VNode {
+    const fs = this.fs, a = this.ctx.assets, name = `cmf_c${fs.model.cls}`, cmf = this.playerCmf, look = fs.player.equip;
+    const x = 110 - TAB_BODY.x, y = 102 - TAB_BODY.y;
+    return h('div.tb-figure', null,
+      sprite('shadow', 120, 0, 36, 20, { style: `position:absolute;left:${92 - TAB_BODY.x}px;top:${96 - TAB_BODY.y}px;mix-blend-mode:multiply;opacity:${20 / 32}` }),
+      cmfFrame(cmf, Math.trunc(this.t / 2) % 6, x, y, (c) => clipImage(a, name, cmf, c, 0, look)));
   }
 
   private mainView(): VNode {
@@ -660,6 +666,7 @@ export class EquipTab {
     const labels = [t[0x15], t[0x16], t[0x17], t[0x18], t[0x4e] ?? 'DMG', t[0x4f] ?? 'DEF'];
     const cur = inv.equip[this.slot];
     return h('div.v-col.v-fill.v-tab.tb-equip', null,
+      this.figureView(),
       this.action?.backdrop(),
       h('div.tb-slots', null, [0, 1, 2].map((r) => [slot(2 * r), h('span'), slot(2 * r + 1)])),
       h('div.v-box.v-heading.tb-name', null, cur && gt(cur.name, { cls: 'tb-ellipsis' })),

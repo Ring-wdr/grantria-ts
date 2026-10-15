@@ -268,7 +268,12 @@ export class FieldScene implements Scene {
     this.buffs = Buffs.from(save.buffs);
     this.dayCounter = save.day ?? 0;
     this.returnZone = save.returnZone ?? 0;
-    this.model = { cls: save.cls, level: save.level, stats: [...save.stats], equip: this.inv.equip, skills: this.skills, buffs: this.buffs.effects(ctx.assets) };
+    this.story = Story.from(save.story, save.cls);
+    // traits and titles too, as recompute() does: without them the loaded stats (and the HP / MP clamp) miss both
+    this.model = {
+      cls: save.cls, level: save.level, stats: [...save.stats], equip: this.inv.equip, skills: this.skills, buffs: this.buffs.effects(ctx.assets),
+      traits: traitStatBonus(), titles: titleBonus(db.a, this.story.titles, this.story.title),
+    };
     this.stats = derive(this.model, this.tables);
     this.vitals = {
       hp: save.hp < 0 ? this.stats.maxHp : Math.min(save.hp, this.stats.maxHp),
@@ -288,7 +293,6 @@ export class FieldScene implements Scene {
     this.player.mult = ctx.assets.tables.actionMult[save.cls];
     this.installStatics();
     this.sdb = new StoryDb(ctx.assets);
-    this.story = Story.from(save.story, save.cls);
     this.field.storyDone = (e) => this.story.isDone(e);
     this.quests = this.makeQuests();
     this.events = new EventRunner(this);

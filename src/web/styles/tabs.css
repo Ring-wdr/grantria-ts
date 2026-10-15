@@ -107,7 +107,8 @@
 .tb-pulse::after { animation: tb-pulse calc(var(--tick) * 32) linear infinite; }
 
 /* equipment: slot columns either side of the character preview, item name, stats */
-.tb-equip { gap: 4px; }
+.tb-equip { gap: 4px; position: relative; }
+.tb-figure { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
 .tb-slots {
   flex: none;
   display: grid;

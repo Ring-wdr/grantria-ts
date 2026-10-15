@@ -147,6 +147,20 @@ export class FieldScene implements Scene {
   shopRequest: number | null = null;
   /** set by the play scene: save to the current slot (shop actions save automatically) */
   autosave: () => void = () => {};
+  /** the frame-end save request DAT_0040f754 (FUN_00020960 -> FUN_0001eba8, misc-systems.md §7.3). Refused with
+   *  "저장이 불가능한 지역입니다." (0x1A61) on special maps unless 3, and where saving is not allowed if 1; 1 logs 0x17
+   *  "게임 데이터 저장됨" (text 0x3B3 + 0x17); 3 saves anywhere, silently (the garden / dimension partial save of toSave) */
+  requestSave(kind: 1 | 2 | 3): void { this.saveReq = kind; }
+  private saveReq: 0 | 1 | 2 | 3 = 0;
+  /** end of the play scene's frame (FUN_00020960): run the pending request, menus and popups open or not */
+  flushSave(): void {
+    const kind = this.saveReq, t = this.db.a.text;
+    if (!kind) return;
+    this.saveReq = 0;
+    if ((kind !== 3 && this.mapType >= 2) || (kind === 1 && !this.canSave)) { this.hud.message(t[0x1a61] ?? ''); return; }
+    this.autosave();
+    if (kind === 1) this.hud.message(t[0x3ca] ?? '');
+  }
   private pendingEvent: { e: number; t: number } | null = null;
   /** boss room scratch a1c..a26, boss projectiles, box override table */
   private bossG = new BossGlobals();
@@ -204,7 +218,10 @@ export class FieldScene implements Scene {
     this.inv.onGot = (it) => { if (it.type !== 0x1a) recordItem(it.type, it.sub, it.grade); };   // 아이템 도감
     for (const sub of takeUnsavedUses(slot)) {
       const i = this.inv.items.findIndex((it) => it.type === 0x1b && it.sub === sub);
-      if (i >= 0) { const it = this.inv.items[i]; if (it.count > 1) it.count--; else this.inv.remove(i); }
+      if (i < 0) continue;
+      const it = this.inv.items[i];
+      if (it.count > 1) it.count--; else this.inv.remove(i);
+      this.requestSave(2);                                           // 4590: saved at once, so quitting cannot bring it back
     }
   }
   /** a counted consumable (0x1b sub 2, 3, 0x15..0x17) was used */
@@ -1356,6 +1373,7 @@ export class FieldScene implements Scene {
     for (let i = 0, n = killMul(); i < n; i++) {                       // 개발자 모드: ×N = N kills (grantKill)
       run.kills++;
       this.achieve({ k: 'kill', type: m.type, garden: false });
+      if (m.type === 0x2a) this.requestSave(3);                      // 베르무트 (FUN_0006d2f8 101691)
       let e = killExp(this.rng, m.level, this.model.level, m.typeRec[4], 0, false);
       if (this.mapType >= 2) e *= 10;
       e = rdiv(e * (100 + (this.stats.D[19] ?? 0) / 10), 100);
@@ -1517,6 +1535,7 @@ export class FieldScene implements Scene {
     this.killedHere = true;
     for (let i = 0; i < kills; i++) {
       this.achieve({ k: 'kill', type: m.type, garden: this.gardenMode === 1 });
+      if (m.type === 0x2a) this.requestSave(3);                      // 베르무트: +0x30fe, then a save (FUN_0006e120 117434)
       if (this.gardenMode !== 2 && !this.sandbox) {
         this.quests.onKill(m.type);
         this.story.recordKill(m.type, this.field.map.header.zone);
@@ -1797,7 +1816,9 @@ export class FieldScene implements Scene {
       this.buffs.start(it.sub - 4); this.recompute();
       this.hud.message((this.db.a.text[0x1ac0] ?? '%s').replace('%s', it.name));
       this.inv.setGroupCooldown(it.type, it.sub, 0);                     // each its own 900 frames
-      return this.consume(idx);
+      if (!this.consume(idx)) return false;
+      this.requestSave(3);                                               // FUN_00040498 48257
+      return true;
     }
     const box = boxEquipment(this.db, this.inv, it.sub, m.level, m.cls, this.rng);   // equipment boxes and packages (§3)
     if (box !== null) {
@@ -1843,7 +1864,11 @@ export class FieldScene implements Scene {
       }
       default: this.hud.message(this.db.a.text[0x1ac2] ?? ''); return false;
     }
-    return this.consume(idx);
+    if (!this.consume(idx)) return false;
+    // FUN_00040498 48353: every use but the counted ones (2, 0x15..0x17; a reload takes those back) asks for a save,
+    // the EXP box with the "saved" log (48229)
+    if (it.sub !== 2) this.requestSave(it.sub === 0x1f ? 1 : 3);
+    return true;
   }
 
   /** MP cost of skill action a after trait track 4 절약 (FUN_000452a0, FUN_00029108) */

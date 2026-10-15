@@ -524,6 +524,14 @@ export class PlayScene implements Scene {
   }
 
   update(presses: number[]): void {
+    this.step(presses);
+    if (!this.gone) this.field.flushSave();                         // FUN_00020960: a save requested this frame (not after a reload)
+  }
+
+  /** replaced by another scene (a reload, the title): its pending save request is dropped */
+  private gone = false;
+
+  private step(presses: number[]): void {
     // touch (UI mode): taps run the topmost area registered while drawing (menus / popups first, then the field UI)
     const f = this.field;
     const o = this.overlays;
@@ -706,7 +714,7 @@ export class PlayScene implements Scene {
     return `슬롯 ${this.slot + 1} · ${this.field.debugLine()}`;
   }
 
-  dispose(): void { if (!this.suspended) this.field.dispose(); }
+  dispose(): void { if (!this.suspended) { this.gone = true; this.field.dispose(); } }
 }
 
 class LoadingScene implements Scene {

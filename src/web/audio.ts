@@ -3,7 +3,8 @@
 // n >= 19 = SFX sN.ogg (48 -> s53) at gain 0.8 on a single stream (a new one stops the previous).
 // The music / effect volumes (0..10, not in the original) scale those gains; 10 keeps them.
 // Browsers start audio only after a user gesture (the context resumes on the first input); in the background
-// (platform lifecycle: hidden page, minimised window, app switched away) everything is muted.
+// (platform lifecycle: hidden page, minimised window, app switched away) and with the sound off the whole context
+// is suspended, so no output stream keeps the device awake.
 import { platform } from '../core/platform';
 
 export class GameAudio {
@@ -27,14 +28,16 @@ export class GameAudio {
     const create = () => {
       if (this.ctx) return;
       try {
-        this.ctx = new AudioContext();
+        // 'playback': larger output buffers than the default 'interactive', so the audio thread wakes far less
+        // often (Android's low-latency path keeps a core busy); a few tens of ms more delay suits BGM / SFX here
+        this.ctx = new AudioContext({ latencyHint: 'playback' });
         this.bgmGain = this.ctx.createGain();
         this.bgmGain.gain.value = this.bgmValue();
         this.bgmGain.connect(this.ctx.destination);
         this.sfxGain = this.ctx.createGain();
         this.sfxGain.gain.value = this.sfxValue();
         this.sfxGain.connect(this.ctx.destination);
-        if (this.paused) void this.ctx.suspend();
+        if (this.silent()) void this.ctx.suspend();
         if (this.wanted >= 0) { const n = this.wanted; this.bgm.n = -1; this.playBgm(n); }
       } catch { this.ctx = null; }
     };
@@ -43,7 +46,7 @@ export class GameAudio {
     create();
     const unlock = () => {
       create();
-      if (this.ctx?.state === 'suspended' && !this.paused) void this.ctx.resume();
+      if (this.ctx?.state === 'suspended' && !this.silent()) void this.ctx.resume();
     };
     addEventListener('keydown', unlock);
     addEventListener('pointerdown', unlock);
@@ -53,8 +56,20 @@ export class GameAudio {
   /** background: suspend the whole audio graph (BGM and SFX); foreground: resume it */
   setPaused(p: boolean): void {
     this.paused = p;
+    this.syncRunning();
+  }
+
+  /** nothing can be heard: in the background, or volume 0 / both volumes 0 (the BGM keeps its place) */
+  private silent(): boolean {
+    return this.paused || !this.enabled || (!this.bgmLevel && !this.sfxLevel);
+  }
+
+  /** run the audio graph only while it can be heard: a suspended context stops the output stream */
+  private syncRunning(): void {
     if (!this.ctx) return;
-    void (p ? this.ctx.suspend() : this.ctx.resume()).catch(() => {});
+    const silent = this.silent();
+    if (silent === (this.ctx.state === 'suspended')) return;
+    void (silent ? this.ctx.suspend() : this.ctx.resume()).catch(() => {});
   }
 
   private load(n: number): Promise<AudioBuffer | null> {
@@ -97,6 +112,7 @@ export class GameAudio {
     this.sfxLevel = sfx;
     if (this.bgmGain) this.bgmGain.gain.value = this.bgmValue();
     if (this.sfxGain) this.sfxGain.gain.value = this.sfxValue();
+    this.syncRunning();
   }
 
   stopBgm(): void {

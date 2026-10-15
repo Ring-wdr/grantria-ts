@@ -9,7 +9,6 @@
       body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
       canvas { image-rendering: pixelated; display: block; }
       #frame { position: relative; overflow: hidden; }
-      #overlay { pointer-events: none; }
       #hud { display: none; }                 /* the dev debug line stays in game.html only */
     </style>
   </head>
@@ -18,7 +17,6 @@
     <div id="frame">
       <div id="stage">
         <canvas id="screen" width="480" height="320"></canvas>
-        <canvas id="overlay" width="480" height="320"></canvas>
       </div>
     </div>
     <script type="module" src="/src/tauri/main.ts"></script>

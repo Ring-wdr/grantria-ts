@@ -27,11 +27,10 @@ let tickMs = 50;
 loadBindings();                                                  // key / pad bindings from the platform store
 const stage = document.getElementById('stage')!;
 const canvas = document.getElementById('screen') as HTMLCanvasElement;
-const overlay = document.getElementById('overlay') as HTMLCanvasElement;
 const debug = document.getElementById('hud')!;
-overlay.width = VIEW_W;
-overlay.height = VIEW_H;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
+// the canvas is never read back (the compositor reads its own targets) and nothing is depth-tested: no preserved
+// buffer (the browser swaps instead of copying each frame), no depth or stencil buffer
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, depth: false, stencil: false, powerPreference: 'low-power' });
 renderer.setPixelRatio(1);
 renderer.setSize(VIEW_W, VIEW_H, false);
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
@@ -59,7 +58,7 @@ await Promise.all([ui.init([...MENU_IMAGES, ...spriteImages]), ui13.init([...MEN
 let scene: Scene;
 for (const l of [hud, ui, ui13]) l.onKeys = (keys, pointerType) => ctx.input.inject(keys, pointerType);
 const ctx: GameContext = {
-  assets, renderer, overlay, compositor, ui, ui13, hud, cmfs, audio: new GameAudio(),
+  assets, renderer, compositor, ui, ui13, hud, cmfs, audio: new GameAudio(),
   options: loadOptions(),
   applyOptions() {
     this.audio.setEnabled(this.options.volume !== 0, this.options.bgm, this.options.sfx);
@@ -96,7 +95,7 @@ function drawScene(): void {
   beginDomFrame();
   scene.draw();
   endDomFrame();
-  debug.textContent = scene.debugLine?.() ?? '';
+  if (import.meta.env.DEV) debug.textContent = scene.debugLine?.() ?? '';   // dev only: a string and a DOM write per tick
 }
 
 let acc = 0, last = performance.now();

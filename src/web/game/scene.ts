@@ -13,8 +13,6 @@ export interface GameContext {
   renderer: THREE.WebGLRenderer;
   compositor: Compositor;
   input: Input;
-  /** 2D canvas over the WebGL screen (provisional text until the bitmap font is ported) */
-  overlay: HTMLCanvasElement;
   /** screen-space UI layer and the 1.3x overlay layer L1 (popups), HTML/CSS */
   ui: DomUi;
   ui13: DomUi;
@@ -33,7 +31,7 @@ export interface GameContext {
 export interface Scene {
   /** one 50 ms tick with the virtual keys pressed since the previous tick */
   update(presses: number[]): void;
-  /** render into the compositor target and the overlay */
+  /** render into the compositor target and the DOM UI layers */
   draw(): void;
   debugLine?(): string;
   /** fullscreen: the screen UI reaches into the side margins, so a fill over the whole view covers them too

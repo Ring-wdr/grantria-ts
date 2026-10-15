@@ -125,7 +125,6 @@ export function render(ctx: GameContext, drawUi: () => void, drawZoom?: () => vo
     ctx.ui13.end();
   }
   ctx.compositor.show();
-  ctx.overlay.getContext('2d')!.clearRect(0, 0, W, H);
 }
 
 /** State 0x05: company logo on white, 21 frames (FUN_0002c4b4). */
@@ -654,7 +653,6 @@ export class PlayScene implements Scene {
   }
 
   draw(): void {
-    this.ctx.overlay.getContext('2d')!.clearRect(0, 0, W, H);
     const dead = this.field.dead;
     if (this.field.ending) {                                  // black screen with the popup
       this.ctx.ui.begin(); this.ctx.ui.fill(0, 0, W, H, 0); this.ctx.ui.end();

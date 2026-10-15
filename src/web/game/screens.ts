@@ -298,11 +298,14 @@ export class SlotScene implements Scene {
     const s = this.slots[i];
     if (!s) return;
     const fresh = Story.fresh(s.cls).toJSON();
-    const book = s.story?.book;
-    // not in the original: the added challenges and the attendance cycle stay with the slot (else they pay again)
-    const kept = Object.fromEntries(Object.entries(s.story?.counters ?? {}).filter(([k]) => k.startsWith('xch') || k.startsWith('attend')));
-    s.story = { ...fresh, book, gather: s.story?.gather, titles: s.story?.titles, title: s.story?.title,   // titles kept (hardmode.md §3.3)
-      counters: { ...(fresh.counters ?? {}), ...kept } };       // event bits, quests, visited maps, keys, chests reset; book / gather level kept
+    const old = s.story;
+    // achievement counters / title flags +0x2df4..+0x2ebb, challenges +0x2c64, 차원의 문 clears +0x3100 and the fortune
+    // day +0x3291 are not cleared (hardmode.md §3.2 / §3.3), so nothing already earned pops up or pays again;
+    // the web's quest tracking toggles (qhide*) go with the quests
+    const kept = Object.fromEntries(Object.entries(old?.counters ?? {}).filter(([k]) => !k.startsWith('qhide')));
+    s.story = { ...fresh, book: old?.book, gather: old?.gather, titles: old?.titles, title: old?.title,
+      counters: { ...(fresh.counters ?? {}), ...kept }, challenges: old?.challenges, dimClears: old?.dimClears,
+      fortuneDay: old?.fortuneDay, fortuneHold: old?.fortuneHold };   // event bits, quests, visited maps, keys, chests reset
     s.buffs = undefined; s.day = 0;                                    // the return zone +0x3104 is kept
     if (s.inv) { s.inv.items = s.inv.items.filter((it) => it.type !== 0x1a); s.inv.keys = []; }   // key store wiped (FUN_00036180)
     saveSlot(i, s);

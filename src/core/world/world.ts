@@ -16,12 +16,13 @@ export function bodyBox(cmf: Cmf, frame: number): [number, number, number, numbe
  * Quirks kept: a single-row box measures only up to the row's bottom edge, and a box whose
  * bottom lies exactly on a cell boundary stops before that row.
  */
-export function buildWalk(map: GameMap, objCmf: (id: number) => [Cmf, number]): Uint8Array {
+export function buildWalk(map: GameMap, objCmf: (id: number) => [Cmf, number], open: (o: MapObject) => boolean = () => false): Uint8Array {
   const W = map.header.width, H = map.header.height;
   const walk = new Uint8Array(W * H);
   map.walk.forEach((row, r) => row.forEach((v, c) => { walk[r * W + c] = v; }));
   const s8 = (v: number) => (v << 24) >> 24;
   for (const o of [...map.objBg, ...map.objMid, ...map.objTop, ...map.objLow]) {
+    if (open(o)) continue;
     const [cmf, f] = objCmf(o.obj);
     const [bx, by, bw, bh] = bodyBox(cmf, f).map(s8);
     if (bx + by + bw + bh <= 0) continue;

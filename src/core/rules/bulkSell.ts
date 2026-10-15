@@ -13,3 +13,11 @@ export function bulkSellPick(items: readonly (Item | null | undefined)[], maxGra
   });
   return out;
 }
+
+/** 조합서 일괄 버리기: recipes (0x19) up to a grade (0..3) */
+export const RECIPE_GRADE_MAX = 3;
+export function bulkRecipePick(items: readonly (Item | null | undefined)[], maxGrade: number): number[] {
+  const out: number[] = [];
+  items.forEach((it, i) => { if (it && it.type === 0x19 && it.grade <= maxGrade) out.push(i); });
+  return out;
+}

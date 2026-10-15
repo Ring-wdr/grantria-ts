@@ -208,16 +208,21 @@ export abstract class Ui {
     this.fill(x + 1, y + h - 1, w - 2, 1, c2);
   }
 
-  /** FUN_00024fdc: effect bank frame id at (x, y) (combat.md §3.9). Clips choose ec / c / oc / t. */
-  effect(id: number, x: number, y: number): void {
+  /** FUN_00024fdc: effect bank frame id at (x, y) (combat.md §3.9). Clips choose ec / c / oc / t. The draw flags are
+   *  word +6 | word +8 << 8, so the +8 word carries the blend mode and alpha (most ec parts: screen 4 or add 13, which
+   *  is what leaves their black out). spread (not in the original): parts left of x − 120 move left and parts right of
+   *  x + 120 move right by that many px, so the full-screen rim reaches the edges of the fullscreen margins. */
+  effect(id: number, x: number, y: number, spread = 0): void {
     const a = this.assets;
     const first = a.d16(0x20cd6 + id * 4), n = a.d16(0x20cd6 + id * 4 + 2);
     for (let i = first; i < first + n; i++) {
       const o = 0x1c1b8 + i * 10;
-      const clip = a.d8(o), sdx = (a.d16(o + 2) << 16) >> 16, sdy = (a.d16(o + 4) << 16) >> 16;
-      const flags = a.d8(o + 6) | (a.d8(o + 7) << 8);
+      const clip = a.d8(o), sdy = (a.d16(o + 4) << 16) >> 16;
+      let sdx = (a.d16(o + 2) << 16) >> 16;
+      const flags = a.d16(o + 6) | (a.d16(o + 8) << 8);
       const c = 0x24b96 + clip * 4;
       const img = clip <= 0x46 ? 'ec' : clip <= 0x68 ? 'c' : clip <= 0x6c ? 'oc' : 't';
+      if (spread) { const mid = sdx + (a.d8(c + 2) >> 1); if (mid < -120) sdx -= spread; else if (mid > 120) sdx += spread; }
       this.image(img, a.d8(c), a.d8(c + 1), a.d8(c + 2), a.d8(c + 3), x + sdx, y + sdy, flags);
     }
   }

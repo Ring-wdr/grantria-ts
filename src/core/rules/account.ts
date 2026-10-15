@@ -102,11 +102,13 @@ export function traitCommit(k: number): number | null {
   return s >= 20 ? [2, 0x1a, 0x37][g] : null;
 }
 
-/** 0x1b sub 6 / 7: spent points come back, levels and the bought counter clear (gd 0x35d..0x373 = 0) */
+/** 0x1b sub 6 / 7: spent points come back and the levels clear (gd 0x35d..0x370 = 0). The original also zeroed the
+ *  특성의 구슬 purchase counter gd[0x371] here (its words run to 0x373), but the bought points come back with the
+ *  reset, so each reset reopened 10 more purchases. The counter is a record of what the account bought: kept. */
 export function traitReset(): void {
   const a = account();
   a.traitPoints += a.traits.reduce((s, v) => s + v, 0);
-  a.traits.fill(0); a.traitBought = 0;
+  a.traits.fill(0);
   saveAccount();
 }
 

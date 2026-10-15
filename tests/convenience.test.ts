@@ -40,6 +40,24 @@ test('bulk sell takes plain gear up to the grade only', async () => {
   assert.deepEqual(bulkSellPick(items, 2), [0, 1, 5]);
 });
 
+test('recipe bulk discard takes recipes up to the grade only', async () => {
+  const { bulkRecipePick } = await import('../src/core/rules/bulkSell.ts');
+  const items = [gear({ type: 0x19, grade: 0 }), gear({ grade: 0 }), gear({ type: 0x19, grade: 2 }), null, gear({ type: 0x1b, grade: 0 }), gear({ type: 0x19, grade: 3 })];
+  assert.deepEqual(bulkRecipePick(items, 0), [0]);
+  assert.deepEqual(bulkRecipePick(items, 3), [0, 2, 5]);
+});
+
+test('특성의 구슬 purchase count survives a trait reset and a deleted slot', async () => {
+  const acc = await import('../src/core/rules/account.ts');
+  const sv = await import('../src/core/save/save.ts');
+  const a = acc.account();
+  a.traitBought = 10; a.traitPoints = 2; a.traits = [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5]; acc.saveAccount();
+  acc.traitReset();
+  assert.deepEqual([acc.account().traitBought, acc.account().traitPoints, acc.account().traits.every((v) => v === 0)], [10, 10, true]);
+  sv.deleteSlot(0); sv.setLap(0, 0);
+  assert.equal(acc.account().traitBought, 10);
+});
+
 test('attendance: one reward a day, streak and the 7-day cycle', async () => {
   const { attend } = await import('../src/core/rules/attendance.ts');
   const a = { d8: (o: number) => o % 7 };

@@ -133,8 +133,17 @@ export class Player {
     this.frame = LOCO.facing[this.dir] * LOCO.idleLen;
     const sp = (k.kind === 6 || k.bonus ? [0, 1, 2, 5, 10, 20][k.c] ?? 0 : [0, 1, 0, 1, -2, 3, -4, 5, -6, 64][k.c] ?? 0) + k.bonus;
     const v = this.dir === 0 ? [sp, 0] : this.dir === 1 ? [-sp, 0] : this.dir === 2 ? [0, sp] : [0, -sp];
-    this.moveAxis('x', v[0], field, { solid: blockers.solid, monsters: [] });
-    this.moveAxis('y', v[1], field, { solid: blockers.solid, monsters: [] });
+    // the first kind-7 tick is 64 px: moved in steps of at most 4 px so it stops at the first wall or barrier instead of
+    // landing past it (a whole-step test let 크라켄's ink throw the player over the room's battle barrier, out of the fight)
+    const b = { solid: blockers.solid, monsters: [] };
+    for (const axis of ['x', 'y'] as const) {
+      let left = axis === 'x' ? v[0] : v[1];
+      while (left) {
+        const s = Math.sign(left) * Math.min(4, Math.abs(left));
+        if (!this.moveAxis(axis, s, field, b)) break;
+        left -= s;
+      }
+    }
     if (k.c === 0) {
       if (k.stun) { this.stun = 20; this.slowed = false; }
       this.knock = null;
@@ -158,6 +167,7 @@ export class Player {
     this.action = 0;
     this.attack = null;
     this.blockCode = 0;                                                // FUN_0001d6c4 memset on map load
+    this.pullTo = this.pullRef = null; this.grabbed = false;           // a boss's hold never follows the player to another map
     this.frame = LOCO.facing[this.dir] * LOCO.idleLen;
   }
 
@@ -388,10 +398,10 @@ export class Player {
           vy = this.dir === 2 ? -sp : this.dir === 3 ? sp : 0;
         }
       }
-      const x0 = this.x, y0 = this.y;
+      const x0 = this.x, y0 = this.y, inside = this.insideMonsters(blockers);
       this.vx = this.moveAxis('x', vx, field, blockers);
       this.vy = this.moveAxis('y', vy, field, blockers);
-      if (blockers.monsters.some((m) => overlaps(this.box(), m))) { this.x = x0; this.y = y0; this.vx = this.vy = 0; }
+      if (this.intoMonster(blockers, inside)) { this.x = x0; this.y = y0; this.vx = this.vy = 0; }
       this.walking = false;
       this.t++;
       return;
@@ -439,10 +449,10 @@ export class Player {
 
   /** FUN_00071424: x then y, a monster overlap undoes the tick, then the corner correction (speed != 0, no action) */
   walkMove(vx: number, vy: number, field: Field, blockers: Blockers): void {
-    const x0 = this.x, y0 = this.y;
+    const x0 = this.x, y0 = this.y, inside = this.insideMonsters(blockers);
     this.vx = this.moveAxis('x', vx, field, blockers);
     this.vy = this.moveAxis('y', vy, field, blockers);
-    if (blockers.monsters.some((m) => overlaps(this.box(), m))) {
+    if (this.intoMonster(blockers, inside)) {
       this.x = x0;
       this.y = y0;
       this.vx = this.vy = 0;
@@ -461,10 +471,21 @@ export class Player {
   /** move s px along the facing (walls and solids per axis, monster overlap undoes); the stored speed becomes s */
   private moveFacing(s: number, field: Field, blockers: Blockers): void {
     const sign = this.dir === 0 || this.dir === 2 ? -s : s;
-    const x0 = this.x, y0 = this.y;
+    const x0 = this.x, y0 = this.y, inside = this.insideMonsters(blockers);
     if (this.dir < 2) { this.vx = this.moveAxis('x', sign, field, blockers) || 0; this.vy = 0; }
     else { this.vy = this.moveAxis('y', sign, field, blockers) || 0; this.vx = 0; }
-    if (blockers.monsters.some((m) => overlaps(this.box(), m))) { this.x = x0; this.y = y0; this.vx = this.vy = 0; }
+    if (this.intoMonster(blockers, inside)) { this.x = x0; this.y = y0; this.vx = this.vy = 0; }
+  }
+
+  /** monster bodies the player already stands in (e.g. pulled into 퀸 프로스트웜's head, or a boss that spawned on top) */
+  private insideMonsters(blockers: Blockers): Set<Rect> {
+    const me = this.box();
+    return new Set(blockers.monsters.filter((m) => overlaps(me, m)));
+  }
+  /** a move ends inside a monster body it did not start in: those already overlapped never trap the player in place */
+  private intoMonster(blockers: Blockers, inside: Set<Rect>): boolean {
+    const me = this.box();
+    return blockers.monsters.some((m) => !inside.has(m) && overlaps(me, m));
   }
 
   /**

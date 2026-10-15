@@ -23,6 +23,8 @@ export class FieldMap {
   private walk = new Uint8Array(0);
   /** walk layers 0..3 (layer 0 = walk) */
   private layers: Uint8Array[] = [];
+  /** story event-done lookup for the map-object rules below (set by the scene; nothing done by default) */
+  storyDone: (e: number) => boolean = () => false;
 
   constructor(protected assets: Assets) {}
 
@@ -40,8 +42,11 @@ export class FieldMap {
 
   /** Load the map data, its object sets and the walk layers. */
   async loadData(mapId: number): Promise<void> {
-    const a = this.assets;
-    const m = await a.map(mapId);
+    const a = this.assets, done = this.storyDone;
+    let m = await a.map(mapId);
+    // FUN_0003357c: after event 0x5d the wind barrier's slot on 0xd0 (the canyon bridge) draws the broken barrier 0x3f
+    // at (188, 183) instead (a copy: the cached map stays as loaded)
+    if (mapId === 0xd0 && done(0x5d)) m = { ...m, objLow: m.objLow.map((o) => (o.obj === 0x15 ? { ...o, obj: 0x3f, x: 188, y: 183 } : o)) };
     const hd = m.header;
     this.map = m;
     this.mapId = mapId;
@@ -67,7 +72,10 @@ export class FieldMap {
     // the portal markers are 8-frame loops (the bob is in cmf_oc frames 112..143) starting at FUN_000f8490(3)
     this.midAnim = this.midStatic.map((_, i) => i < m.objMid.length ? { len: 0, cnt: 0 } : { len: 8, cnt: Math.floor(Math.random() * 3) });
 
-    this.walk = buildWalk(m, (id) => { const [, c, f] = this.objCmf(id); return [c, f]; });
+    // FUN_0001da78: the wind barrier (object 0x15) of 0xd0 stops blocking once event 0x5c is done (the crystal piece is
+    // brought), and object 5 of 0xad once event 0x61 is done
+    const open = (o: MapObject) => (mapId === 0xd0 && o.obj === 0x15 && done(0x5c)) || (mapId === 0xad && o.obj === 5 && done(0x61));
+    this.walk = buildWalk(m, (id) => { const [, c, f] = this.objCmf(id); return [c, f]; }, open);
     this.layers = buildWalkLayers(m, this.walk);
   }
 

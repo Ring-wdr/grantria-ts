@@ -289,6 +289,7 @@ export class FieldScene implements Scene {
     this.installStatics();
     this.sdb = new StoryDb(ctx.assets);
     this.story = Story.from(save.story, save.cls);
+    this.field.storyDone = (e) => this.story.isDone(e);
     this.quests = this.makeQuests();
     this.events = new EventRunner(this);
     // saves made before the event 0x28 key grant was ported: quest 0x45 waits for 투명한 허물 forever
@@ -612,9 +613,20 @@ export class FieldScene implements Scene {
     this.gateBoss = null;
     this.bannerT = -1;
     this.mapType = id < 0x165 ? 0 : field.map.header.mapType;
-    // FUN_0001bb8c: garden gate floors start empty; a visited boss room keeps its boss away (not 0x27 / 0x23)
+    // FUN_0001bb8c: garden gate floors start empty; a visited boss room keeps its boss away (0x27 / 0x23 too: their
+    // three slots a1c..a1e are cleared instead). Not in the original: a story room whose boss death event has not run
+    // yet keeps its boss, so a save made after entering (autosaves, being pushed out) cannot strand the story.
     const bossRoom = field.map.header.mapType === 2, gateFloor = this.gardenMode === 1 && bossRoom;
-    const cleared = this.gardenMode === 0 && bossRoom && this.story.maps.has(id);
+    const storyRoom = bossRoom && field.map.header.zone !== 13;
+    const cleared = this.gardenMode === 0 && bossRoom && this.story.maps.has(id)
+      && (!storyRoom || field.map.actors.every((ac) => {
+        const rec = ac.actor >= 0 && ac.actor < FIRST_NPC ? ctx.assets.tables.actorTypes[ac.actor] : null, e = rec?.[1] === 11 ? bossDeathEvent(ac.actor, id) : -1;
+        return e < 0 || this.story.isDone(e);
+      }));
+    // FUN_0001bb8c end: after event 0x1e (the party joins) every monster of the HIDE_1E maps is off: the early boss rooms
+    // (0x25 / 0x46 / 0x51, so the other two classes' first bosses are not met again) and the fields 0x74 / 0x76 / 0x77 /
+    // 0x7a until event 0x1f turns those four back on
+    const hide1e = this.gardenMode === 0 && this.story.isDone(0x1e) && HIDE_1E.includes(id) && !(this.story.isDone(0x1f) && SHOW_1F.includes(id));
     if (this.gardenMode === 2 && this.dim && id >= 0x165) {          // FUN_0001dd48: tier2 from the run's floor level
       this.db.dimLvl = dimLevel(this.dim);
       this.db.tier2 = this.db.dimLvl > 88;
@@ -623,7 +635,7 @@ export class FieldScene implements Scene {
     if (dimActors) this.mapType = field.map.header.mapType;           // no barrier hiding on maps >= 0x165
     for (const ac of dimActors ?? field.map.actors) {
       if (ac.actor < 0 || ac.actor >= 260) continue;
-      if (cleared && ac.actor < FIRST_NPC && ac.actor !== 0x27 && ac.actor !== 0x23) continue;
+      if ((cleared || hide1e) && ac.actor < FIRST_NPC) continue;
       const typeRec = ctx.assets.tables.actorTypes[ac.actor];
       const name = `cmf_c${typeRec[0]}`;
       try {
@@ -840,6 +852,7 @@ export class FieldScene implements Scene {
     lead.face(p.dir);
     this.lead = lead;
     p.action = 0; p.attack = null;
+    p.pullTo = p.pullRef = null;                                       // the scene ignores a boss's pull while it runs
     // FUN_00034e24 first frame: every monster of type 3..0x2a leaves the scene, bosses too (events 0x66 / 0x56 / 0x4f
     // / 0x50 keep them); the script's PLACE / SPAWN_TYPE brings a boss in, the end of the event restores them
     if (!this.events.keepsMonsters) for (const m of this.monsters) if (m.isBoss) m.evHidden = true;
@@ -857,7 +870,8 @@ export class FieldScene implements Scene {
       this.bannerT = 0;
     }
     if (e === 0x6b && this.gateBoss) { this.monsters.push(this.gateBoss); this.gateBoss = null; }   // 100층: PLACE wakes 베르무트, no banner
-    if (e === 0x6c) { this.gardenMode = 0; this.gardenFlag = 0; }  // 베르무트 defeated: 0x3dc1a0..af cleared                              // state 0x3D: black screen, popup 0x5C
+    if (e === 0x6c) { this.gardenMode = 0; this.gardenFlag = 0; }
+    if (e === 0x5d && this.field.mapId === 0xd0) void this.field.load(0xd0);   // the wind barrier broke: redraw it as the broken barrier  // 베르무트 defeated: 0x3dc1a0..af cleared                              // state 0x3D: black screen, popup 0x5C
     if ((e === 0 || e === 10 || e === 0x14) && this.hard) this.autosave();   // hard: the opening end saves
     const lead = this.lead;
     if (lead) {
@@ -900,7 +914,8 @@ export class FieldScene implements Scene {
     let boss: { name: string; hp: number; maxHp: number } | null = null;
     if (o.hudBoss) {
       const p = this.player;
-      const b = this.monsters.find((m) => m.isBoss && m.alive && m.hp > 0 && m.maxHp > 0 && Math.hypot(m.x - p.x, m.y - p.y) < 360);
+      // 35 / 39: the role-0 object is the one that takes hits (퀸 프로스트웜 part A, 마더 main body), not the drawn main body
+      const b = this.monsters.find((m) => m.isBoss && m.alive && m.hp > 0 && m.maxHp > 0 && !(m instanceof Boss && m.noReward) && Math.hypot(m.x - p.x, m.y - p.y) < 360);
       if (b) boss = { name: plain(a.text[0x3e1 + b.type] ?? ''), hp: b.hp, maxHp: b.maxHp };
     }
     return {
@@ -1650,7 +1665,7 @@ export class FieldScene implements Scene {
     const a = this.db.a, first = a.d16(0x20cd6 + id * 4), n = a.d16(0x20cd6 + id * 4 + 2);
     for (let i = first; i < first + n; i++) {
       const o = 0x1c1b8 + i * 10, clip = a.d8(o), sdx = (a.d16(o + 2) << 16) >> 16, sdy = (a.d16(o + 4) << 16) >> 16;
-      const flags = a.d8(o + 6) | (a.d8(o + 7) << 8), c = 0x24b96 + clip * 4;
+      const flags = a.d16(o + 6) | (a.d16(o + 8) << 8), c = 0x24b96 + clip * 4;    // +8: blend mode and alpha (Ui.effect)
       const img = clip <= 0x46 ? 'ec' : clip <= 0x68 ? 'c' : clip <= 0x6c ? 'oc' : 't';
       const w = a.d8(c + 2), h = a.d8(c + 3);
       if (w > 0 && h > 0) V.quad(img, a.d8(c), a.d8(c + 1), w, h, x + sdx, y + sdy, (flags >> 2) & 3, flags & 1, ((flags >> 4) & 15) + 1, (flags >> 8) & 31, 8 - ((flags >> 13) & 7));
@@ -2208,6 +2223,8 @@ export class FieldScene implements Scene {
     }
     // web-only safety: the arm's release never runs once Mother is dead (the original may leave state 1)
     if (this.player.grabbed && !this.monsters.some((m) => m.type === 39 && m.alive)) this.player.grabbed = false;
+    // web-only safety: the suction (state 8) ends with part A's cycle; once the Queen is dead nothing would end it
+    if (this.player.pullTo && !this.monsters.some((m) => m.type === 35 && m.alive)) this.player.pullTo = this.player.pullRef = null;
     for (const s of this.shots) s.update(this.player.x, this.player.y, (n) => this.rng.rand(n));
     this.shots = this.shots.filter((s) => !s.gone);
     this.poisonTick();
@@ -2349,10 +2366,13 @@ export class FieldScene implements Scene {
     if (!this.events.active) for (const f of this.sparks) {           // FUN_00030734 (owner 0): bank frame t - 1 + d8(0x23632 + set)
       const base = this.db.a.d8(0x23632 + f.set), cx = (VIEW_W >> 1) + this.cam.x - ox, cy = (VIEW_H >> 1) + this.cam.y - oy;
       if (!f.hidden) this.ui.effect(f.t - 1 + base, f.x - ox, f.y - oy);
-      const k = base - 1 + f.t;                                        // set 1: the rim over the whole screen
-      if (k === 15) { this.ui.alpha = 16; this.ui.effect(6, cx, cy); }
-      else if (k === 16) { this.ui.alpha = 8; this.ui.effect(7, cx, cy); }
-      else if (k === 17) this.ui.effect(8, cx, cy);
+      // set 1: the rim over the whole screen. Touch mode (DAT_003b3b48, always on Android) on a screen not 320 wide draws
+      // frames 12 / 13 / 14, whose lines sit on the 480 px edges; 6 / 7 / 8 (no touch) and 9..11 (320 wide) gather
+      // around the centre. Fullscreen (편의 설정): the side bands move out by the margin to the screen edges
+      const k = base - 1 + f.t, pad = this.ctx.compositor.pad;
+      if (k === 15) { this.ui.alpha = 16; this.ui.effect(12, cx, cy, pad); }
+      else if (k === 16) { this.ui.alpha = 8; this.ui.effect(13, cx, cy, pad); }
+      else if (k === 17) this.ui.effect(14, cx, cy, pad);
       this.ui.alpha = 32;
     }
     const gd = this.guide;

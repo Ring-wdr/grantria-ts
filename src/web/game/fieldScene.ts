@@ -146,7 +146,7 @@ export class FieldScene implements Scene {
   /** shop kind requested by NPC talk (the play scene opens the shop screen) */
   shopRequest: number | null = null;
   /** set by the play scene: save to the current slot (shop actions save automatically) */
-  autosave: () => void = () => {};
+  autosave: (partial?: boolean) => void = () => {};
   /** the frame-end save request DAT_0040f754 (FUN_00020960 -> FUN_0001eba8, misc-systems.md §7.3). Refused with
    *  "저장이 불가능한 지역입니다." (0x1A61) on special maps unless 3, and where saving is not allowed if 1; 1 logs 0x17
    *  "게임 데이터 저장됨" (text 0x3B3 + 0x17); 3 saves anywhere, silently (the garden / dimension partial save of toSave) */
@@ -158,7 +158,7 @@ export class FieldScene implements Scene {
     if (!kind) return;
     this.saveReq = 0;
     if ((kind !== 3 && this.mapType >= 2) || (kind === 1 && !this.canSave)) { this.hud.message(t[0x1a61] ?? ''); return; }
-    this.autosave();
+    this.autosave(kind === 3);
     if (kind === 1) this.hud.message(t[0x3ca] ?? '');
   }
   private pendingEvent: { e: number; t: number } | null = null;
@@ -519,16 +519,20 @@ export class FieldScene implements Scene {
     this.ctx.audio.playBgm(this.mapType < 2 ? this.field.map.header.bgm : 0x0c);
   }
 
-  /** Snapshot for the save slot. */
-  toSave(): SaveData {
+  /** Snapshot for the save slot. partial = save request 3; special maps (mapType >= 2: the original only saves
+   *  there through request 3) and the garden / dimension modes are partial whatever was asked. */
+  toSave(partial = false): SaveData {
     if (this.slot >= 0) { setAccountDay(this.slot, this.dayCounter); clearUnsavedUses(this.slot); saveAccount(); }
     const d = this.fullSave();
-    if (this.gardenMode === 0) return d;
-    // FUN_0001eba8 partial save: event bits, visited maps / regions, keys and doors keep the file's values
-    const prev = this.prevSave()?.story;
-    if (prev && d.story) Object.assign(d.story, { done: prev.done, maps: prev.maps, zones: prev.zones, collect: prev.collect, collectDim: prev.collectDim, doors: prev.doors });   // +0x3173 too (garden.md)
-    const file = this.prevSave();
-    if (this.gardenMode === 2 && file) Object.assign(d, { map: file.map, zone: file.zone, x: file.x, y: file.y, dir: file.dir });
+    const file = (partial || this.mapType >= 2 || this.gardenMode !== 0) ? this.prevSave() : null;
+    if (!file) return d;
+    // FUN_0001eba8 7571 partial save: the file's record with progress copied over it. Kept from the file: map +0x30dc,
+    // position +0x30e0, facing +0x31ce, region +0x3104, return region +0x3290, keys +0x3171 / +0x3173, visited maps
+    // +0x3175, event bits +0x31ad, doors +0x32a1; HP is written as the max HP (+0x30d8 = +0x301c)
+    Object.assign(d, { map: file.map, zone: file.zone, x: file.x, y: file.y, dir: file.dir, returnZone: file.returnZone, hp: this.stats.maxHp });
+    if (this.gardenMode === 1) Object.assign(d, { map: 0x9f, zone: 7, x: 160, y: 400 });   // then the garden entrance
+    const prev = file.story;
+    if (prev && d.story) Object.assign(d.story, { done: prev.done, maps: prev.maps, zones: prev.zones, collect: prev.collect, collectDim: prev.collectDim, doors: prev.doors });
     return d;
   }
 

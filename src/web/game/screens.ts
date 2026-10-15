@@ -485,7 +485,7 @@ export class PlayScene implements Scene {
 
   private constructor(private ctx: GameContext, private slot: number, readonly field: FieldScene) {
     backlog.clear();
-    field.autosave = () => { saveSlot(slot, field.toSave()); };
+    field.autosave = (partial = false) => { saveSlot(slot, field.toSave(partial)); };
     field.prevSave = () => loadSlot(slot);
     field.bindSlot(slot);
   }

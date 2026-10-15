@@ -34,6 +34,7 @@ import { OPENING, Story, StoryDb } from '../../core/data/story';
 import { Field, VIEW_H, VIEW_W, type Drawable } from '../render/field';
 import { Field3D, use3d } from '../render3d/field3d';
 import { ViewAngle, quarterOf, viewInput } from '../../core/world/view';
+import { dashDodges } from '../../core/combat/dodge';
 import { FIELD_ZONES, FieldHud, type HudState } from './fieldHud';
 import { GlUi } from '../render/ui';
 import { button, gt, win } from '../render/view';
@@ -2092,6 +2093,7 @@ export class FieldScene implements Scene {
     const { player, vitals, hud } = this;
     if (this.dead) return false;
     const type = src.isBoss ? src.type : -1;
+    if (player.dashInvuln && dashDodges(type, action)) { hud.miss(player.x, player.y - 43); return false; }   // 2.5D dash
     if (type === 5 && action === 12) {               // landing push: away from the landing corner, +5 speed
       let c = this.bossG.get(0x1d);
       if (c === 3) {
@@ -2202,6 +2204,7 @@ export class FieldScene implements Scene {
     if (this.inv.unlocked(13)) this.autoLoot();
     this.talkTarget = this.findTalkTarget();
     if (this.player.autoWalking) presses = [];                        // FUN_00045570 returns while the path is set
+    if (presses.includes(AVK.DASH)) this.tryDash();                   // before the gathering filter: a dash cancels it
     presses = this.gatherKeys(presses);
     this.nodeTick();
     if (presses.includes(AVK.OK) && this.player.controllable && this.talkTarget && this.player.action === 0) { this.talkTo(this.talkTarget); return; }
@@ -2277,6 +2280,13 @@ export class FieldScene implements Scene {
     if (this.vitals.tint) this.vitals.tint--;
     this.checkPortals();
     if (!this.pendingWarp && !this.sandbox) this.checkTriggers();
+  }
+
+  /** dash (2.5D, not in the original): cancels a gathering swing; the direction turns with the view */
+  private tryDash(): void {
+    if (!this.player.controllable || this.player.autoWalking || this.player.dashT || this.player.dashCd) return;
+    if (this.run) this.cancelGather(true);
+    this.player.startDash(viewInput(this.ctx.input, this.view));
   }
 
   /** 2.5D view (not in the original): Q / E (the menu tab keys, free in the field) turn it; a boss on the map
@@ -2364,6 +2374,7 @@ export class FieldScene implements Scene {
     if (vitals.tint && !(vitals.invuln & 2)) pd.fx = { tint: [255, 0, 0], amount: Math.max(0, vitals.tint * 4 - 8) };
     else if (this.poison > 0 && (this.poison >> 2) & 1) pd.fx = { tint: [0, 0x66, 0], amount: 24 };
     if (this.warpT > 9) pd.fx = { ...pd.fx, alpha: Math.max(0, (13 - this.warpT) * 6) };
+    if (!this.lead) player.dashTrail.forEach(([x, y], i) => ents.push({ ...pd, x, y, depth: y - 8, shadow: false, fx: { alpha: 6 + 4 * i } }));   // dash after-images
     if (this.lead) { const d = this.lead.drawable(); if (d) { d.shadow = this.lead.id !== NO_SHADOW; ents.push(d); } } else { pd.shadow = true; ents.push(pd); }
     const originX = field.width < VIEW_W ? (VIEW_W - field.width) >> 1 : 0;
     const shakeK = fxScale(this.ctx.options.shake);                     // 편의 설정: shake reduced / off

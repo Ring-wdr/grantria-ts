@@ -9,6 +9,8 @@ export const AVK = {
   LOG: -103, AUTO: -104,
   /** not in the original: held to fast-forward dialogue (편의 설정 빨리 넘기기) */
   FAST: -105,
+  /** not in the original (2.5D): dash */
+  DASH: -108,
 } as const;
 
 /** the six quick-slot keys in slot order (HUD slots 0..5) */

@@ -29,6 +29,10 @@ export const LOCO = {
   body: [-8, -8, 16, 8] as const,
 };
 
+/** Dash (2.5D, not in the original): distance ticks × speed, invulnerable for the first ticks, then a cooldown.
+ *  Moved in steps of at most `sub` px so a one-cell wall stops it; monsters are passed through. */
+export const DASH = { ticks: 4, speed: 16, iframes: 3, cooldown: 12, sub: 4 };
+
 const DIR_KEYS: Record<number, Dir> = { [AVK.LEFT]: 0, [AVK.RIGHT]: 1, [AVK.UP]: 2, [AVK.DOWN]: 3 };
 
 /** Rectangle in world pixels: [left, top, right, bottom) */
@@ -101,6 +105,66 @@ export class Player {
   private cornerCell = 0;
   private cornerFlags = 0;
 
+  /** dash ticks left, its velocity, invulnerable ticks left, cooldown ticks left */
+  dashT = 0;
+  private dashV: [number, number] = [0, 0];
+  private dashInv = 0;
+  dashCd = 0;
+  /** feet of the last dash ticks, newest last (the scene draws fading after-images there) */
+  dashTrail: [number, number][] = [];
+  /** in the dash's invulnerable ticks: attacks that are not unblockable miss */
+  get dashInvuln(): boolean { return this.dashInv > 0; }
+
+  /**
+   * Start a dash toward the held direction key (or the stick's exact angle, or the facing). Allowed while walking or
+   * idle, and in a basic attack's last ticks (its combo window, so the original rhythm stays); not in skills,
+   * interactions, knockback, stun, a boss's hold or a path walk. Returns whether it started.
+   */
+  startDash(input: Input): boolean {
+    if (this.dashT || this.dashCd || !this.controllable || this.grabbed || this.pullTo || this.autoPath) return false;
+    if (this.action !== 0) {
+      const rec = this.actions[this.action - 1];
+      if (this.action > this.basicCount || !rec || this.actTick < rec.n - 3) return false;
+    }
+    const key = input.direction(), st = input.stick;
+    let vx: number, vy: number;
+    if (key && st.active) { const r = (st.angle * Math.PI) / 180; vx = Math.cos(r); vy = Math.sin(r); }
+    else {
+      const d = key ? DIR_KEYS[key] : this.dir;
+      vx = d === 0 ? -1 : d === 1 ? 1 : 0; vy = d === 2 ? -1 : d === 3 ? 1 : 0;
+    }
+    if (key) this.faceKey(key);
+    this.dashV = [vx * DASH.speed, vy * DASH.speed];
+    this.dashT = DASH.ticks;
+    this.dashInv = DASH.iframes + 1;                 // counted down at the start of each update
+    this.dashCd = DASH.ticks + DASH.cooldown;
+    this.dashTrail = [];
+    this.action = 0; this.attack = null; this.combo = false; this.actTick = 0;
+    return true;
+  }
+
+  /** one dash tick: both axes in sub-steps (walls and NPCs stop that axis, monsters do not), walk frames at speed */
+  private dashTick(field: Field, blockers: Blockers): void {
+    const b = { solid: blockers.solid, monsters: [] };
+    this.dashTrail.push([this.x, this.y]);
+    if (this.dashTrail.length > 3) this.dashTrail.shift();
+    let [lx, ly] = this.dashV.map(Math.round);
+    while (lx || ly) {
+      const sx = Math.sign(lx) * Math.min(DASH.sub, Math.abs(lx)), sy = Math.sign(ly) * Math.min(DASH.sub, Math.abs(ly));
+      const mx = sx ? this.moveAxis('x', sx, field, b) : 0, my = sy ? this.moveAxis('y', sy, field, b) : 0;
+      if (sx && !mx) lx = 0; else lx -= sx;
+      if (sy && !my) ly = 0; else ly -= sy;
+    }
+    this.vx = this.vy = 0;
+    this.blockCode = 0;
+    this.portalX = this.x; this.portalY = this.y;
+    const len = LOCO.walkLen[this.cls] ?? 6;
+    this.frame = LOCO.walkBase + LOCO.facing[this.dir] * len + (this.t % len);
+    this.walking = true;
+    if (--this.dashT === 0) this.dashTrail = [];
+    this.t++;
+  }
+
   /** player state 9: walking a found path (garden entrance "아니오"); all field keys are ignored meanwhile */
   private autoPath: [number, number][] | null = null;
   private onAutoDone: (() => void) | null = null;
@@ -121,6 +185,7 @@ export class Player {
     this.dir = d;
     if (d < 2) this.lastH = d as 0 | 1; else this.lastV = d as 2 | 3;
     this.knock = { kind, c: kind === 6 ? 5 : 9, bonus: opts.bonus ?? 0, stun: !!opts.stun };
+    this.dashT = 0; this.dashTrail = [];
     this.slowed = false;                                               // +0x79 = 6 / 7 overwrites state 2
     this.action = 0;
     this.attack = null;
@@ -169,6 +234,7 @@ export class Player {
     this.attack = null;
     this.blockCode = 0;                                                // FUN_0001d6c4 memset on map load
     this.pullTo = this.pullRef = null; this.grabbed = false;           // a boss's hold never follows the player to another map
+    this.dashT = 0; this.dashTrail = [];
     this.frame = LOCO.facing[this.dir] * LOCO.idleLen;
   }
 
@@ -375,6 +441,8 @@ export class Player {
     this.portalX = this.portalY = null;
     if (this.slowT > 0) this.slowT--;                                 // FUN_0007352c, before the player update
     if (this.slowed && this.slowT === 0) this.slowed = false;          // FUN_00071ec0 case 2: back to state 0
+    if (this.dashCd > 0) this.dashCd--;
+    if (this.dashInv > 0) this.dashInv--;
     if (this.knock) { this.knockTick(field, blockers); this.walking = false; this.t++; return; }
     if (this.grabbed) { this.walking = false; return; }                // state 1 has no case in FUN_00071ec0
     if (this.autoPath) {                                               // case 9: speed 8, no walls / portals / corners
@@ -386,6 +454,7 @@ export class Player {
       return;
     }
     if (this.pullTo) { this.suction(input, field, blockers); return; }
+    if (this.dashT > 0) { this.dashTick(field, blockers); return; }
     if (this.stun > 0) { this.stun--; this.frame = LOCO.facing[this.dir] * LOCO.idleLen; this.walking = false; this.vx = this.vy = 0; return; }
     if (this.action !== 0) {                         // direction locked, arrows ignored
       let [vx, vy] = this.attackTick(input.isHeld(AVK.OK));

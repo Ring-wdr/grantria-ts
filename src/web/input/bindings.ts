@@ -40,6 +40,7 @@ export const ACTIONS: Action[] = [
   { key: AVK.LOG, label: '대사 로그', kb: ['KeyL'], pad: [] },
   { key: AVK.AUTO, label: '자동 진행', kb: ['KeyK'], pad: [] },
   { key: AVK.FAST, label: '빨리 넘기기 (누르고 있기)', kb: ['ControlLeft'], pad: [] },
+  { key: AVK.DASH, label: '대쉬', kb: ['ShiftLeft', 'ShiftRight'], pad: ['l3'] },
 ];
 
 /** pad buttons the player may assign (the d-pad stays directions / HUD keys, home is the system's) */

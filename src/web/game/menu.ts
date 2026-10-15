@@ -8,6 +8,7 @@ import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
 import { expNeed } from '../../core/rules/rules';
+import { titleEffectText } from '../../core/rules/achievements';
 import { rankScore } from './ranking';
 import { cellView } from './tabs';
 import type { GameContext } from './scene';
@@ -214,15 +215,18 @@ export class GameMenu {
     return this.type === 0 ? 6 : 1;
   }
 
-  /** title list 0x31 (FUN_0005b804 / keys FUN_00051b10): 12 pages × 5, detail MENUPOP 10 */
-  private titles: { page: number; sel: number; detail: boolean } | null = null;
+  /** title list 0x31 (FUN_0005b804 / keys FUN_00051b10): 12 pages × 5, detail MENUPOP 10; btn = DAT_00407c0a
+   *  (0 칭호장착 / 칭호해제, 1 취소) */
+  private titles: { page: number; sel: number; detail: boolean; btn: number } | null = null;
   /** quick-slot release overlay (character page '7', DAT_003b3c52 from 0x1D: FUN_000560c4 -> FUN_00037118) */
   private release: { cur: number } | null = null;
 
   private titleKey(k: number): void {
     const tl = this.titles!, fs = this.field, id = tl.page * 5 + tl.sel;
-    if (tl.detail) {
-      if (k === AVK.OK && fs.story.titles.has(id)) { fs.story.title = fs.story.title === id ? 0xff : id; fs.recompute(); }   // wear / take off
+    if (tl.detail) {                                 // MENUPOP 10: owned -> 칭호장착/해제 | 취소, else 확 인
+      const owned = fs.story.titles.has(id);
+      if (owned && (k === AVK.LEFT || k === AVK.RIGHT)) { tl.btn ^= 1; return; }
+      if (k === AVK.OK && owned && tl.btn === 0) { fs.story.title = fs.story.title === id ? 0xff : id; fs.recompute(); }   // wear / take off
       if (k === AVK.OK || k === AVK.CLR) tl.detail = false;
       return;
     }
@@ -230,7 +234,7 @@ export class GameMenu {
     else if (k === AVK.RIGHT) { tl.page = (tl.page + 1) % 12; if (tl.page * 5 + tl.sel > 55) tl.sel = 0; }
     else if (k === AVK.UP) tl.sel = (tl.sel + 4) % 5;
     else if (k === AVK.DOWN) tl.sel = (tl.sel + 1) % 5;
-    else if (k === AVK.OK) { if (id <= 55) tl.detail = true; }
+    else if (k === AVK.OK) { if (id <= 55) { tl.detail = true; tl.btn = 0; } }
     else if (k === AVK.CLR) this.titles = null;
     if (this.titles && this.titles.page * 5 + this.titles.sel > 55) this.titles.sel = 55 - this.titles.page * 5;
   }
@@ -247,12 +251,22 @@ export class GameMenu {
       }));
     }
     const id = tl.page * 5 + tl.sel, owned = fs.story.titles.has(id);
-    // the detail goes to the 'tab-over' slot: inside the list it sat under the (positioned) rows
-    const detail = tl.detail && h('div.v-modal.v-fill', { style: 'background:rgba(0,0,0,0.55)', on: () => [AVK.OK] },
-      win('.v-col.v-detail', null,
+    // MENUPOP 10 (FUN_00029e1c): name, condition 0xD37+n, a rule, 장착효과 / 기본효과 (FUN_0004f6a8 case 10), then
+    // 칭호장착·칭호해제 + 취소 when owned, else 확 인. In the 'tab-over' slot: inside the list it sat under the rows
+    const fx = titleEffectText(this.ctx.assets, id);
+    const pick = (b: number) => () => { if (tl.btn === b) return [AVK.OK]; tl.btn = b; };
+    const detail = tl.detail && h('div.v-modal.v-fill', { style: 'background:rgba(0,0,0,0.55)', on: () => [AVK.CLR] },
+      win('.v-col.v-detail', { on: () => [] },
         gt(name(id), { pen: 0xffe0 }),
-        gt(t[0xd37 + id] ?? '', { cls: 'v-grow' }),
-        owned && h('div.v-dim-note', null, fs.story.title === id ? '[5] 해제' : '[5] 장착')));
+        gt(t[0xd37 + id] ?? ''),
+        h('div.v-rule', { style: 'width:100%' }),
+        h('div.v-row', { style: 'width:100%' },
+          h('div.v-col.v-grow', null, gt(t[0x19de] ?? ''), gt(fx.worn)),
+          h('div.v-col.v-grow', null, gt(t[0x19df] ?? ''), gt(fx.owned))),
+        h('div.v-row', { style: 'gap:8px' }, owned
+          ? [button(gt(t[fs.story.title === id ? 0x4d0 : 0x4cf] ?? ''), { sel: tl.btn === 0, on: pick(0) }),
+             button(gt(t[0x195] ?? ''), { sel: tl.btn === 1, on: pick(1) })]
+          : button(gt(t[0x1a00] ?? ''), { sel: true, on: () => [AVK.OK] }))));
     u.mount('tab', 'titles', menuList([...rows, ...Array.from({ length: 5 - rows.length }, () => h('div.v-menu-gap'))], undefined,
       [h('div.v-row.v-pager', null,
         h('span.v-page-btn', { on: () => [AVK.LEFT] }, '◀'), `${tl.page + 1}/12`, h('span.v-page-btn', { on: () => [AVK.RIGHT] }, '▶'))]));
@@ -265,13 +279,13 @@ export class GameMenu {
    * title box (UP from the top stat row) and the 퀵슬롯해제 button (RIGHT from the right column), OK opens them.
    */
   private charKey(k: number): void {
-    if (k === AVK.K0) { this.titles = { page: 0, sel: 0, detail: false }; return; }   // title list 0x31
+    if (k === AVK.K0) { this.titles = { page: 0, sel: 0, detail: false, btn: 0 }; return; }   // title list 0x31
     if (k === AVK.K7) { this.release = { cur: 0 }; return; }                          // 퀵슬롯해제 overlay
     const f = this.charFocus, c = this.statCur;
     if (f === 'title') {
       if (k === AVK.DOWN) this.charFocus = 'stats';
       else if (k === AVK.RIGHT) this.charFocus = 'release';
-      else if (k === AVK.OK) this.titles = { page: 0, sel: 0, detail: false };
+      else if (k === AVK.OK) this.titles = { page: 0, sel: 0, detail: false, btn: 0 };
       return;
     }
     if (f === 'release') {

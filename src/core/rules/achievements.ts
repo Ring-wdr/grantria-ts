@@ -2,6 +2,7 @@
 // (analysis/features/account.md §3). Counters live in the story save; conditions follow
 // data/account/titles.json and challenges.json (titles 24 / 25 come from the daily fortune, fortune.ts);
 // challenge 45..47 use "all six equipped at least grade g".
+import { cfmt } from '../data/skillDetail';
 
 /** event kinds reported by the game */
 export type AchEvent =
@@ -124,6 +125,13 @@ export function titleBonus(a: { d8(o: number): number }, owned: Iterable<number>
     if (v) out.push({ stat: a.d8(o), v });
   }
   return out;
+}
+
+/** MENUPOP 10 (FUN_0004f6a8 case 10): the option text 0x7B4 + rec[1] inside text 0x1B12, filled with the worn value
+ *  rec[2] (장착효과, 0x19DE) and the owned value rec[3] (기본효과, 0x19DF) */
+export function titleEffectText(a: { d8(o: number): number; text: string[] }, n: number): { worn: string; owned: string } {
+  const o = 0x25473 + 5 * n, f = cfmt(a.text[0x1b12] ?? '%s', a.text[0x7b4 + a.d8(o + 1)] ?? '');
+  return { worn: cfmt(f, a.d8(o + 2)), owned: cfmt(f, a.d8(o + 3)) };
 }
 
 /** FUN_0001f17c: challenge reward gold = d16[0x20c72 + 2n] × 100 */

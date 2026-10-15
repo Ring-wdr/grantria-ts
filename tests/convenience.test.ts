@@ -163,3 +163,11 @@ test('item detail lines: stat with options and enhancement bonus, armour enhance
   assert.equal(detailLines(a, gear({ type: 15, base: 7, options: [[0x24, 3]] })).stat, 'R* 10');
   assert.equal(enhEffect(gear({ type: 4, enh: 0 })), null);
 });
+
+test('title detail effects: option text with the worn and the owned value', async () => {
+  const { titleEffectText } = await import('../src/core/rules/achievements.ts');
+  const d = new Uint8Array(0x25473 + 5 * 4);
+  d.set([1, 0, 5, 1, 0], 0x25473 + 5 * 3);
+  const text: string[] = []; text[0x1b12] = '<%s>'; text[0x7b4] = 'atk +%d%%';
+  assert.deepEqual(titleEffectText({ d8: (o: number) => d[o], text }, 3), { worn: '<atk +5%>', owned: '<atk +1%>' });
+});

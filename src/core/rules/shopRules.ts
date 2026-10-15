@@ -6,6 +6,7 @@ import type { Assets } from '../data/assets';
 import type { Inventory, Item, ItemDb } from './items';
 import type { Rng } from './rules';
 import { traitVal } from './account';
+import { cfmt } from '../data/skillDetail';
 
 // rules.ts rdiv / cdiv (inlined so node --test can load this module without extension mapping)
 const rdiv = (a: number, b: number): number => ((Math.trunc((a * 16) / b) + 8) >> 4);
@@ -180,6 +181,40 @@ export function enhance(db: ItemDb, inv: Inventory, it: Item, rng: Rng, useAux: 
   else if (e >= 6) { if (rng.rand(1000) > keep) it.enh = e - 1; }
   if (it.enh !== e) renameEnh(a, it, e);
   return { ok: false, destroyed: false };
+}
+
+/** FUN_000371c4(it, d): the armour enhancement effect, (enh + d)³ by slot, and its option text (FUN_00039820:
+ *  0x1a 크리티컬 / 0x25 모든 스탯 / 0x15 행운 / 0x1c 크리티컬 데미지); null for weapons, accessories and +0 */
+export function enhEffect(it: Item, d = 0): { value: number; opt: number } | null {
+  const e = it.enh + d, k = it.type - 3;
+  if (!e || k < 0 || k > 11) return null;
+  const [div, add, opt] = ([[580, 1, 0x1a], [200, 5, 0x25], [40, 5, 0x15], [200, 1, 0x1c]] as const)[Math.trunc(k / 3)];
+  return { value: rdiv(e ** 3, div) + add, opt };
+}
+
+/**
+ * Item detail lines of FUN_0004eea0 / FUN_00039820 (MENUPOP 1): the main stat line and, for enhanced armour, the
+ * enhancement effect line drawn above the options.
+ * - stat: base plus the % options that raise it (weapon 0x1b / 0, armour 0x21 / 2: base·v/100; accessory 0x24: v),
+ *   then the enhancement bonus FUN_00037238 after "|i+": text 0x1AFD / 0x1AFF with the value in yellow when an option
+ *   raised it, else 0x1AFE / 0x1B00; accessories "모든저항력" 0x1B01 / 0x1B02 without an enhancement part.
+ * - enh: text 0x1C65 "|e+%d강:%s" around the option text of enhEffect.
+ */
+export function detailLines(a: Assets, it: Item): { stat: string | null; enh: string | null } {
+  const t = a.text;
+  if (it.type >= 0x10) return { stat: null, enh: null };
+  const ids = it.type < 3 ? [0x1b, 0] : it.type < 15 ? [0x21, 2] : [0x24];
+  let v = it.base;
+  for (const [id, val] of it.options) {
+    if (id === 0xff) break;
+    if (ids.includes(id)) v += it.type === 15 ? val : Math.trunc((val * it.base) / 100);
+  }
+  const up = v > it.base;
+  const stat = it.type === 15 ? cfmt(t[up ? 0x1b01 : 0x1b02] ?? '', v)
+    : cfmt(t[it.type < 3 ? (up ? 0x1afd : 0x1afe) : (up ? 0x1aff : 0x1b00)] ?? '', v, enhBonus(it, 0));
+  const fx = enhEffect(it);
+  const enh = fx ? cfmt(t[0x1c65] ?? '', it.enh, cfmt(cfmt(t[0x1acf] ?? '', t[fx.opt + 0x7b4] ?? ''), fx.value)) : null;
+  return { stat, enh };
 }
 
 /** enhancement bonus FUN_00037238(it, d): base + bonus shown on the enhance screen */

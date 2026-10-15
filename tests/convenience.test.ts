@@ -137,3 +137,20 @@ test('회상: seen story events are kept per class, account-wide', async () => {
   r.resetRecordsCache();
   assert.deepEqual([r.seenEvents(0), r.seenEvents(1), r.records().seenFromSlots], [[0, 5], [10], true]);   // persisted
 });
+
+test('item detail lines: stat with options and enhancement bonus, armour enhancement effect', async () => {
+  const { detailLines, enhEffect } = await import('../src/core/rules/shopRules.ts');
+  const text: string[] = [];
+  text[0x1afd] = 'A* %d + %d'; text[0x1afe] = 'A %d + %d'; text[0x1aff] = 'D* %d + %d'; text[0x1b00] = 'D %d + %d';
+  text[0x1b01] = 'R* %d'; text[0x1b02] = 'R %d'; text[0x1c65] = '+%d:%s'; text[0x1acf] = '%s';
+  text[0x7b4 + 0x1a] = 'crit %d%%'; text[0x7b4 + 0x25] = 'all %d';
+  const a = { text } as never;
+  // weapon base 100, +10% attack option, +3: bonus = round((4+4+4)% of 100) = 12
+  assert.deepEqual(detailLines(a, gear({ type: 0, base: 100, enh: 3, options: [[0x1b, 10], [5, 3]] })), { stat: 'A* 110 + 12', enh: null });
+  assert.equal(detailLines(a, gear({ type: 1, base: 100, enh: 0, options: [] })).stat, 'A 100 + 0');
+  // armour type 3 (+5): crit = round(125 / 580) + 1 = 1; type 6 (+10): all stats = round(1000 / 200) + 5 = 10
+  assert.equal(detailLines(a, gear({ type: 3, base: 20, enh: 5 })).enh, '+5:crit 1%');
+  assert.equal(detailLines(a, gear({ type: 6, base: 20, enh: 10 })).enh, '+10:all 10');
+  assert.equal(detailLines(a, gear({ type: 15, base: 7, options: [[0x24, 3]] })).stat, 'R* 10');
+  assert.equal(enhEffect(gear({ type: 4, enh: 0 })), null);
+});

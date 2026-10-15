@@ -15,7 +15,7 @@ import { quantityFlow, type QuantityEvent } from './flows/quantityFlow';
 import { buyBag } from './community';
 import { BagTools, buyCouponTool, couponToolPopup } from './bagTools';
 import { ShopScreen } from './shop';
-import { combineNeeds, countOf, consume } from '../../core/rules/shopRules';
+import { combineNeeds, countOf, consume, detailLines } from '../../core/rules/shopRules';
 import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
 import { button, cSprite, gt, h, padBadge, sprite, type KeyAct, type ScrollRef, type VChild, type VNode } from '../render/view';
@@ -26,7 +26,6 @@ import { platform } from '../../core/platform';
 
 /** URL of an image under assets/images (resolved per call: the platform is installed at boot) */
 const imageUrl = (name: string) => platform().assets.url(`images/${name}.png`);
-const YELLOW565 = 0xffe0;
 
 /** Action ids of the item action popup (text 0x171 + id), kind 0 = inventory, 4 = equipment tab. */
 const ACTION = { DETAIL: 1, USE: 2, DECOMPOSE: 3, QUICK: 5, DROP: 4, CANCEL: 6, UNEQUIP: 7, EQUIP: 8, ENHANCE: 12, SOCKET: 28 } as const;
@@ -156,22 +155,22 @@ export class ActionPopup {
 export function itemDetailView(fs: FieldScene, it: Item, footer?: VChild, overlay?: VChild): VNode {
   if (it.type === 0x19) return recipeDetailView(fs, it, footer, overlay);
   const t = fs.db.a.text, gear = it.type < 0x10;
-  const label = it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6;
+  const lines = detailLines(fs.db.a, it);
   const desc = t[fs.db.descId(it.type, it.sub, it.grade)] ?? '';
   return h('div.u-window.v-col.v-fill.tb-detail', null,
     h('div.v-box.v-row.tb-detail-head', null,
       cellView(fs, it),
       h('div.v-col.v-grow', { style: 'gap:1px' },
         h('div.v-row', { style: 'gap:4px' },
-          gear && it.enh > 0 && h('span.tb-enh', null, `+${it.enh}`),
-          gt(it.name, { cls: 'v-grow tb-ellipsis' })),
+          gt(it.name, { cls: 'v-grow tb-ellipsis' })),                   // the name already carries "+N" (renameEnh)
         gear && h('div.v-row.tb-sub', null,
           h('span.v-grow', null, `${t[0x24] ?? 'REQUIRE LV'} ${it.reqLevel}`),
           it.type < 15 && gt(t[0x5d + (it.type % 3)] ?? '', { pen: 0x9e7f })))),
     h('div.v-box.v-col.v-grow.v-scroll.tb-detail-body', null,
       gt(desc),
       gear && h('div.v-rule'),
-      gear && gt(`${t[label] ?? ''} ${it.base}`, { pen: YELLOW565 }),
+      gear && lines.enh && gt(lines.enh),                               // FUN_0002ae5c: enhanced armour, above the options
+      gear && lines.stat && gt(lines.stat),                             // "공격력 : N |i+ 강화 보너스" (FUN_0004eea0)
       gear && it.options.filter(([id]) => id !== 0xff).map(([id, v]) => gt(optionText(t, id, v), { pen: 0x9e7f })),
       gear && compareView(fs, it)),
     footer,

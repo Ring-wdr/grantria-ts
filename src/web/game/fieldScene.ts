@@ -2297,9 +2297,9 @@ export class FieldScene implements Scene {
   }
 
   /** status icons over poisoned / slowed objects (FUN_000324e4: cmf_status frame 6·i + t % 6) */
-  private drawStatus(ox: number, oy: number): void {
+  private drawStatus(): void {
     // FUN_000324e4: icon 6i + (that timer % 6) at the foot origin; the stun icon at y − k·h (k by type)
-    const icon = (i: number, timer: number, x: number, y: number) => this.ui.frame('cmf_status', this.statusCmf, 6 * i + (timer % 6), x - ox, y - oy, 'es');
+    const icon = (i: number, timer: number, x: number, y: number) => { const [sx, sy] = this.field.project(x, y); this.ui.frame('cmf_status', this.statusCmf, 6 * i + (timer % 6), sx, sy, 'es'); };
     if (!this.events.active) for (const m of this.monsters) {
       if (!m.alive) continue;
       const timers = [m.slow, m.dark, m.poison, m.stun, m.burn, m.chill];
@@ -2380,25 +2380,25 @@ export class FieldScene implements Scene {
     const hud = this.hudUi;
     hud.begin();
     if (ev) {
-      this.drawBalloons(originX);
+      this.drawBalloons();
       this.ui.end();
       this.events.drawOverlay(hud);
       if (this.ctx.input.confirm) this.hud.confirmControls();
       this.drawPopup();
       return;
     }
-    const ox = this.cam.x - originX - sx, oy = this.cam.y - sy;
-    this.drawQuestMarks(ox, oy);
-    this.drawStatus(ox, oy);
-    if (this.run) this.run.draw(this.ui, this.run.node.x - ox, this.run.node.y - oy);
+    const at = (x: number, y: number) => field.project(x, y);
+    this.drawQuestMarks();
+    this.drawStatus();
+    if (this.run) this.run.draw(this.ui, ...at(this.run.node.x, this.run.node.y));
     for (const f of this.gatherFx) {                                  // FUN_00030734 spark (alpha 32), FUN_00029604 star (alpha 16, counters 1..7)
-      if (f.kind === 'spark') { this.ui.effect(f.t - 1, f.x - ox, f.y - oy); continue; }
+      if (f.kind === 'spark') { this.ui.effect(f.t - 1, ...at(f.x, f.y)); continue; }
       if (f.t >= 8) continue;
-      this.ui.alpha = 16; this.ui.effect(0xa7 + (f.t % 4), f.x - ox, f.y - oy); this.ui.alpha = 32;
+      this.ui.alpha = 16; this.ui.effect(0xa7 + (f.t % 4), ...at(f.x, f.y)); this.ui.alpha = 32;
     }
     if (!this.events.active) for (const f of this.sparks) {           // FUN_00030734 (owner 0): bank frame t - 1 + d8(0x23632 + set)
-      const base = this.db.a.d8(0x23632 + f.set), cx = (VIEW_W >> 1) + this.cam.x - ox, cy = (VIEW_H >> 1) + this.cam.y - oy;
-      if (!f.hidden) this.ui.effect(f.t - 1 + base, f.x - ox, f.y - oy);
+      const base = this.db.a.d8(0x23632 + f.set), cx = (VIEW_W >> 1) + originX + sx, cy = (VIEW_H >> 1) + sy;
+      if (!f.hidden) this.ui.effect(f.t - 1 + base, ...at(f.x, f.y));
       // set 1: the rim over the whole screen. Touch mode (DAT_003b3b48, always on Android) on a screen not 320 wide draws
       // frames 12 / 13 / 14, whose lines sit on the 480 px edges; 6 / 7 / 8 (no touch) and 9..11 (320 wide) gather
       // around the centre. Fullscreen (편의 설정): the side bands move out by the margin to the screen edges
@@ -2413,14 +2413,15 @@ export class FieldScene implements Scene {
       let u = this.tick & 0x1f;
       if (u > 16) u = 32 - u;
       this.ui.alpha = u << 1;
-      if (gd.variant === 0) this.ui.image('t', 211, 70, 35, 49, gd.x - ox, gd.y - oy + (u >> 1));
-      else if (gd.variant === 1) this.ui.image('t', 211, 70, 35, 49, gd.x - ox + (u >> 1), gd.y - oy, 0xc);   // turned 270°
+      const [gx, gy] = at(gd.x, gd.y);
+      if (gd.variant === 0) this.ui.image('t', 211, 70, 35, 49, gx, gy + (u >> 1));
+      else if (gd.variant === 1) this.ui.image('t', 211, 70, 35, 49, gx + (u >> 1), gy, 0xc);   // turned 270°
       this.ui.alpha = 32;
     }
     for (const f of this.useFxs) {                                    // FUN_00029604: frame id + t, alpha 24 then 36 - 3t, hidden from t 8
       if (f.t >= 8) continue;
       this.ui.alpha = f.t < 5 ? 24 : 36 - 3 * f.t;
-      this.ui.effect(f.id + f.t, f.x + this.cam.x - ox, f.y + this.cam.y - oy);
+      this.ui.effect(f.id + f.t, ...at(f.x + this.cam.x, f.y + this.cam.y));
     }
     this.ui.alpha = 32;
     this.ui.end();
@@ -2446,7 +2447,7 @@ export class FieldScene implements Scene {
       hits: this.events.active ? undefined : this.hits,
       extra: this.hudExtra(),
       nextEvent: this.pendingEvent ? 200 - this.pendingEvent.t : 0,
-    }, this.cam.x - originX - sx, this.cam.y - sy, this.showButtons && !this.dead && !this.talk && !this.ctx.input.confirm);
+    }, at, this.showButtons && !this.dead && !this.talk && !this.ctx.input.confirm);
     if (this.ctx.input.confirm) this.hud.confirmControls();
     const flashA = Math.round(Math.min(32, this.flash * 4) * fxScale(this.ctx.options.flash));
     if (flashA > 0) { hud.alpha = flashA; hud.fill(0, 0, VIEW_W, VIEW_H, 0xffffff); hud.alpha = 32; }
@@ -2472,14 +2473,15 @@ export class FieldScene implements Scene {
   }
 
   /** quest marks over NPCs (end of FUN_00030cec): 1 yellow ?, 2 grey !, 3 orange !, bobbing, alpha 24 */
-  private drawQuestMarks(ox: number, oy: number): void {
+  private drawQuestMarks(): void {
     const u = this.ui, bob = (this.tick % 6) >> 1;
     for (const a of this.actors) {
       if (!a.visible || a.id < 43) continue;
       const { mark } = this.quests.marker(a.id);
       if (!mark || mark === 5) continue;
       const bb = a.rect();
-      const x = a.x - 4 - ox + (a.dir & 1 ? 2 : -2) - 2, y = bb[1] + 4 - oy + bob - 0x36;   // y + body dy
+      const [ax, ay] = this.field.project(a.x, bb[1]);
+      const x = ax - 4 + (a.dir & 1 ? 2 : -2) - 2, y = ay + 4 + bob - 0x36;   // y + body dy
       u.alpha = 24;
       if (mark === 2) u.image('c', 0xf1, 1, 9, 19, x, y);
       else if (mark === 3) u.image('c', 0x79, 0, 9, 19, x, y);
@@ -2496,7 +2498,7 @@ export class FieldScene implements Scene {
   }
 
   /** BALLOON n above actors: effect bank frames (events.md §0.3) */
-  private drawBalloons(originX: number): void {
+  private drawBalloons(): void {
     const FIRST = [0x15, 0x1b, 0x22, 0x35, 0x3c, 0x28, 0x2e, 0x43, 0x4a, 0x53, 0x5c, 99];
     const COUNT = [4, 5, 4, 5, 5, 4, 5, 5, 7, 7, 5, 5];
     for (const a of [this.lead, ...this.actors]) {
@@ -2504,7 +2506,8 @@ export class FieldScene implements Scene {
       const n = a.balloon - 1, loop = n > 4 ? 3 : 2;
       let k = a.balloonT;
       if (k >= COUNT[n]) k = loop + ((k - COUNT[n]) % Math.max(1, COUNT[n] - loop));
-      this.ui.effect(FIRST[n] + k, a.x - this.cam.x + originX, a.rect()[1] - 16 - this.cam.y);
+      const [bx, by] = this.field.project(a.x, a.rect()[1]);
+      this.ui.effect(FIRST[n] + k, bx, by - 16);
     }
   }
 

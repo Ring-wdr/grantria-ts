@@ -159,10 +159,10 @@ export class FieldHud {
   noSlideOn(mapId: number): void { this.lastMap = mapId; this.slide = 32; }
 
   /** buttons = false while the game-over screen redraws the field (FUN_0003357c) */
-  draw(s: HudState, camX: number, camY: number, buttons = true): void {
+  draw(s: HudState, at: (x: number, y: number) => [number, number], buttons = true): void {
     const u = this.ui;
     if (s.mapId !== this.lastMap) { this.lastMap = s.mapId; this.slide = -33; }
-    this.drawFloats(camX, camY);
+    this.drawFloats(at);
     if (s.target) this.targetPanel(s.target);
     if (s.hits?.count) this.hitCounter(s.hits.count, s.hits.timer);
     this.statusBar(s);
@@ -375,10 +375,10 @@ export class FieldHud {
   }
 
   /** Damage numbers (kind 2 style 9, kind 1 red style 6), MISS / CRITICAL from t.pxl, labels. */
-  private drawFloats(camX: number, camY: number): void {
+  private drawFloats(at: (x: number, y: number) => [number, number]): void {
     const u = this.ui;
     for (const f of this.floats) {
-      const x = f.x - camX, y = f.y - camY;
+      const [x, y] = at(f.x, f.y);
       if (f.kind === 'damage') {                            // style / alpha from NUM_T[11 - c], c = 7..1
         const [a, st] = NUM_T[Math.min(4 + f.age, 10)];
         u.alpha = a;

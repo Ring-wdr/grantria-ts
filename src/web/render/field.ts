@@ -21,6 +21,9 @@ export class Field extends FieldMap {
   private mapCam = new THREE.OrthographicCamera(0, 1, 0, 1, -1, 1);
   private viewCam = new THREE.OrthographicCamera(0, VIEW_W, 0, VIEW_H, -1, 1);
   passes = 0;
+  /** top-left of the view in the last render(): project() maps world pixels to view pixels through it */
+  protected camX = 0;
+  protected camY = 0;
 
   constructor(protected override assets: WebAssets, private compositor: Compositor) {
     super(assets);
@@ -70,6 +73,12 @@ export class Field extends FieldMap {
     await this.view.preload(this.view.allImages(cmfName, cmf, this.zone, equip));
   }
 
+  /** World pixel (x, y) on the ground -> view pixel of the last render (the 480-wide window; the fullscreen margins
+   *  are negative / past 480). World-anchored UI (damage numbers, marks, balloons) goes through this. */
+  project(x: number, y: number): [number, number] {
+    return [x - this.camX, y - this.camY];
+  }
+
   private drawObj(L: SpriteLayer, o: MapObject, off = 0): void {
     const [n, c, f] = this.objCmf(o.obj);
     L.frame(n, c, f + off, o.x, o.y, this.zone, DEFAULT_EQUIP);
@@ -78,6 +87,8 @@ export class Field extends FieldMap {
   /** Render the view with its top-left corner at world (camX, camY) into the compositor target
    * (call compositor.show() after any UI passes). */
   render(camX: number, camY: number, entities: Drawable[], beforeTop?: (V: SpriteLayer) => void): void {
+    this.camX = camX;
+    this.camY = camY;
     const V = this.view;
     V.clear();
     V.target(this.mapTarget.texture, this.width, this.height);

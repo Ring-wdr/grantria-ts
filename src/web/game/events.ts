@@ -546,7 +546,8 @@ export class EventRunner {
     if (this.flash && flashK) { u.alpha = Math.round((FLASH[15 - this.flash] ?? 0) * flashK); u.fill(0, 0, W, H, 0xffffff); u.alpha = 32; }
     if (this.showItem) {
       const s = this.showItem, r = this.fs.db.iconRect(s.icon);
-      const x = s.x < 0 ? (W >> 1) - 12 : s.x - this.fs.cam.x - 12, y = s.y < 0 ? (H >> 1) - 12 : s.y - this.fs.cam.y - 24;
+      const [px, py] = this.fs.field.project(s.x, s.y);
+      const x = s.x < 0 ? (W >> 1) - 12 : px - 12, y = s.y < 0 ? (H >> 1) - 12 : py - 24;
       u.alpha = Math.max(0, Math.min(32, Math.round(Math.sin((s.k * Math.PI) / 180 * 4) * 32)));
       u.image(r.image, r.sx, r.sy, 24, 24, x, y);
       u.alpha = 32;

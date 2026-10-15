@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grantria 2.5D test scene</title>
+    <style>
+      html, body { margin: 0; background: #111; color: #ccc; font: 12px system-ui, sans-serif; }
+      body { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; }
+      canvas { image-rendering: pixelated; display: block; width: 960px; height: 640px; max-width: 100%; height: auto; }
+      #info { color: #8a8; }
+    </style>
+  </head>
+  <body>
+    <div>방향키/WASD 이동 · Q/E 시점 45° 회전 · R/F 기울기 · Z/X 줌 · T 2D↔2.5D · H 높이</div>
+    <canvas id="screen" width="960" height="640"></canvas>
+    <div id="info"></div>
+    <script type="module" src="/src/web/viewer/scene3d.ts"></script>
+  </body>
+</html>

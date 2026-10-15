@@ -15,9 +15,9 @@ const TILE = 16;
 
 /** FieldMap plus the pre-rendered under-layer and the per-tick view pass. */
 export class Field extends FieldMap {
-  private mapTarget = createTarget(1, 1);
-  private under: SpriteLayer;
-  private view: SpriteLayer;
+  protected mapTarget = createTarget(1, 1);
+  protected under: SpriteLayer;
+  protected view: SpriteLayer;
   private mapCam = new THREE.OrthographicCamera(0, 1, 0, 1, -1, 1);
   private viewCam = new THREE.OrthographicCamera(0, VIEW_W, 0, VIEW_H, -1, 1);
   passes = 0;
@@ -25,7 +25,7 @@ export class Field extends FieldMap {
   protected camX = 0;
   protected camY = 0;
 
-  constructor(protected override assets: WebAssets, private compositor: Compositor) {
+  constructor(protected override assets: WebAssets, protected compositor: Compositor) {
     super(assets);
     this.under = new SpriteLayer(assets);
     this.view = new SpriteLayer(assets);
@@ -79,7 +79,7 @@ export class Field extends FieldMap {
     return [x - this.camX, y - this.camY];
   }
 
-  private drawObj(L: SpriteLayer, o: MapObject, off = 0): void {
+  protected drawObj(L: SpriteLayer, o: MapObject, off = 0): void {
     const [n, c, f] = this.objCmf(o.obj);
     L.frame(n, c, f + off, o.x, o.y, this.zone, DEFAULT_EQUIP);
   }

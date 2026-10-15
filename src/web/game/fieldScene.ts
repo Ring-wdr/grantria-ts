@@ -32,6 +32,8 @@ import { untrackKey } from './questTab';
 import { QuestLog } from '../../core/rules/quests';
 import { OPENING, Story, StoryDb } from '../../core/data/story';
 import { Field, VIEW_H, VIEW_W, type Drawable } from '../render/field';
+import { Field3D, use3d } from '../render3d/field3d';
+import { ViewAngle, quarterOf, viewInput } from '../../core/world/view';
 import { FIELD_ZONES, FieldHud, type HudState } from './fieldHud';
 import { GlUi } from '../render/ui';
 import { button, gt, win } from '../render/view';
@@ -79,6 +81,8 @@ interface WarpList { rows: number[]; cur: number }
 
 export class FieldScene implements Scene {
   readonly field: Field;
+  /** 2.5D view angle (Q / E turn it in 45° steps); stays 0 in the 2D renderer */
+  readonly view = new ViewAngle();
   /** world-space effects (aura, quest marks, status icons, balloons) drawn with WebGL on the tick */
   readonly ui: GlUi;
   /** HUD, minimap, dialogue and event overlays (HTML layer) */
@@ -259,7 +263,8 @@ export class FieldScene implements Scene {
   skillPoints: number;
 
   private constructor(readonly ctx: GameContext, save: SaveData, playerCmf: Cmf, readonly db: ItemDb) {
-    this.field = new Field(ctx.assets, ctx.compositor);
+    if (use3d()) { const f = new Field3D(ctx.assets, ctx.compositor); f.view3d = this.view; this.field = f; }
+    else this.field = new Field(ctx.assets, ctx.compositor);
     this.ui = new GlUi(ctx.assets, ctx.compositor);
     this.hudUi = ctx.hud;
     this.inv = new Inventory(db);
@@ -2142,6 +2147,7 @@ export class FieldScene implements Scene {
   update(presses: number[]): void {
     this.tick++;
     if (this.busy || this.dead) return;
+    this.view.tick();
     this.field.animateObjects();                                      // FUN_00034e24 -> FUN_00063640
     if (this.overlays.update(presses)) return;
     if (this.events.active) {
@@ -2179,6 +2185,7 @@ export class FieldScene implements Scene {
       return;
     }
     this.playTicks++;
+    this.viewTick(presses);
     if (this.buffs.tick(this.db.a)) this.recompute();
     if (this.gardenMode !== 2) this.dayTick();                         // day/night stops in the dimension
     if (this.warpT >= 0 && this.warpWarp()) return;
@@ -2216,7 +2223,7 @@ export class FieldScene implements Scene {
     this.updateGimmicks();
     const px0 = this.player.x, py0 = this.player.y;
     this.player.gatherSwing = this.run ? this.run.swing(this.tick) : null;
-    this.player.update(this.ctx.input, this.field, blockers);
+    this.player.update(viewInput(this.ctx.input, this.view), this.field, blockers);
     if (this.run && this.player.action === this.player.interactAction) this.run.playerTick();   // FUN_000618f4
     this.gatherFxTick();
     this.useFxs = this.useFxs.filter((f) => { f.t++; f.y -= 3; return f.t <= 10; });   // FUN_0002c99c
@@ -2270,6 +2277,17 @@ export class FieldScene implements Scene {
     if (this.vitals.tint) this.vitals.tint--;
     this.checkPortals();
     if (!this.pendingWarp && !this.sandbox) this.checkTriggers();
+  }
+
+  /** 2.5D view (not in the original): Q / E (the menu tab keys, free in the field) turn it; a boss on the map
+   *  holds it at the map's default angle, its art has no turned facings */
+  private viewTick(presses: number[]): void {
+    if (!(this.field instanceof Field3D)) return;
+    this.view.lock(this.monsters.some((m) => m.alive && m.isBoss));
+    for (const k of presses) {
+      if (k === AVK.TAB_L) this.view.turn(-1);
+      else if (k === AVK.TAB_R) this.view.turn(1);
+    }
   }
 
   /** FUN_0007352c: 극독의 비약 (buff 14) poisons monsters within 50 px every 20 buff frames, and poisoned
@@ -2341,7 +2359,7 @@ export class FieldScene implements Scene {
     for (const g of this.ground) ents.push(...groundDrawables(g, this.db, this.statusCmf, !!this.ctx.options.effects, this.dead));
     for (const p of this.projectiles) ents.push(p.drawable());
     if (!ev) for (const s of this.shots) ents.push(s.drawable());
-    const pd = player.drawable();
+    const pd = player.drawable(quarterOf(this.view.yaw));
     // hit tint 12, 8, 4, 0 and off on ticks where (invuln & 2) (combat.md §5.2)
     if (vitals.tint && !(vitals.invuln & 2)) pd.fx = { tint: [255, 0, 0], amount: Math.max(0, vitals.tint * 4 - 8) };
     else if (this.poison > 0 && (this.poison >> 2) & 1) pd.fx = { tint: [0, 0x66, 0], amount: 24 };

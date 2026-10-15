@@ -14,6 +14,7 @@ export default defineConfig({
         viewer: resolve(import.meta.dirname, 'index.html'),
         game: resolve(import.meta.dirname, 'game.html'),
         tauri: resolve(import.meta.dirname, 'tauri.html'),
+        scene3d: resolve(import.meta.dirname, 'scene3d.html'),
       },
     },
   },

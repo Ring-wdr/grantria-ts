@@ -66,6 +66,9 @@ export class Compositor {
     this.blurScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.blurMat));
   }
 
+  /** the WebGL renderer (the 3D field renders its own pass through it) */
+  get gl(): THREE.WebGLRenderer { return this.renderer; }
+
   /** width of the internal target */
   get width(): number { return VIEW_W + 2 * this.pad; }
 

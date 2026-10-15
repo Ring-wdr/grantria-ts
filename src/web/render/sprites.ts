@@ -221,6 +221,12 @@ export class SpriteLayer {
   private zoomMats = new Map<number, THREE.ShaderMaterial>();
   /** Colour effect applied to quads drawn while set: tint colour, strength and alpha in 0..32. */
   fx: SpriteFx | null = null;
+  /** 2.5D: maps a layer point to its vertex position (default (x, y, 0)); the 3D field stands sprites up with it */
+  place: ((x: number, y: number, out: Float32Array, o: number) => void) | null = null;
+  /** 2.5D: materials test the depth buffer (sprites over 3D ground); never written, sprites stay in painter's order */
+  depthTest = false;
+  /** 2.5D: quads whose blend reads the destination are recorded here instead (drawn on screen after the 3D pass) */
+  dstSink: SpriteLayer | null = null;
 
   private assets: WebAssets;
   constructor(assets: WebAssets) {
@@ -284,9 +290,10 @@ export class SpriteLayer {
       this.mats.push(mat);
       this.slots.set(mat, s);
     }
-    const k = this.count++, p = this.pos, o = k * 12, r = this.rects;
+    const k = this.count++, p = this.pos, o = k * 12, r = this.rects, pl = this.place;
     this.matIdx[k] = s;
-    p[o] = x0; p[o + 1] = y0; p[o + 3] = x1; p[o + 4] = y0; p[o + 6] = x1; p[o + 7] = y1; p[o + 9] = x0; p[o + 10] = y1;
+    if (pl) { pl(x0, y0, p, o); pl(x1, y0, p, o + 3); pl(x1, y1, p, o + 6); pl(x0, y1, p, o + 9); }
+    else { p[o] = x0; p[o + 1] = y0; p[o + 3] = x1; p[o + 4] = y0; p[o + 6] = x1; p[o + 7] = y1; p[o + 9] = x0; p[o + 10] = y1; }
     r[k * 4] = Math.min(x0, x1); r[k * 4 + 1] = Math.min(y0, y1); r[k * 4 + 2] = Math.max(x0, x1); r[k * 4 + 3] = Math.max(y0, y1);
     return k;
   }
@@ -294,7 +301,7 @@ export class SpriteLayer {
   private material(tex: THREE.Texture, blend: number, alpha8: number): THREE.ShaderMaterial {
     const fx = this.fx;
     const amt = fx?.amount ?? 0, a32 = fx?.alpha ?? 32, tint = fx?.tint ?? [0, 0, 0];
-    const key = `${tex.uuid}|${blend}|${alpha8}|${tint.join(',')}|${amt}|${a32}`;
+    const key = `${tex.uuid}|${blend}|${alpha8}|${tint.join(',')}|${amt}|${a32}|${this.depthTest ? 1 : 0}`;
     let m = this.materials.get(key);
     if (!m) {
       const alpha = (alpha8 / 8) * (a32 / 32);
@@ -303,7 +310,7 @@ export class SpriteLayer {
         tint: { value: new THREE.Vector3(tint[0] / 255, tint[1] / 255, tint[2] / 255) },
         tintAmt: { value: amt / 32 },
       };
-      const common = { vertexShader: VERT, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide };
+      const common = { vertexShader: VERT, transparent: true, depthTest: this.depthTest, depthWrite: false, side: THREE.DoubleSide };
       m = b
         ? new THREE.ShaderMaterial({
             ...common,
@@ -375,7 +382,14 @@ export class SpriteLayer {
     const u0 = sx / img.width, u1 = (sx + w) / img.width;
     let v0 = sy / img.height, v1 = (sy + h) / img.height;
     if (bottomUp) [v0, v1] = [1 - v0, 1 - v1];
-    const q = this.add(this.material(tex, blend, alpha8), x, y, x + dw, y + dh) * 8, t = this.uv;
+    const mat = this.material(tex, blend, alpha8), sink = this.dstSink;
+    if (sink && mat.userData.readsDst) {
+      sink.fx = this.fx;
+      sink.textures.set(name!, tex);
+      sink.quad(name, sx, sy, w, h, x, y, rot, hflip, scale, blend, alpha8, bottomUp, drawW, drawH);
+      return;
+    }
+    const q = this.add(mat, x, y, x + dw, y + dh) * 8, t = this.uv;
     // source corners TL, TR, BR, BL; destination corner i samples src[(i - rot) mod 4], hflip swaps TL/TR and BL/BR
     for (let i = 0; i < 4; i++) {
       const s = ((hflip ? i ^ 1 : i) - rot + 4) & 3;

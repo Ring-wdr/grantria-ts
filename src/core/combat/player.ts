@@ -8,6 +8,7 @@ import { boxOverride } from './projectiles';
 import { AVK } from '../keys';
 import type { InputState as Input } from '../input';
 import { walkPathTick } from '../world/pathfind';
+import { worldDirToScreen } from '../world/view';
 
 /** Direction like entity +0x7a: 0 left, 1 right, 2 up, 3 down. */
 export type Dir = 0 | 1 | 2 | 3;
@@ -521,9 +522,17 @@ export class Player {
     this.t++;
   }
 
-  drawable(): Drawable {
+  /** q: quarter turns of the 2.5D view (core/world/view.ts); the idle and walk frames are drawn facing the way the
+   *  player faces on screen (actions keep their frames) */
+  drawable(q = 0): Drawable {
     // facing row 1 art faces left; facing right is the mirrored case (locomotion.md §0)
-    const mirror = this.dir < 2 && this.lastH === 1;
-    return { cmfName: this.cmfName, cmf: this.cmf, frame: this.frame, x: this.x, y: this.y, mirror, equip: this.equip, depth: this.y + LOCO.body[1] };
+    let mirror = this.dir < 2 && this.lastH === 1, frame = this.frame;
+    if (q & 3 && this.action === 0) {
+      const d = worldDirToScreen(this.dir, q), len = LOCO.walkLen[this.cls] ?? 6, walk = frame - LOCO.walkBase;
+      if (walk >= 0 && walk < 3 * len) frame = LOCO.walkBase + LOCO.facing[d] * len + walk % len;
+      else if (frame >= 0 && frame < 3 * LOCO.idleLen) frame = LOCO.facing[d] * LOCO.idleLen + frame % LOCO.idleLen;
+      if (frame !== this.frame || this.dir < 2) mirror = d === 1;
+    }
+    return { cmfName: this.cmfName, cmf: this.cmf, frame, x: this.x, y: this.y, mirror, equip: this.equip, depth: this.y + LOCO.body[1] };
   }
 }

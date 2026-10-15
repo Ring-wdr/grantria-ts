@@ -197,16 +197,36 @@ export function cmfImages(assets: WebAssets, cmfName: string, cmf: Cmf, zone: nu
   return cmf.frames.flatMap((fr) => fr.parts.map((p) => clipImage(assets, cmfName, cmf, p.clip, zone, equip)));
 }
 
+/**
+ * Quads recorded in painter's order into one dynamic vertex buffer per layer (corners TL, TR, BR, BL; z stays 0).
+ * The compositor draws runs of consecutive quads that share a material as one draw call (geometry groups of mesh).
+ */
 export class SpriteLayer {
-  readonly group = new THREE.Group();
-  private order = 0;
+  /** quads recorded since clear() */
+  count = 0;
+  /** per quad: its material, an index into mats */
+  matIdx = new Uint16Array(0);
+  /** per quad: the destination rect x0, y0, x1, y1 in layer units (the compositor's overlap test for blends reading
+   *  the destination) */
+  rects = new Float32Array(0);
+  /** the materials used since clear(); also the material array of mesh */
+  readonly mats: THREE.ShaderMaterial[] = [];
+  readonly mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.mats);
+  private slots = new Map<THREE.ShaderMaterial, number>();
+  private pos = new Float32Array(0);
+  private uv = new Float32Array(0);
+  private cap = 0;
   private textures = new Map<string, THREE.Texture | null>();
   private materials = new Map<string, THREE.ShaderMaterial>();
+  private zoomMats = new Map<number, THREE.ShaderMaterial>();
   /** Colour effect applied to quads drawn while set: tint colour, strength and alpha in 0..32. */
   fx: SpriteFx | null = null;
 
   private assets: WebAssets;
-  constructor(assets: WebAssets) { this.assets = assets; }
+  constructor(assets: WebAssets) {
+    this.assets = assets;
+    this.mesh.frustumCulled = false;
+  }
 
   async preload(names: Iterable<string | null>): Promise<void> {
     await Promise.all([...new Set(names)].filter((n): n is string => !!n && !this.textures.has(n))
@@ -214,9 +234,61 @@ export class SpriteLayer {
   }
 
   clear(): void {
-    for (const m of this.group.children as THREE.Mesh[]) m.geometry.dispose();
-    this.group.clear();
-    this.order = 0;
+    this.count = 0;
+    this.mats.length = 0;
+    this.slots.clear();
+  }
+
+  /** clear() and free the vertex buffers (they are allocated again on the next quad) */
+  dispose(): void {
+    this.clear();
+    this.mesh.geometry.dispose();
+    this.cap = 0;
+    this.pos = this.uv = this.rects = new Float32Array(0);
+    this.matIdx = new Uint16Array(0);
+  }
+
+  /** Mark the recorded part of the vertex buffers for upload (before drawing). */
+  sync(): void {
+    if (!this.count) return;
+    const g = this.mesh.geometry;
+    for (const [name, n] of [['position', 12], ['uv', 8]] as const) {
+      const a = g.getAttribute(name) as THREE.BufferAttribute;
+      a.clearUpdateRanges();
+      a.addUpdateRange(0, this.count * n);
+      a.needsUpdate = true;
+    }
+  }
+
+  private grow(): void {
+    const cap = Math.max(256, this.cap * 2);
+    const pos = new Float32Array(cap * 12), uv = new Float32Array(cap * 8), rects = new Float32Array(cap * 4), matIdx = new Uint16Array(cap);
+    pos.set(this.pos); uv.set(this.uv); rects.set(this.rects); matIdx.set(this.matIdx);
+    const index = cap * 4 > 0x10000 ? new Uint32Array(cap * 6) : new Uint16Array(cap * 6);
+    for (let k = 0; k < cap; k++) index.set([k * 4, k * 4 + 1, k * 4 + 2, k * 4, k * 4 + 2, k * 4 + 3], k * 6);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2).setUsage(THREE.DynamicDrawUsage));
+    geo.setIndex(new THREE.BufferAttribute(index, 1));
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = geo;
+    this.cap = cap; this.pos = pos; this.uv = uv; this.rects = rects; this.matIdx = matIdx;
+  }
+
+  /** Append a quad covering (x0, y0)-(x1, y1) drawn with mat; returns its index (texture coordinates are the caller's). */
+  private add(mat: THREE.ShaderMaterial, x0: number, y0: number, x1: number, y1: number): number {
+    if (this.count === this.cap) this.grow();
+    let s = this.slots.get(mat);
+    if (s === undefined) {
+      s = this.mats.length;
+      this.mats.push(mat);
+      this.slots.set(mat, s);
+    }
+    const k = this.count++, p = this.pos, o = k * 12, r = this.rects;
+    this.matIdx[k] = s;
+    p[o] = x0; p[o + 1] = y0; p[o + 3] = x1; p[o + 4] = y0; p[o + 6] = x1; p[o + 7] = y1; p[o + 9] = x0; p[o + 10] = y1;
+    r[k * 4] = Math.min(x0, x1); r[k * 4 + 1] = Math.min(y0, y1); r[k * 4 + 2] = Math.max(x0, x1); r[k * 4 + 3] = Math.max(y0, y1);
+    return k;
   }
 
   private material(tex: THREE.Texture, blend: number, alpha8: number): THREE.ShaderMaterial {
@@ -263,17 +335,16 @@ export class SpriteLayer {
 
   /** A zoom pass (FUN_0007ac0c) over the rect covering the whole target, at this point of the draw order. */
   zoom(x: number, y: number, w: number, h: number, k: number): void {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute([x, y, 0, x + w, y, 0, x + w, y + h, 0, x, y + h, 0], 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
-    geo.setIndex([0, 1, 2, 0, 2, 3]);
-    const m = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: ZOOM_FRAG, uniforms: { ...dstUniforms, k: { value: k } },
-      blending: THREE.NoBlending, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
-    m.userData.readsDst = true;
-    const mesh = new THREE.Mesh(geo, m);
-    mesh.renderOrder = this.order++;
-    mesh.frustumCulled = false;
-    this.group.add(mesh);
+    let m = this.zoomMats.get(k);
+    if (!m) {
+      m = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: ZOOM_FRAG, uniforms: { ...dstUniforms, k: { value: k } },
+        blending: THREE.NoBlending, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+      // it samples the snapshot away from its own pixels: it needs one taken right before it
+      m.userData.readsDst = m.userData.readsAll = true;
+      this.zoomMats.set(k, m);
+    }
+    const q = this.add(m, x, y, x + w, y + h) * 8, t = this.uv;
+    t[q] = 0; t[q + 1] = 0; t[q + 2] = 1; t[q + 3] = 0; t[q + 4] = 1; t[q + 5] = 1; t[q + 6] = 0; t[q + 7] = 1;
   }
 
   /** Make an arbitrary texture drawable by quad(tex.uuid, ...). */
@@ -304,19 +375,13 @@ export class SpriteLayer {
     const u0 = sx / img.width, u1 = (sx + w) / img.width;
     let v0 = sy / img.height, v1 = (sy + h) / img.height;
     if (bottomUp) [v0, v1] = [1 - v0, 1 - v1];
-    // source corners TL, TR, BR, BL; destination corner i samples src[(i - rot) mod 4]
-    const src = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
-    const rotated = [0, 1, 2, 3].map((i) => src[(i - rot + 4) & 3]);
-    const corners = hflip ? [rotated[1], rotated[0], rotated[3], rotated[2]] : rotated;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(
-      [x, y, 0, x + dw, y, 0, x + dw, y + dh, 0, x, y + dh, 0], 3));
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(corners.flat(), 2));
-    geo.setIndex([0, 1, 2, 0, 2, 3]);
-    const mesh = new THREE.Mesh(geo, this.material(tex, blend, alpha8));
-    mesh.renderOrder = this.order++;
-    mesh.frustumCulled = false;
-    this.group.add(mesh);
+    const q = this.add(this.material(tex, blend, alpha8), x, y, x + dw, y + dh) * 8, t = this.uv;
+    // source corners TL, TR, BR, BL; destination corner i samples src[(i - rot) mod 4], hflip swaps TL/TR and BL/BR
+    for (let i = 0; i < 4; i++) {
+      const s = ((hflip ? i ^ 1 : i) - rot + 4) & 3;
+      t[q + i * 2] = s === 1 || s === 2 ? u1 : u0;
+      t[q + i * 2 + 1] = s < 2 ? v0 : v1;
+    }
   }
 
   /** One cmf part; mirror flips the whole frame around its origin (x -> -x - w, hflip toggled). */

@@ -5,11 +5,15 @@
 // Browsers start audio only after a user gesture (the context resumes on the first input); in the background
 // (platform lifecycle: hidden page, minimised window, app switched away) and with the sound off the whole context
 // is suspended, so no output stream keeps the device awake.
+// Decoded BGM is large (a mono track of a minute is ~11 MB of float PCM at 48 kHz): only the current and the
+// previous track stay decoded, SFX (short) stay cached.
 import { platform } from '../core/platform';
 
 export class GameAudio {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, Promise<AudioBuffer | null>>();
+  /** BGM files still decoded in buffers, most recent first (at most 2) */
+  private bgmKept: string[] = [];
   private bgm: { n: number; src: AudioBufferSourceNode | null } = { n: -1, src: null };
   private sfx: AudioBufferSourceNode | null = null;
   private bgmGain: GainNode | null = null;
@@ -74,6 +78,10 @@ export class GameAudio {
 
   private load(n: number): Promise<AudioBuffer | null> {
     const file = n === 48 ? 's53' : `s${n}`;
+    if (n < 19) {
+      this.bgmKept = [file, ...this.bgmKept.filter((f) => f !== file)];
+      for (const f of this.bgmKept.splice(2)) this.buffers.delete(f);
+    }
     let p = this.buffers.get(file);
     if (!p && this.ctx) {
       const ctx = this.ctx;

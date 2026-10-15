@@ -51,14 +51,14 @@ export class Field extends FieldMap {
     this.mapCam.right = this.width;
     this.mapCam.bottom = this.height;
     this.mapCam.updateProjectionMatrix();
-    this.compositor.draw(U.group, this.mapCam, this.width, this.height, this.mapTarget);
-    U.clear();                                        // the tile quads live on in mapTarget: free their buffers now
+    this.compositor.draw(U, this.mapCam, this.width, this.height, this.mapTarget);
+    U.dispose();                                      // the tile quads live on in mapTarget: free their buffers now
   }
 
   /** Free the GPU side (the scene is being replaced: leaving the dimension reloads the save into a new one). */
   dispose(): void {
-    this.under.clear();
-    this.view.clear();
+    this.under.dispose();
+    this.view.dispose();
     this.mapTarget.dispose();
   }
 
@@ -108,6 +108,6 @@ export class Field extends FieldMap {
     this.viewCam.top = camY;
     this.viewCam.bottom = camY + VIEW_H;
     this.viewCam.updateProjectionMatrix();
-    this.passes = this.compositor.draw(V.group, this.viewCam, VIEW_W + 2 * pad, VIEW_H);
+    this.passes = this.compositor.draw(V, this.viewCam, VIEW_W + 2 * pad, VIEW_H);
   }
 }

@@ -1,8 +1,10 @@
 // Renders a SpriteLayer in painter's order into an off-screen target. Quads whose blend mode
-// needs the destination color get a fresh snapshot of everything drawn before them.
+// needs the destination color read a snapshot of everything drawn before them.
 import * as THREE from 'three';
-import { dstUniforms } from './sprites';
+import { dstUniforms, type SpriteLayer } from './sprites';
 import { VIEW_H, VIEW_W } from '../../core/render';
+
+const IDENTITY = new THREE.Matrix4();
 
 export function createTarget(w: number, h: number): THREE.WebGLRenderTarget {
   const rt = new THREE.WebGLRenderTarget(w, h, { magFilter: THREE.NearestFilter, minFilter: THREE.NearestFilter, depthBuffer: false });
@@ -127,7 +129,9 @@ export class Compositor {
     this.renderer.setRenderTarget(null);
   }
 
-  private useSnapshot(w: number, h: number): void {
+  /** Copy the target as drawn so far into the destination snapshot. It covers the whole target: blends reading the
+   *  destination sample it at gl_FragCoord. */
+  private takeSnapshot(w: number, h: number): void {
     if (!this.snapshot || this.snapshot.image.width !== w || this.snapshot.image.height !== h) {
       this.snapshot?.dispose();
       this.snapshot = new THREE.FramebufferTexture(w, h);
@@ -135,25 +139,50 @@ export class Compositor {
     }
     dstUniforms.dstTex.value = this.snapshot;
     dstUniforms.size.value.set(w, h);
+    this.renderer.copyFramebufferToTexture(this.snapshot);
+  }
+
+  /** the camera's view in layer units (x0, y0, x1, y1), a unit wider on every side: a quad wholly outside it draws
+   *  no pixel. Unbounded for anything but a plain orthographic camera. */
+  private static viewOf(camera: THREE.Camera): number[] {
+    const c = camera as THREE.OrthographicCamera;
+    c.updateMatrixWorld();
+    if (!c.isOrthographicCamera || c.zoom !== 1 || c.view?.enabled || !c.matrixWorld.equals(IDENTITY)) return [-Infinity, -Infinity, Infinity, Infinity];
+    return [Math.min(c.left, c.right) - 1, Math.min(c.top, c.bottom) - 1, Math.max(c.left, c.right) + 1, Math.max(c.top, c.bottom) + 1];
   }
 
   /**
-   * Draw group's meshes (in renderOrder) through camera into target (default: the internal
-   * target, the w x h view centred in it when it is wider: see pad). clear = false draws over the
-   * existing content (UI passes). Returns the number of render passes.
+   * Whether quad i of layer needs a new snapshot: it is on screen and the snapshot (taken before quad since, -1 =
+   * none yet) is missing or may be stale under it, i.e. a quad drawn since covers a pixel near it on screen (rects
+   * less than a layer unit apart count).
    */
-  draw(group: THREE.Group, camera: THREE.Camera, w: number, h: number, target?: THREE.WebGLRenderTarget, clear = true): number {
+  private static stale(layer: SpriteLayer, since: number, i: number, v: number[]): boolean {
+    const r = layer.rects;
+    const x0 = Math.max(r[i * 4] - 1, v[0]), y0 = Math.max(r[i * 4 + 1] - 1, v[1]);
+    const x1 = Math.min(r[i * 4 + 2] + 1, v[2]), y1 = Math.min(r[i * 4 + 3] + 1, v[3]);
+    if (x0 >= x1 || y0 >= y1) return false;             // off screen: it draws nothing, whatever it samples
+    if (since < 0 || i - since > 1024) return true;     // (the scan is bounded for big pre-render layers)
+    for (let j = since; j < i; j++) if (r[j * 4] < x1 && r[j * 4 + 2] > x0 && r[j * 4 + 1] < y1 && r[j * 4 + 3] > y0) return true;
+    return false;
+  }
+
+  /**
+   * Draw the layer's quads (in painter's order) through camera into target (default: the internal target, the
+   * w x h view centred in it when it is wider: see pad). clear = false draws over the existing content (UI passes).
+   * Consecutive quads sharing a material are one draw call; a quad whose blend reads the destination gets a
+   * snapshot of everything drawn before it, taken anew only when it may cover a pixel drawn since the last one.
+   * Returns the number of render passes.
+   */
+  draw(layer: SpriteLayer, camera: THREE.Camera, w: number, h: number, target?: THREE.WebGLRenderTarget, clear = true): number {
     const r = this.renderer;
     if (!target) {
       if (this.rt.width !== this.width || this.rt.height !== VIEW_H) this.rt.setSize(this.width, VIEW_H);
       target = this.rt;
       target.viewport.set((target.width - w) >> 1, 0, w, h);
     }
-    // the snapshot covers the whole target: dst-reading blends sample it at gl_FragCoord
-    this.useSnapshot(target.width, target.height);
-    const meshes = (group.children as THREE.Mesh[]).slice().sort((a, b) => a.renderOrder - b.renderOrder);
-    const parent = group.parent;
-    this.scene.add(group);
+    const n = layer.count, mesh = layer.mesh, geo = mesh.geometry;
+    layer.sync();
+    this.scene.add(mesh);
     r.setRenderTarget(target);
     if (clear) {
       r.setClearColor(0x000000, 1);
@@ -162,26 +191,29 @@ export class Compositor {
     const auto = r.autoClear;
     r.autoClear = false;
     let passes = 0;
-    let start = 0;
-    const drawRange = (a: number, b: number) => {
-      if (a >= b) return;
-      for (const m of group.children) m.visible = false;
-      for (let i = a; i < b; i++) meshes[i].visible = true;
+    const flush = () => {
+      if (!geo.groups.length) return;
       r.render(this.scene, camera);
+      geo.clearGroups();
       passes++;
     };
-    meshes.forEach((m, i) => {
-      if (!(m.material as THREE.Material).userData.readsDst) return;
-      drawRange(start, i);
-      r.copyFramebufferToTexture(this.snapshot!);
-      drawRange(i, i + 1);
-      start = i + 1;
-    });
-    drawRange(start, meshes.length);
-    for (const m of group.children) m.visible = true;
+    geo.clearGroups();
+    const view = Compositor.viewOf(camera);
+    let since = -1;                                    // the snapshot holds the target as it was before quad `since`
+    for (let i = 0; i < n; i++) {
+      const mi = layer.matIdx[i], ud = layer.mats[mi].userData;
+      if (ud.readsDst && (ud.readsAll || Compositor.stale(layer, since, i, view))) {
+        flush();
+        this.takeSnapshot(target.width, target.height);
+        since = i;
+      }
+      const g = geo.groups[geo.groups.length - 1];
+      if (g && g.materialIndex === mi && g.start + g.count === i * 6) g.count += 6;
+      else geo.addGroup(i * 6, 6, mi);
+    }
+    flush();
     r.autoClear = auto;
-    if (parent) parent.add(group);
-    else this.scene.remove(group);
+    this.scene.remove(mesh);
     target.viewport.set(0, 0, target.width, target.height);
     r.setRenderTarget(null);
     return passes;
@@ -206,8 +238,8 @@ export class Compositor {
     this.renderer.render(this.present, this.presentCam);
   }
 
-  render(group: THREE.Group, camera: THREE.Camera, w: number, h: number): { passes: number } {
-    const passes = this.draw(group, camera, w, h);
+  render(layer: SpriteLayer, camera: THREE.Camera, w: number, h: number): { passes: number } {
+    const passes = this.draw(layer, camera, w, h);
     this.show();
     return { passes };
   }

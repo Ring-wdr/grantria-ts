@@ -463,11 +463,11 @@ export class GlUi extends Ui {
       this.cam.right = VIEW_W / 2 + hw + b;
       this.cam.updateProjectionMatrix();
     }
-    this.compositor.draw(this.layer.group, this.cam, VIEW_W + 2 * this.bleed, VIEW_H, undefined, clear);
+    this.compositor.draw(this.layer, this.cam, VIEW_W + 2 * this.bleed, VIEW_H, undefined, clear);
   }
 
   dispose(): void {
-    this.layer.clear();
+    this.layer.dispose();
     this.text.dispose();
     this.white.dispose();
   }

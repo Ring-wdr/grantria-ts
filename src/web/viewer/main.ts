@@ -58,7 +58,7 @@ function draw(): void {
   camera.right = w;
   camera.bottom = h;
   camera.updateProjectionMatrix();
-  passes = compositor.render(mapScene.layer.group, camera, w, h).passes;
+  passes = compositor.render(mapScene.layer, camera, w, h).passes;
 }
 
 let passes = 0;
@@ -81,7 +81,7 @@ async function show(): Promise<void> {
     + `몬스터Lv ${hd.monLevel} · 액터 ${mapScene.map.actors.length} · 포털 ${mapScene.map.portals.map((p) => p.target).join(',') || '-'}`;
   $('diffFig').hidden = true;
   draw();
-  status.textContent = `${mapScene.layer.group.children.length} quads · ${passes} passes`;
+  status.textContent = `${mapScene.layer.count} quads · ${passes} passes`;
   history.replaceState(null, '', `?map=${id}`);
 }
 

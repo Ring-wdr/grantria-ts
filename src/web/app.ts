@@ -104,6 +104,12 @@ function drawScene(): void {
   if (import.meta.env.DEV) debug.textContent = scene.debugLine?.() ?? '';   // dev only: a string and a DOM write per tick
 }
 
+/** Animation frames are only requested around the ticks (a timer wakes the loop WAKE_MS before the next one is due),
+ *  except while a gamepad is connected: then every frame, so short presses are not missed. Each animation frame runs
+ *  a BeginMainFrame through Blink and the WebView compositor even when the tick draws nothing (3 of 4 frames at 15 Hz).
+ *  A tick runs on the frame nearest its due time (up to EARLY_MS early;
+ *  `acc` keeps the average rate exact). CSS animations are unaffected: the compositor runs them by itself. */
+const WAKE_MS = 8, EARLY_MS = 8;
 let acc = 0, last = performance.now();
 function frame(now: number): void {
   const p = perf;                                                // 성능 기록 (perfLog.ts): null unless switched on
@@ -113,7 +119,7 @@ function frame(now: number): void {
   acc += Math.min(250, now - last);
   last = now;
   let stepped = false;
-  while (acc >= tickMs) {
+  while (acc >= tickMs - EARLY_MS) {
     const t0 = p ? performance.now() : 0;
     scene.update(ctx.input.takePresses());
     if (p) p.update(performance.now() - t0);
@@ -125,7 +131,9 @@ function frame(now: number): void {
     drawScene();
     if (p) p.drawn(performance.now() - t0);
   }
-  requestAnimationFrame(frame);
+  const wait = tickMs - acc - WAKE_MS;                           // the next frame then lands within EARLY_MS of the due time or after it
+  if (ctx.input.padConnected || wait < 20) requestAnimationFrame(frame);
+  else setTimeout(() => requestAnimationFrame(frame), wait);
 }
 
 // dev-only test hook: advance ticks without requestAnimationFrame (hidden panes throttle it)

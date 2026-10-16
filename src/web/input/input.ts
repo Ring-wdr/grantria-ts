@@ -60,6 +60,8 @@ export class Input implements InputState {
   private padStick = false;
   /** right stick vertical axis past its dead zone (-1 up .. 1 down), 0 when centred: scrolls the open text */
   padScrollY = 0;
+  /** a gamepad was connected at the last poll (app.ts then polls every animation frame, not only on ticks) */
+  padConnected = false;
 
   /** key settings (game/keyMap.ts): the next raw key or pad button goes here instead of the game */
   capture: ((c: { kb: string } | { pad: PadButton } | { cancel: true }) => void) | null = null;
@@ -128,8 +130,10 @@ export class Input implements InputState {
     try { pads = navigator.getGamepads(); } catch { return; }      // blocked by a permissions policy
     const keys = new Set<number>(), now = new Set<PadButton>();
     let lx = 0, ly = 0, ry = 0, kind: PadKind | null = null;
+    this.padConnected = false;
     for (const p of pads) {
       if (!p || !p.connected) continue;
+      this.padConnected = true;
       const r = readPad(p);
       for (const b of r.buttons) now.add(b);
       if (r.buttons.size || Math.hypot(r.lx, r.ly) > PAD_DEAD) kind = padKind(p.id);

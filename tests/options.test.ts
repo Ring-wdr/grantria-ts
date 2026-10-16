@@ -53,5 +53,5 @@ test('개발자 모드: whole-number multipliers, off until unlocked, lock reset
   dev().killMul = 4; saveDev(); resetDevCache();
   assert.equal(killMul(), 4);
   lockDev(); resetDevCache();
-  assert.deepEqual(dev(), { unlocked: false, killMul: 1, dropMul: 1 });
+  assert.deepEqual(dev(), { unlocked: false, killMul: 1, dropMul: 1, perfLog: false });
 });

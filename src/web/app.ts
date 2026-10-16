@@ -14,13 +14,19 @@ import { VIEW_H, VIEW_W } from './render/field';
 import { Input } from './input/input';
 import { newGame } from '../core/save/save';
 import type { GameContext, Scene } from './game/scene';
-import { LogoScene, MENU_CMFS, MENU_IMAGES, PlayScene, TitleScene } from './game/screens';
+import { CharSelectScene, LogoScene, MENU_CMFS, MENU_IMAGES, PlayScene, SlotScene, TitleScene } from './game/screens';
+import { DataScene } from './game/dataScene';
+import { RankingScene } from './game/ranking';
+import { ReplayListScene } from './game/replay';
+import { SandboxScene } from './game/sandbox';
 import { AVK } from '../core/keys';
 import { DomUi, beginDomFrame, endDomFrame, installBlink, padScroll } from './render/domUi';
 import { GameAudio } from './audio';
 import { loadOptions, optionFps } from '../core/save/options';
 import { loadBindings } from './input/bindings';
 import { platform } from '../core/platform';
+import { dev } from '../core/rules/dev';
+import { exportPerf, perf, perfRecordCount, setPerfSource, startPerf, stopPerf, type PerfContext } from './perfLog';
 
 let tickMs = 50;
 
@@ -100,17 +106,25 @@ function drawScene(): void {
 
 let acc = 0, last = performance.now();
 function frame(now: number): void {
+  const p = perf;                                                // 성능 기록 (perfLog.ts): null unless switched on
+  p?.frame(now);
   ctx.input.pollPads();
   padScroll(ctx.input.padScrollY, Math.min(100, now - last));
   acc += Math.min(250, now - last);
   last = now;
   let stepped = false;
   while (acc >= tickMs) {
+    const t0 = p ? performance.now() : 0;
     scene.update(ctx.input.takePresses());
+    if (p) p.update(performance.now() - t0);
     acc -= tickMs;
     stepped = true;
   }
-  if (stepped) drawScene();
+  if (stepped) {
+    const t0 = p ? performance.now() : 0;
+    drawScene();
+    if (p) p.drawn(performance.now() - t0);
+  }
   requestAnimationFrame(frame);
 }
 
@@ -125,8 +139,37 @@ if (import.meta.env.DEV) {
       drawScene();
       return debug.textContent;
     },
+    perf: { start: startPerf, stop: stopPerf, export: exportPerf, count: perfRecordCount, recorder: () => perf },
   };
 }
+
+/** 성능 기록: what is on screen at the end of each minute. Release builds minify class names (constructor.name
+ *  would be 'qa'), hence the explicit names for the main scenes. */
+const SCENE_NAMES: [Function, string][] = [
+  [PlayScene, 'play'], [TitleScene, 'title'], [LogoScene, 'logo'], [SlotScene, 'slot'], [CharSelectScene, 'charSelect'],
+  [DataScene, 'data'], [RankingScene, 'ranking'], [ReplayListScene, 'replayList'], [SandboxScene, 'sandbox'],
+];
+function sceneName(s: Scene): string {
+  for (const [cls, name] of SCENE_NAMES) if (s instanceof cls) return name;
+  // screens.ts keeps these private; property names survive minification
+  if ('tab' in s) return 'titleOption';
+  if (s.backdrop !== undefined) return 'rating';
+  return Object.keys(s).length === 1 ? 'loading' : `?${s.constructor.name}`;
+}
+
+function perfContext(): PerfContext {
+  const field = scene instanceof PlayScene ? scene.field : null, o = ctx.options, info = renderer.info;
+  return {
+    scene: sceneName(scene), map: field ? field.field.mapId : null, monsters: field ? field.monsters.filter((m) => m.alive).length : null,
+    options: { fps: Math.round(1000 / tickMs), speed: o.speed, effects: o.effects, fullscreen: o.fullscreen, minimap: o.minimap,
+      shake: o.shake, flash: o.flash, volume: o.volume, bgm: o.bgm, sfx: o.sfx },
+    renderer: { geometries: info.memory.geometries, textures: info.memory.textures, programs: info.programs?.length ?? 0,
+      calls: info.render.calls, triangles: info.render.triangles },
+    view: { canvasW: canvas.width, canvasH: canvas.height, cssW: innerWidth, cssH: innerHeight, dpr: devicePixelRatio },
+  };
+}
+setPerfSource(perfContext);
+if (dev().unlocked && dev().perfLog) startPerf();
 
 // mouse: pointer cursor over anything tappable (full-screen catch-alls such as modal backdrops excluded)
 canvas.addEventListener('pointermove', (e) => {

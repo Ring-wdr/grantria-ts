@@ -13,6 +13,8 @@ export interface DevSettings {
   killMul: number;
   /** drop rolls per monster killed, 1..DEV_MAX */
   dropMul: number;
+  /** 성능 기록 (web/perfLog.ts) runs from boot; display only, off by default */
+  perfLog: boolean;
 }
 
 export const DEV_MAX = 10;
@@ -26,7 +28,7 @@ const mul = (v: unknown): number => (typeof v === 'number' && Number.isInteger(v
 export function dev(): DevSettings {
   if (cache) return cache;
   const d = loadJson<Partial<DevSettings>>(KEY) ?? {};
-  cache = { unlocked: d.unlocked === true, killMul: mul(d.killMul), dropMul: mul(d.dropMul) };
+  cache = { unlocked: d.unlocked === true, killMul: mul(d.killMul), dropMul: mul(d.dropMul), perfLog: d.perfLog === true };
   return cache;
 }
 
@@ -41,5 +43,5 @@ export function dropMul(): number { const d = dev(); return d.unlocked ? d.dropM
 
 export function unlockDev(): void { dev().unlocked = true; saveDev(); }
 
-/** hide the row again and put every multiplier back to the original 1 */
-export function lockDev(): void { cache = { unlocked: false, killMul: 1, dropMul: 1 }; saveDev(); }
+/** hide the row again, put every multiplier back to the original 1 and switch 성능 기록 off */
+export function lockDev(): void { cache = { unlocked: false, killMul: 1, dropMul: 1, perfLog: false }; saveDev(); }

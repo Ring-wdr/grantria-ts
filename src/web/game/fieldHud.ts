@@ -301,18 +301,7 @@ export class FieldHud {
       [AVK.K9]: 7, [AVK.STAR]: 8, [AVK.POUND]: 9, [-7]: 10, [AVK.SAVE]: 11, [10000]: 12, [AVK.LOG]: 14 } as Record<number, number>)[held] ?? 0xff;
     const on = (b: boolean) => (b ? ' on' : '');
     u.alpha = 32;
-    // virtual stick: ring, four chevrons, a knob that follows the finger (radius 22); touch only, keyboard and
-    // pads have their own directions
-    const e = inp.edge, touch = inp.device === 'touch';                // edge layout: stick left, right cluster right
-    const cx = STICK.x - e, cy = STICK.y;
-    if (touch) {
-      u.el(`t-stick${on(inp.stick.active)}`, cx - 30, cy - 30, 60, 60);
-      ([[0, -42, 0], [-43, 0, 270], [0, 42, 180], [43, 0, 90]] as const).forEach(([dx, dy, rot], i) =>
-        u.el(`t-arrow${on(idx === i)}`, cx + dx - 10, cy + dy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` } }));
-      const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 ? 22 / d : 1;
-      u.el(`t-knob${on(idx < 4)}`, cx - 15, cy - 15, 30, 30,
-        { vars: { '--kx': `${Math.round(inp.stick.dx * k)}px`, '--ky': `${Math.round(inp.stick.dy * k)}px` } });
-    }
+    const e = inp.edge;                                               // edge layout: stick left, right cluster right
     // attack
     u.el(`t-circle t-attack${on(inp.isHeld(AVK.OK))}`, ATTACK.x + e - 29, ATTACK.y - 29, 58, 58, { html: ICONS.sword });
     // quick slots 1, 3, 7, 9, *, #: the skill / item icon stays the game's art inside a CSS ring
@@ -341,7 +330,19 @@ export class FieldHud {
     // 대사 로그 where the coupon shop button was (the shop stays in the community menu), on every device; it moves out
     // with the right cluster on a wide touch screen
     u.el(`t-pill${on(idx === 14)}`, W - 0x50 + e, H - 0x102, 0x4c, 22, { html: `${ICONS.log}<span>대사 로그</span>` });
-    if (inp.device !== 'touch') this.padHints();
+    // virtual stick: ring, four chevrons, a knob that follows the finger (radius 22); touch only, keyboard and
+    // pads have their own directions. Drawn after the other buttons (it overlaps none of them): while the knob's
+    // transform transition runs, Chromium promotes everything painted after it to its own layer and re-rasters the
+    // whole HUD at each start and end, about 4 times a second under a dragging finger.
+    if (inp.device === 'touch') {
+      const cx = STICK.x - e, cy = STICK.y;
+      u.el(`t-stick${on(inp.stick.active)}`, cx - 30, cy - 30, 60, 60);
+      ([[0, -42, 0], [-43, 0, 270], [0, 42, 180], [43, 0, 90]] as const).forEach(([dx, dy, rot], i) =>
+        u.el(`t-arrow${on(idx === i)}`, cx + dx - 10, cy + dy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` } }));
+      const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 ? 22 / d : 1;
+      u.el(`t-knob${on(idx < 4)}`, cx - 15, cy - 15, 30, 30,
+        { vars: { '--kx': `${Math.round(inp.stick.dx * k)}px`, '--ky': `${Math.round(inp.stick.dy * k)}px` } });
+    } else this.padHints();
   }
 
   /** touch confirm mode (Input.confirm): the attack button becomes 확인 (OK) and the stick keeps only ◀ ▶ (yes / no) */

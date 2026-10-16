@@ -22,6 +22,8 @@ export class Minimap {
   private canvas = document.createElement('canvas');
   private ctx2d: CanvasRenderingContext2D;
   private tex: THREE.CanvasTexture;
+  /** the pixels last put into the canvas */
+  private last: Uint32Array | null = null;
 
   constructor(assets: WebAssets) {
     this.canvas.width = 120; this.canvas.height = 108;
@@ -119,8 +121,14 @@ export class Minimap {
       const c = MARK_COLOUR[d.mark];
       for (const [ddx, ddy] of MARK_SHAPE[d.mark]) dot(cx + ddx, cy + ddy, c);
     }
-    this.ctx2d.putImageData(img, 0, 0);
-    this.tex.needsUpdate = true;
+    const words = new Uint32Array(out.buffer);
+    let same = !!this.last;
+    for (let i = 0; same && i < words.length; i++) same = words[i] === this.last![i];
+    if (!same) {                                                     // unchanged (standing still): keep the canvas as is
+      this.last = words;
+      this.ctx2d.putImageData(img, 0, 0);
+      this.tex.needsUpdate = true;
+    }
     u.texture(this.tex, 120, 108, 0, 45);
   }
 }

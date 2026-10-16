@@ -30,6 +30,8 @@ const css565 = (c: number) => { const [r, g, b] = rgb565(c); return `rgb(${r},${
 
 interface UiNode {
   el: HTMLElement;
+  /** reconcile key (a group's children are keyed under it) */
+  key: string;
   /** last applied style / content signature */
   sig: string;
   used: boolean;
@@ -147,6 +149,7 @@ export function padScroll(dy: number, ms: number): void {
 export class DomUi extends Ui {
   readonly root: HTMLDivElement;
   private nodes = new Map<string, UiNode>();
+  private nodeOf = new WeakMap<Element, UiNode>();
   private counts = new Map<string, number>();
   private seg = 0;
   private cursors = new Map<HTMLElement, number>();
@@ -351,19 +354,31 @@ export class DomUi extends Ui {
 
   /** Get (or create) the next element of a kind and put it at the current paint position. */
   private node(kind: string, make: () => HTMLElement, id = ''): UiNode {
-    const n = this.counts.get(kind) ?? 0;
-    this.counts.set(kind, n + 1);
-    const key = `${this.seg}:${kind}:${n}${id}`;
+    // counted per parent: an element drawn one more or one less time at the top level (a blinking icon) must not
+    // shift the keys inside the groups after it, or their elements would move between parents every frame
+    const parent = this.parents[this.parents.length - 1];
+    const ck = `${this.nodeOf.get(parent)?.key ?? this.seg}/${kind}`;
+    const n = this.counts.get(ck) ?? 0;
+    this.counts.set(ck, n + 1);
+    const key = `${ck}:${n}${id}`;
     let node = this.nodes.get(key);
     if (!node) {
-      node = { el: make(), sig: '', used: false };
+      node = { el: make(), key, sig: '', used: false };
       this.nodes.set(key, node);
+      this.nodeOf.set(node.el, node);
     }
     node.used = true;
     this.drew = true;
-    const parent = this.parents[this.parents.length - 1];
     const i = this.cursors.get(parent) ?? 0;
-    if (parent.children[i] !== node.el) parent.insertBefore(node.el, parent.children[i] ?? null);
+    let at = parent.children[i];
+    if (at !== node.el) {
+      // a last-frame element not drawn yet this frame sits here (one that is no longer drawn): move it to the end once
+      // (endFrame removes it) instead of moving every later sibling in front of it. Each DOM move restyles,
+      // repaints and recomposites the moved element.
+      if (node.el.parentElement === parent)
+        while (at && at !== node.el && this.nodeOf.get(at)?.used === false) { parent.append(at); at = parent.children[i]; }
+      if (at !== node.el) parent.insertBefore(node.el, at ?? null);
+    }
     this.cursors.set(parent, i + 1);
     return node;
   }
@@ -451,11 +466,13 @@ export class DomUi extends Ui {
 
   texture(tex: THREE.Texture, w: number, h: number, x: number, y: number): void {
     const node = this.node('tex', () => { const c = document.createElement('canvas'); c.className = 'u-tex'; return c; });
-    const c = node.el as HTMLCanvasElement;
-    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const c = node.el as HTMLCanvasElement & { _tex?: THREE.Texture; _ver?: number };
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; c._tex = undefined; }
     DomUi.set(node, `left:${px(x + this.ox)};top:${px(y + this.oy)};width:${w}px;height:${h}px;${this.opacity()}`);
     const src = tex.image as CanvasImageSource | undefined;
-    if (src) {
+    // copy only when the texture changed: every canvas update repaints the HUD tiles under it at screen resolution
+    if (src && (c._tex !== tex || c._ver !== tex.version)) {
+      c._tex = tex; c._ver = tex.version;
       const g = c.getContext('2d')!;
       g.clearRect(0, 0, w, h);
       g.drawImage(src, 0, 0, w, h, 0, 0, w, h);

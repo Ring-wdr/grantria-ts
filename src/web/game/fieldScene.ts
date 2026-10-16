@@ -245,6 +245,8 @@ export class FieldScene implements Scene {
   cam = { x: 0, y: 0 };
   private shake: [number, number][] = [];
   private pendingWarp: { map: number; x: number; y: number } | null = null;
+  /** not in the original: set on every map entry, cleared once the player stands outside all portal rects */
+  private portalHold = false;
   private busy = true;
   /** set when the player's HP reaches 0 */
   dead = false;
@@ -722,6 +724,7 @@ export class FieldScene implements Scene {
     await Promise.all([field.preloadSprite('cmf_status', this.statusCmf), field.preloadImages(['shadow', 't', 'ec', 'c', 'oc', 'es'])]);
     if (!forEvent) {
       player.place(sx, sy);
+      this.portalHold = true;
       this.cam = { x: 0, y: 0 };
       for (let i = 0; i < 20; i++) this.updateCamera();
       ctx.audio.playBgm(field.map.header.bgm);
@@ -1342,6 +1345,13 @@ export class FieldScene implements Scene {
     const x = this.player.portalX ?? this.player.x, y = this.player.portalY ?? this.player.y;   // before the corner correction
     const inside = (r: { cx0: number; cy0: number; cx1: number; cy1: number }, m: number) =>
       r.cx0 * 16 - m <= x && x <= (r.cx1 + 1) * 16 + m && r.cy0 * 16 - m <= y && y <= (r.cy1 + 1) * 16 + m;
+    // not in the original: two arrival points sit inside the way back (m171 -> m170 on the edge of the m171 portal,
+    // m70 -> m69 inside the m70 one), so standing still after the warp bounced straight back. The rect only warps
+    // once the player has stepped off every portal since entering the map.
+    if (this.portalHold) {
+      if (this.field.map.portals.some((pt) => pt.rects.some((r) => inside(r, 0)))) return;
+      this.portalHold = false;
+    }
     for (const pt of this.field.map.portals) {
       for (const r of pt.rects) {
         if (inside(r, 0)) {

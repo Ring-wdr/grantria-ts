@@ -18,12 +18,12 @@ USB로 연결하면 충전되면서 온도와 전력이 둘 다 의미가 없어
 
 1. 개발자 옵션 → 무선 디버깅 켜기 → "페어링 코드로 기기 페어링". PC에서 한 번만:
    ```bash
-   adb pair 172.30.1.23:41234
+   adb pair 192.0.2.10:37000
    ```
    (화면에 나온 IP:포트와 6자리 코드)
 2. 연결 (무선 디버깅 화면의 IP:포트, 페어링 포트와 다르다). 포트를 모르면 `adb mdns services`로 찾는다.
    ```bash
-   adb connect 172.30.1.23:42643
+   adb connect 192.0.2.10:40000
    ```
 3. 케이블을 뺀다. `adb devices`에 IP:포트 하나만 보이면 된다.
 
@@ -156,7 +156,7 @@ adb shell perfetto --txt -c - -o /data/misc/perfetto-traces/grantria.pftrace < t
 adb pull /data/misc/perfetto-traces/grantria.pftrace
 ```
 
-PowerShell에서는 `<` 대신 `Get-Content tools/perfetto_deep.pbtxt | adb shell perfetto --txt -c - -o /data/misc/perfetto-traces/grantria.pftrace`. Git Bash에서는 `/data/...` 경로가 Windows 경로로 바뀌므로 두 명령 앞에 `MSYS_NO_PATHCONV=1`을 붙인다. 30초에 약 50 MB다(SM-S948N, Android 16에서 설정 확인).
+PowerShell에서는 `<` 대신 `Get-Content tools/perfetto_deep.pbtxt | adb shell perfetto --txt -c - -o /data/misc/perfetto-traces/grantria.pftrace`. Git Bash에서는 `/data/...` 경로가 Windows 경로로 바뀌므로 두 명령 앞에 `MSYS_NO_PATHCONV=1`을 붙인다. 30초에 약 50 MB다(Android 16 기기에서 설정 확인).
 
 <https://ui.perfetto.dev>에서 연다. 볼 것:
 

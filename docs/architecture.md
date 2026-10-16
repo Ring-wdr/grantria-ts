@@ -109,6 +109,6 @@ web/
 - 일부 ABI만: `-- --target aarch64` (실기기), `--target x86_64` (에뮬레이터).
 - Android 프로젝트는 `src-tauri/gen/android`(커밋 대상). 가로 고정(`sensorLandscape`), 시스템 바 숨김(`MainActivity.kt`), 릴리스 서명은 `app/keystore.properties`(git 제외: `storeFile`, `storePassword`, `keyAlias`, `keyPassword`).
 - 화면은 2배 이상 정수 배율이 안 나오면(휴대폰 가로) 화면에 맞춰 소수 배율로 늘린다(`web/app.ts` `fit()`). 터치 입력은 원본 touchdata 영역 그대로다.
-- 실기기 확인(2026-10-13, Galaxy SM-S948N, Android 17, 디버그 APK): 가로 전체 화면, 필드·HUD·터치 조작, 사운드, 설정·세이브 유지, 백업 내보내기·가져오기(Android 파일 선택 창) 모두 정상.
+- 실기기 확인(2026-10-13, Android 17 실기기, 디버그 APK): 가로 전체 화면, 필드·HUD·터치 조작, 사운드, 설정·세이브 유지, 백업 내보내기·가져오기(Android 파일 선택 창) 모두 정상.
 - 앱 아이콘은 `src-tauri/app-icon.png`에서 `npx tauri icon src-tauri/app-icon.png`로 만든다. 이 저장소의 아이콘은 임시 그림이다. 원본 아이콘을 쓰려면 직접 가진 APK의 `res/drawable-hdpi-v4/icon.png`(72×72)를 1024로 키워 `app-icon.png`로 두고 다시 만든다(원본 그림이므로 커밋하지 않는다). Android는 적응형 아이콘(`mipmap-anydpi-v26`)을 지워 사각 아이콘을 그대로 쓴다(적응형은 가장자리를 잘라 낸다). `tauri icon`을 다시 돌리면 적응형 파일이 다시 생기므로 지워야 한다.
 - 릴리스 서명 키는 저장소 밖 `%USERPROFILE%\.grantria-signing\grantria-release.jks`, 비밀번호는 git에서 빠진 `gen/android/app/keystore.properties`에 있다. 같은 키로 서명해야 설치된 앱을 업데이트할 수 있으므로 둘 다 따로 백업해 둔다.

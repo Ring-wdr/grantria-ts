@@ -8,7 +8,7 @@ process), CPU / GPU clocks, the display and per-app refresh rate, and whether th
 (duration reached or Ctrl+C) it prints a summary. See docs/perf-soak.md for running a fair A/B comparison.
 
     python tools/perf_soak.py --label A --duration 45m
-    python tools/perf_soak.py --serial 172.30.1.23:42643 --interval 10 --out soak-a.csv
+    python tools/perf_soak.py --serial 192.0.2.10:40000 --interval 10 --out soak-a.csv
     python tools/perf_soak.py --summarize soak-a.csv soak-b.csv      # side by side, no device needed
     python tools/perf_soak.py --on-device --label A --duration 1h    # the phone samples itself (adb may drop)
     python tools/perf_soak.py --collect                              # stop that loop, pull it and write the CSV

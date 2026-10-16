@@ -27,6 +27,8 @@ export class GameAudio {
 
   /** the page is hidden (minimised window, app in the background): everything stays silent until it is back */
   private paused = false;
+  /** the context was last asked to run (resume) rather than to stop (suspend) */
+  private running = false;
 
   constructor() {
     const create = () => {
@@ -41,7 +43,8 @@ export class GameAudio {
         this.sfxGain = this.ctx.createGain();
         this.sfxGain.gain.value = this.sfxValue();
         this.sfxGain.connect(this.ctx.destination);
-        if (this.silent()) void this.ctx.suspend();
+        this.running = !this.silent();
+        if (!this.running) void this.ctx.suspend();
         if (this.wanted >= 0) { const n = this.wanted; this.bgm.n = -1; this.playBgm(n); }
       } catch { this.ctx = null; }
     };
@@ -50,7 +53,7 @@ export class GameAudio {
     create();
     const unlock = () => {
       create();
-      if (this.ctx?.state === 'suspended' && !this.silent()) void this.ctx.resume();
+      if (this.ctx && this.ctx.state !== 'running' && !this.silent()) { this.running = true; void this.ctx.resume(); }
     };
     addEventListener('keydown', unlock);
     addEventListener('pointerdown', unlock);
@@ -71,9 +74,17 @@ export class GameAudio {
   /** run the audio graph only while it can be heard: a suspended context stops the output stream */
   private syncRunning(): void {
     if (!this.ctx) return;
-    const silent = this.silent();
-    if (silent === (this.ctx.state === 'suspended')) return;
-    void (silent ? this.ctx.suspend() : this.ctx.resume()).catch(() => {});
+    // judged by the last request, not ctx.state: a resume turns the state to 'running' only once the output has
+    // started, and a suspend asked for before that must still be made or the context runs on in the background.
+    // Not silent, any state but 'running' resumes (WebKit's 'interrupted' after a call or an app switch too).
+    if (this.silent()) {
+      if (!this.running) return;
+      this.running = false;
+      void this.ctx.suspend().catch(() => {});
+    } else if (!this.running || this.ctx.state !== 'running') {
+      this.running = true;
+      void this.ctx.resume().catch(() => {});
+    }
   }
 
   private load(n: number): Promise<AudioBuffer | null> {
@@ -97,15 +108,17 @@ export class GameAudio {
     this.wanted = n;
     if (n < 0 || n >= 19 || this.bgm.n === n || !this.ctx) return;
     this.bgm.src?.stop();
-    this.bgm = { n, src: null };
+    // compared by identity: after stopBgm() and the same track again, both decodes would pass a check of n and the
+    // first source would play on with no reference left to stop it
+    const cur = this.bgm = { n, src: null as AudioBufferSourceNode | null };
     void this.load(n).then((buf) => {
-      if (!buf || !this.ctx || this.bgm.n !== n) return;
+      if (!buf || !this.ctx || this.bgm !== cur) return;
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;
       src.connect(this.bgmGain!);
       src.start();
-      this.bgm.src = src;
+      cur.src = src;
     });
     if (this.bgmGain) this.bgmGain.gain.value = this.bgmValue();
   }

@@ -108,8 +108,10 @@ function drawScene(): void {
  *  except while a gamepad is connected: then every frame, so short presses are not missed. Each animation frame runs
  *  a BeginMainFrame through Blink and the WebView compositor even when the tick draws nothing (3 of 4 frames at 15 Hz).
  *  A tick runs on the frame nearest its due time (up to EARLY_MS early;
- *  `acc` keeps the average rate exact). CSS animations are unaffected: the compositor runs them by itself. */
-const WAKE_MS = 8, EARLY_MS = 8;
+ *  `acc` keeps the average rate exact). WAKE_MS leaves the timer some slack over EARLY_MS, or a timer firing a little
+ *  late misses that frame and the tick lands a frame later (33 / 67 ms gaps instead of 50). CSS animations are
+ *  unaffected: transform / opacity ones run on the compositor, others request their own frames from Blink. */
+const WAKE_MS = 10, EARLY_MS = 8;
 let acc = 0, last = performance.now();
 function frame(now: number): void {
   const p = perf;                                                // 성능 기록 (perfLog.ts): null unless switched on
@@ -131,7 +133,8 @@ function frame(now: number): void {
     drawScene();
     if (p) p.drawn(performance.now() - t0);
   }
-  const wait = tickMs - acc - WAKE_MS;                           // the next frame then lands within EARLY_MS of the due time or after it
+  // from the frame time `now`, not from here: the tick and the draw above took part of the wait already
+  const wait = tickMs - acc - WAKE_MS - (performance.now() - now);
   if (ctx.input.padConnected || wait < 20) requestAnimationFrame(frame);
   else setTimeout(() => requestAnimationFrame(frame), wait);
 }

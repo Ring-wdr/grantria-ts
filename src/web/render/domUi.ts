@@ -147,6 +147,8 @@ export function padScroll(dy: number, ms: number): void {
 }
 
 export class DomUi extends Ui {
+  /** how many no-longer-drawn elements node() moves out of the way at most (see there) */
+  private static readonly SKIP = 2;
   readonly root: HTMLDivElement;
   private nodes = new Map<string, UiNode>();
   private nodeOf = new WeakMap<Element, UiNode>();
@@ -360,7 +362,7 @@ export class DomUi extends Ui {
     const ck = `${this.nodeOf.get(parent)?.key ?? this.seg}/${kind}`;
     const n = this.counts.get(ck) ?? 0;
     this.counts.set(ck, n + 1);
-    const key = `${ck}:${n}${id}`;
+    const key = `${ck}:${n}|${id}`;
     let node = this.nodes.get(key);
     if (!node) {
       node = { el: make(), key, sig: '', used: false };
@@ -370,14 +372,17 @@ export class DomUi extends Ui {
     node.used = true;
     this.drew = true;
     const i = this.cursors.get(parent) ?? 0;
-    let at = parent.children[i];
+    const at = parent.children[i];
     if (at !== node.el) {
-      // a last-frame element not drawn yet this frame sits here (one that is no longer drawn): move it to the end once
-      // (endFrame removes it) instead of moving every later sibling in front of it. Each DOM move restyles,
-      // repaints and recomposites the moved element.
-      if (node.el.parentElement === parent)
-        while (at && at !== node.el && this.nodeOf.get(at)?.used === false) { parent.append(at); at = parent.children[i]; }
-      if (at !== node.el) parent.insertBefore(node.el, at ?? null);
+      // last-frame elements not drawn yet this frame sit in front of it, likely ones no longer drawn: when it is at
+      // most SKIP places on, move those to the end once (endFrame removes them) instead of moving it and every later
+      // sibling. Further on they are more likely elements drawn later this frame (the keys of a kind shift when one
+      // more or one less is drawn before), and moving them all to the end would move the whole rest of the parent.
+      // Each DOM move restyles, repaints and recomposites the moved element.
+      let e: Element | null = at, skip = 0;
+      while (e && e !== node.el && skip < DomUi.SKIP && this.nodeOf.get(e)?.used === false) { e = e.nextElementSibling; skip++; }
+      if (e === node.el) for (; skip > 0; skip--) parent.append(parent.children[i]);
+      else parent.insertBefore(node.el, at ?? null);
     }
     this.cursors.set(parent, i + 1);
     return node;

@@ -220,7 +220,8 @@ class Sampler:
             k, _, v = line.partition(' ')
             m = re.search(r'\d+', v)
             if m:
-                row['gpu_mhz' if k == 'clock' else 'gpu_busy_pct'] = int(m.group(0))
+                v = int(m.group(0))
+                row['gpu_mhz' if k == 'clock' else 'gpu_busy_pct'] = round(gpu_mhz(v)) if k == 'clock' else v
 
         # processes: CPU % of one core since the previous sample, RSS, PSS and (app) graphics memory
         up = num((s.get('uptime') or [''])[0].split(' ')[0]) or 0.0
@@ -597,6 +598,12 @@ def run_on_device(args: argparse.Namespace) -> int:
 
 # ---- summary ---------------------------------------------------------------------------------------------------
 
+def gpu_mhz(v: float) -> float:
+    """/sys/kernel/gpu/gpu_clock in MHz: Adreno (Snapdragon) reports MHz, Mali (Exynos) kHz (156000 = 156 MHz);
+    no GPU clock is anywhere near 10 GHz, so a larger value is kHz"""
+    return v / 1000 if v > 10000 else v
+
+
 def load(path: str) -> list[dict[str, str]]:
     with open(path, newline='', encoding='utf-8') as f:
         return list(csv.DictReader(f))
@@ -656,6 +663,8 @@ def summary_of(path: str) -> dict[str, str]:
     for k, name in (('app_cpu_pct', 'app CPU % (1 core)'), ('ren_cpu_pct', 'renderer CPU %'), ('sys_cpu_pct', 'device CPU % (all)'),
                     ('gpu_busy_pct', 'GPU busy %'), ('gpu_mhz', 'GPU MHz')):
         v = col(fg or ok, k)
+        if k == 'gpu_mhz':
+            v = [gpu_mhz(x) for x in v]                        # CSVs written before the kHz fix
         if v:
             s[f'{name} avg'] = fmt(statistics.fmean(v))
     for k, name in (('app_pss_mb', 'app PSS MB'), ('app_gfx_mb', 'app graphics MB'), ('ren_pss_mb', 'renderer PSS MB')):

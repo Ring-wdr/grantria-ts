@@ -79,6 +79,9 @@
 .v-box.tb-detail-head { flex: none; gap: 8px; padding: 2px 6px 2px 2px; min-height: 30px; }
 .tb-sub { gap: 6px; color: #9cb4d6; line-height: 12px; }
 .tb-detail-body { gap: 1px; padding: 6px 10px; text-align: center; align-items: stretch; }
+/* lines keep their height and the body scrolls: as flex items a clipped line (the ellipsis of 착용 중) could shrink
+   below its text when the lines ran a little taller than the box (font metrics differ per device) */
+.tb-detail-body > * { flex-shrink: 0; }
 .tb-detail-foot { flex: none; justify-content: space-between; }
 .v-box.tb-gems {
   position: absolute;

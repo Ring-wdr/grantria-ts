@@ -564,9 +564,12 @@ export class DomUi extends Ui {
   /**
    * A styled element (touch controls): cls from ui.css, optional inner HTML (inline SVG) or text,
    * and CSS custom properties. Drawn at the current alpha only through the classes' own opacity.
+   * Elements are pooled per first class (or opts.key), not across all of them: when another set of controls is drawn
+   * (touch confirm mode under a popup), a node reused for a different control would run its transform transition
+   * from the old one's (a t-arrow's rotate made the QUEST pill spin after the SAVE popup).
    */
-  el(cls: string, x: number, y: number, w: number, h: number, opts: { html?: string; text?: string; vars?: Record<string, string | number> } = {}): void {
-    const node = this.node('el', DomUi.div(cls));
+  el(cls: string, x: number, y: number, w: number, h: number, opts: { html?: string; text?: string; vars?: Record<string, string | number>; key?: string } = {}): void {
+    const node = this.node(`el:${opts.key ?? cls.split(' ', 1)[0]}`, DomUi.div(cls));
     if (node.el.className !== cls) node.el.className = cls;
     const content = opts.html ?? opts.text ?? '';
     if (node.el.dataset.c !== content) {

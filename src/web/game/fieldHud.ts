@@ -338,7 +338,7 @@ export class FieldHud {
       const cx = STICK.x - e, cy = STICK.y;
       u.el(`t-stick${on(inp.stick.active)}`, cx - 30, cy - 30, 60, 60);
       ([[0, -42, 0], [-43, 0, 270], [0, 42, 180], [43, 0, 90]] as const).forEach(([dx, dy, rot], i) =>
-        u.el(`t-arrow${on(idx === i)}`, cx + dx - 10, cy + dy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` } }));
+        u.el(`t-arrow${on(idx === i)}`, cx + dx - 10, cy + dy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` }, key: `t-arrow${rot}` }));
       const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 ? 22 / d : 1;
       u.el(`t-knob${on(idx < 4)}`, cx - 15, cy - 15, 30, 30,
         { vars: { '--kx': `${Math.round(inp.stick.dx * k)}px`, '--ky': `${Math.round(inp.stick.dy * k)}px` } });
@@ -352,7 +352,7 @@ export class FieldHud {
     const cx = STICK.x - e, cy = STICK.y;
     u.el('t-stick', cx - 30, cy - 30, 60, 60);
     ([[-43, 270], [43, 90]] as const).forEach(([dx, rot]) =>
-      u.el('t-arrow', cx + dx - 10, cy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` } }));
+      u.el('t-arrow', cx + dx - 10, cy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` }, key: `t-arrow${rot}` }));
     u.el(`t-circle t-attack t-confirm${inp.isHeld(AVK.OK) ? ' on' : ''}`, ATTACK.x + e - 29, ATTACK.y - 29, 58, 58, { html: ICONS.check });
   }
 

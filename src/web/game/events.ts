@@ -376,9 +376,12 @@ export class EventRunner {
         const it = SPAWN_ITEM[`${this.id}:${this.clock}`];
         if (it) { fs.eventItems.push({ cat: it[0], sub: it[1], x: it[2], y: it[3] }); break; }   // a new one every time
         const p = SPAWN_PLACE[`${this.id}:${arg}@${this.clock}`] ?? SPAWN_PLACE[`${this.id}:${arg}`];
-        if (arg >= 0x101) {                                    // not created: only one already on the map moves
-          const a = fs.actors.find((x) => x.id === arg);
-          if (a && p) { a.x = p[0]; a.y = p[1]; a.face((p[2] & 3) as Dir); }
+        if (arg >= 0x101) {                                    // 992 (events 74/75/79/80) only gets its id: one already on the map moves
+          let a = fs.actors.find((x) => x.id === arg);
+          // events 9 / 19 / 29: the placement code builds the light 0x102 the hero follows to the summon circle; without it
+          // WALK_TO / HIDE / CAM_FOLLOW 0x102 fell back to the leader (El walked the light's path and was hidden early)
+          if (!a && arg === 0x102 && p) a = fs.spawnActor(arg, true) ?? undefined;
+          if (a && p) { a.x = p[0]; a.y = p[1]; a.face((p[2] & 3) as Dir); if (arg === 0x102) { a.visible = true; a.alpha = 32; } }
           break;
         }
         // a boss standing in the room is the one brought in (event 8 King Dusty): a new one would stand beside it

@@ -830,6 +830,15 @@ export class FieldScene implements Scene {
     }
   }
 
+  /** FUN_0002f184 id 0x102, the event light (events 9 / 19 / 29): c.pxl frame 0x13 at (x, y + 8) (the sin / cos bob
+   *  is 22 * table(1024) >> 16, under a pixel), alpha pulsing over a 12..49 counter */
+  private lightDrawable(a: EvActor): Drawable | null {
+    if (!a.visible || a.alpha <= 0) return null;
+    const dd = (i: number) => this.ctx.assets.dd(0x400de3, 0x13 * 4 + i);
+    const k = 12 + this.tick % 38, alpha = Math.min(a.alpha, k > 31 ? 32 - (k & 31) : k);
+    return { cmfName: '', frame: 0, x: a.x, y: a.y + 8, depth: a.y, img: { name: 'c', sx: dd(0), sy: dd(1), w: dd(2), h: dd(3) }, fx: { alpha } };
+  }
+
   /** a new actor of that id (event spawn / PLACE of an actor not on the map) */
   spawnActor(id: number, forceNew = false): EvActor | null {
     if (!forceNew) { const a = this.actors.find((x) => x.id === id); if (a) return a; }
@@ -1965,14 +1974,15 @@ export class FieldScene implements Scene {
     const tgt = m;                                                     // the hit object's own HP (FUN_0006e120)
     const full = tgt.hp >= tgt.maxHp;
     if (tgt.firstHit < 0) tgt.firstHit = this.tick;
+    const alive = tgt.hp > 0;
     this.ghost = { m: tgt, old: tgt.hp, n: 1 };                         // DAT_003b3ab0 / 3ab4, DAT_003b3aaa = 1
     tgt.hp -= dmg + rdiv(dmg * (D[42] ?? 0), 100);                     // extra damage % on every hit
     const guarding = tgt.type === 0x1a && tgt.action === 12;          // Gardius in action 12 heals 3/2 of half the damage
     if (guarding) tgt.hp = Math.min(tgt.maxHp, tgt.hp + 3 * (dmg >> 1));
     if (dmg * 2 >= tgt.maxHp) this.achieve({ k: 'bigHit' });
-    if (tgt.hp <= 0) {
+    if (alive && tgt.hp <= 0) {                                       // counted once: the monster dies in its own update
       if (full) this.achieve({ k: 'oneHitKill' });
-      if (fromPlayer && aid === 100) this.achieve({ k: 'basicKill' });
+      if (aid === 100) this.achieve({ k: 'basicKill' });               // swings and c1's kind 3 basic projectile (skillAid 100)
       if (this.tick - tgt.firstHit <= 100) this.achieve({ k: 'quickKill' });
     }
     this.ctx.audio.playSfx(0x20 + model.cls);                         // FUN_0006e120 hit sound
@@ -2333,10 +2343,10 @@ export class FieldScene implements Scene {
     const ents: Drawable[] = [];
     const ev = this.events.active;
     for (const a of this.actors.slice().reverse()) {
-      const d = a.drawable();
+      const d = a.id === 0x102 ? this.lightDrawable(a) : a.drawable();
       if (!d) continue;
       if (this.partHide === 0x22c && a.id === 0x2c) d.hideClips = [0x11, 0x02];
-      d.shadow = a.id !== NO_SHADOW;
+      d.shadow = a.id !== NO_SHADOW && a.id !== 0x102;
       ents.push(d);
     }
     for (const g of this.gimmicks) ents.push(...g.drawables(field.oc));

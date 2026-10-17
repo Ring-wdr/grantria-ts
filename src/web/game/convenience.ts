@@ -33,6 +33,7 @@ const ROWS: Row[] = [
   { key: 'mapQuests', label: '퀘스트 위치', values: ['끔', '켬'], count: 2, help: '지도에 진행 중인 모든 퀘스트의 목적지를 파란 표시로 더합니다(방문한 방만).' },
   { key: 'autosaveMap', label: '맵 이동 자동 저장', values: ['끔', '켬'], count: 2, help: '저장할 수 있는 맵에 들어갈 때마다 저장합니다(쓰러지면 그곳부터).' },
   { key: 'abyss', label: '심연 도전', values: ['끔', '켬'], count: 2, help: '차원의 문 보스를 잡으면 결과 대신 더 강한 심연으로 내려갈지 묻습니다.' },
+  { key: 'powerSave', label: '절전 모드', values: ['끔', '켬'], count: 2, help: '발열을 줄입니다(실험). 기기에 따라 덜 부드러울 수 있습니다.' },
 ];
 
 const ROW_H = 20;
@@ -72,6 +73,7 @@ export class ConveniencePanel {
     // volumes stop at the ends; the other rows wrap like the original option rows
     o[r.key] = r.values ? (v + d + r.count) % r.count : Math.max(0, Math.min(r.count - 1, v + d));
     this.ctx.applyOptions();
+    if (r.key === 'powerSave') this.note = '앱을 다시 시작하면 적용됩니다.';           // power.ts: fixed at launch
     if (r.key === 'hudBuffs' && ++this.taps >= DEV_TAPS && !dev().unlocked) {
       unlockDev();
       this.note = '개발자 모드가 열렸습니다. 환경설정 맨 아래에서 들어갈 수 있습니다.';

@@ -109,6 +109,7 @@ export function createWebPlatform(): Platform {
     assets: webAssetSource(),
     now: () => performance.now(),
     vibrate: webVibrate,
+    refreshCap: () => {},                               // a page cannot pick the display mode
     prompt: async (message, initial) => window.prompt(message, initial),
     lifecycle: new PageLifecycle(),                     // a browser has no back key of its own to take over
     touchFirst: () => coarse.matches,

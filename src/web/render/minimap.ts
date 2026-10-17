@@ -20,8 +20,8 @@ export class Minimap {
   private bits = new Uint8Array(0);
   private mask: Uint8Array | null = null;
   private canvas = document.createElement('canvas');
-  private ctx2d: CanvasRenderingContext2D;
-  private tex: THREE.CanvasTexture;
+  protected ctx2d: CanvasRenderingContext2D;
+  protected tex: THREE.CanvasTexture;
   /** the pixels last put into the canvas */
   private last: Uint32Array | null = null;
 
@@ -121,7 +121,13 @@ export class Minimap {
       const c = MARK_COLOUR[d.mark];
       for (const [ddx, ddy] of MARK_SHAPE[d.mark]) dot(cx + ddx, cy + ddy, c);
     }
-    const words = new Uint32Array(out.buffer);
+    this.put(img);
+    u.texture(this.tex, 120, 108, 0, 45);
+  }
+
+  /** Put this tick's pixels into the canvas texture (legacy/minimap.ts: every tick, as 0.1.7). */
+  protected put(img: ImageData): void {
+    const words = new Uint32Array(img.data.buffer);
     let same = !!this.last;
     for (let i = 0; same && i < words.length; i++) same = words[i] === this.last![i];
     if (!same) {                                                     // unchanged (standing still): keep the canvas as is
@@ -129,6 +135,5 @@ export class Minimap {
       this.ctx2d.putImageData(img, 0, 0);
       this.tex.needsUpdate = true;
     }
-    u.texture(this.tex, 120, 108, 0, 45);
   }
 }

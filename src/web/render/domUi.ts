@@ -24,11 +24,11 @@ const BLEND: Record<number, string> = {
   8: 'hard-light', 10: 'hard-light', 13: 'plus-lighter', 14: 'multiply', 15: 'hard-light',
 };
 
-const px = (v: number) => `${Math.round(v * 100) / 100}px`;
+export const px = (v: number) => `${Math.round(v * 100) / 100}px`;
 const css = (rgb: number) => `#${(rgb & 0xffffff).toString(16).padStart(6, '0')}`;
 const css565 = (c: number) => { const [r, g, b] = rgb565(c); return `rgb(${r},${g},${b})`; };
 
-interface UiNode {
+export interface UiNode {
   el: HTMLElement;
   /** reconcile key (a group's children are keyed under it) */
   key: string;
@@ -150,12 +150,12 @@ export class DomUi extends Ui {
   /** how many no-longer-drawn elements node() moves out of the way at most (see there) */
   private static readonly SKIP = 2;
   readonly root: HTMLDivElement;
-  private nodes = new Map<string, UiNode>();
+  protected nodes = new Map<string, UiNode>();
   private nodeOf = new WeakMap<Element, UiNode>();
-  private counts = new Map<string, number>();
-  private seg = 0;
-  private cursors = new Map<HTMLElement, number>();
-  private parents: HTMLElement[] = [];
+  protected counts = new Map<string, number>();
+  protected seg = 0;
+  protected cursors = new Map<HTMLElement, number>();
+  protected parents: HTMLElement[] = [];
   private shared: DomShared;
   /** receives the keys returned by a clicked view element (wired to Input in main.ts) */
   onKeys: (keys: number[], pointerType: string) => void = () => {};
@@ -164,7 +164,7 @@ export class DomUi extends Ui {
   private mounts = new Map<string, { el: HTMLElement; used: boolean }>();
   /** hold(): keep the last drawn elements this frame if nothing is drawn (the HUD under a menu) */
   private held = false;
-  private drew = false;
+  protected drew = false;
   /** fullscreen bleed of an unclipped layer (the HUD): a fill over the whole view also covers the side margins */
   bleed = 0;
 
@@ -355,7 +355,7 @@ export class DomUi extends Ui {
   end(): void { /* the DOM is the output */ }
 
   /** Get (or create) the next element of a kind and put it at the current paint position. */
-  private node(kind: string, make: () => HTMLElement, id = ''): UiNode {
+  protected node(kind: string, make: () => HTMLElement, id = ''): UiNode {
     // counted per parent: an element drawn one more or one less time at the top level (a blinking icon) must not
     // shift the keys inside the groups after it, or their elements would move between parents every frame
     const parent = this.parents[this.parents.length - 1];
@@ -393,13 +393,13 @@ export class DomUi extends Ui {
   }
 
   /** apply a style string when it changed */
-  private static set(node: UiNode, style: string): void {
+  protected static set(node: UiNode, style: string): void {
     if (node.sig === style) return;
     node.sig = style;
     node.el.style.cssText = style;
   }
 
-  private opacity(extra = 1): string {
+  protected opacity(extra = 1): string {
     const o = (this.alpha / 32) * extra;
     return o >= 1 ? '' : `opacity:${Math.max(0, Math.round(o * 1000) / 1000)};`;
   }

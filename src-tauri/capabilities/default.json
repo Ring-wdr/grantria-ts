@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: the saves and the touch flag (app commands), vibration and picked-file names (native plugin), open / save dialogs and reading / writing the files picked in them, the quit question and quitting on the Android back key",
+  "description": "Main window: the saves and the touch flag (app commands), vibration, picked-file names and the 절전 모드 refresh-rate cap (native plugin), open / save dialogs and reading / writing the files picked in them, the quit question and quitting on the Android back key",
   "windows": ["main"],
   "permissions": [
     "core:default",

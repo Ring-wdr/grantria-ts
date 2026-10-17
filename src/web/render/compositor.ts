@@ -1,7 +1,8 @@
 // Renders a SpriteLayer in painter's order into an off-screen target. Quads whose blend mode
 // needs the destination color read a snapshot of everything drawn before them.
 import * as THREE from 'three';
-import { dstUniforms, type SpriteLayer } from './sprites';
+import { dstUniforms, SpriteLayer } from './sprites';
+import type { WebAssets } from '../assets';
 import { VIEW_H, VIEW_W } from '../../core/render';
 
 const IDENTITY = new THREE.Matrix4();
@@ -18,12 +19,12 @@ export class Compositor {
   pad = 0;
   /** the target changed size since the menu backdrop was frozen */
   backdropStale = false;
-  private rt = createTarget(VIEW_W, VIEW_H);
-  private snapshot: THREE.FramebufferTexture | null = null;
+  protected rt = createTarget(VIEW_W, VIEW_H);
+  protected snapshot: THREE.FramebufferTexture | null = null;
   private present = new THREE.Scene();
   private presentCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private presentMat: THREE.ShaderMaterial;
-  private scene = new THREE.Scene();
+  protected scene = new THREE.Scene();
   /** menu backdrop (FUN_0005dc50): the screen darkened and blurred once, reused while the menu is open */
   private backdrop = createTarget(1, 1);
   private blurMat = new THREE.ShaderMaterial({
@@ -54,7 +55,7 @@ export class Compositor {
   });
   private blurScene = new THREE.Scene();
 
-  constructor(private renderer: THREE.WebGLRenderer) {
+  constructor(protected renderer: THREE.WebGLRenderer) {
     this.presentMat = new THREE.ShaderMaterial({
       uniforms: { src: { value: this.rt.texture } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
@@ -127,6 +128,11 @@ export class Compositor {
     this.renderer.setRenderTarget(this.rt);
     this.renderer.render(this.present, this.presentCam);
     this.renderer.setRenderTarget(null);
+  }
+
+  /** a sprite layer this compositor draws (legacy/compositor.ts makes the 0.1.7 kind) */
+  newLayer(assets: WebAssets): SpriteLayer {
+    return new SpriteLayer(assets);
   }
 
   /** Copy the target as drawn so far into the destination snapshot. It covers the whole target: blends reading the

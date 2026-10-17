@@ -5,7 +5,8 @@ import type { WebAssets } from '../assets';
 import type { Compositor } from '../render/compositor';
 import type { Input } from '../input/input';
 import type { DomUi } from '../render/domUi';
-import type { GameAudio } from '../audio';
+import type { Sound } from '../audio';
+import type { PowerProfile } from '../power';
 import type { Options } from '../../core/save/options';
 
 export interface GameContext {
@@ -20,7 +21,9 @@ export interface GameContext {
   hud: DomUi;
   /** sprites used by menus (title logo, class idle animations) */
   cmfs: Record<string, Cmf>;
-  audio: GameAudio;
+  audio: Sound;
+  /** 절전 모드 on: the current way, off: the 0.1.7 way (power.ts), fixed at launch */
+  power: PowerProfile;
   /** option.dat settings; applyOptions pushes volume / speed changes to audio and the tick rate */
   options: Options;
   applyOptions(): void;

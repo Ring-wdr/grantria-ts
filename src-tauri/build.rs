@@ -7,7 +7,7 @@ fn main() {
             .plugin(
                 "native",
                 tauri_build::InlinedPlugin::new()
-                    .commands(&["vibrate", "display_name"])
+                    .commands(&["vibrate", "display_name", "refresh_cap"])
                     .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
             ),
     )

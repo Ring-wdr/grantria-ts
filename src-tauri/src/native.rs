@@ -29,6 +29,21 @@ async fn vibrate<R: Runtime>(app: AppHandle<R>, ms: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// 절전 모드: on a 90 / 120 Hz screen ask for the 60 Hz display mode of the same resolution, off back to the
+/// system's choice. Android only (NativePlugin.kt); a desktop window leaves the monitor alone.
+#[tauri::command]
+async fn refresh_cap<R: Runtime>(app: AppHandle<R>, on: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        #[derive(serde::Serialize)]
+        struct Args { on: bool }
+        app.state::<Android<R>>().0.run_mobile_plugin::<()>("refreshCap", Args { on }).map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = (app, on);
+    Ok(())
+}
+
 /// The name of a file picked in the open dialog. On Android the dialog returns a content:// URI, whose
 /// own name only the ContentResolver knows; the original save import reads the member number from it.
 #[tauri::command]
@@ -49,7 +64,7 @@ async fn display_name<R: Runtime>(app: AppHandle<R>, path: String) -> Result<Str
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("native")
-        .invoke_handler(tauri::generate_handler![vibrate, display_name])
+        .invoke_handler(tauri::generate_handler![vibrate, display_name, refresh_cap])
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]
             _app.manage(Android(_api.register_android_plugin("dev.ringwdr.grantria", "NativePlugin")?));

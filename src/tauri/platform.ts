@@ -93,6 +93,9 @@ export async function createTauriPlatform(): Promise<Platform> {
       invoke('plugin:native|vibrate', { ms }).catch(() => {});
       padRumble(ms);
     },
+    refreshCap(on) {
+      invoke('plugin:native|refresh_cap', { on }).catch(() => {});
+    },
     prompt: promptDialog,                    // window.prompt is not available in every webview
     lifecycle,
     touchFirst: () => touchFirst,            // fixed by the build target (Rust cfg(mobile))

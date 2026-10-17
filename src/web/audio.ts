@@ -9,7 +9,17 @@
 // previous track stay decoded, SFX (short) stay cached.
 import { platform } from '../core/platform';
 
-export class GameAudio {
+/** what the game asks of the sound (GameContext.audio): GameAudio here, or the 0.1.7 one (legacy/audio.ts) */
+export interface Sound {
+  enabled: boolean;
+  setPaused(p: boolean): void;
+  playBgm(n: number): void;
+  setEnabled(on: boolean, bgm?: number, sfx?: number): void;
+  stopBgm(): void;
+  playSfx(n: number): void;
+}
+
+export class GameAudio implements Sound {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, Promise<AudioBuffer | null>>();
   /** BGM files still decoded in buffers, most recent first (at most 2) */

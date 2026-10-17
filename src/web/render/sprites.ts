@@ -139,7 +139,7 @@ void main() {
 
 /** FUN_0007ac0c: nearest-neighbour zoom of everything drawn so far by k/256 around the target's centre (W/2, H/2):
  *  dst(x, y) = src(cx - tdiv((cx - x)·256, k), cy - tdiv((cy - y)·256, k)), rows counted from the top */
-const ZOOM_FRAG = /* glsl */ `
+export const ZOOM_FRAG = /* glsl */ `
 uniform sampler2D dstTex;
 uniform vec2 size;
 uniform float k;
@@ -291,7 +291,7 @@ export class SpriteLayer {
     return k;
   }
 
-  private material(tex: THREE.Texture, blend: number, alpha8: number): THREE.ShaderMaterial {
+  protected material(tex: THREE.Texture, blend: number, alpha8: number): THREE.ShaderMaterial {
     const fx = this.fx;
     const amt = fx?.amount ?? 0, a32 = fx?.alpha ?? 32, tint = fx?.tint ?? [0, 0, 0];
     const key = `${tex.uuid}|${blend}|${alpha8}|${tint.join(',')}|${amt}|${a32}`;
@@ -375,7 +375,13 @@ export class SpriteLayer {
     const u0 = sx / img.width, u1 = (sx + w) / img.width;
     let v0 = sy / img.height, v1 = (sy + h) / img.height;
     if (bottomUp) [v0, v1] = [1 - v0, 1 - v1];
-    const q = this.add(this.material(tex, blend, alpha8), x, y, x + dw, y + dh) * 8, t = this.uv;
+    this.emit(this.material(tex, blend, alpha8), x, y, dw, dh, u0, v0, u1, v1, rot, hflip);
+  }
+
+  /** Record one quad of quad() (legacy/sprites.ts: one mesh each, as 0.1.7). */
+  protected emit(mat: THREE.ShaderMaterial, x: number, y: number, dw: number, dh: number,
+    u0: number, v0: number, u1: number, v1: number, rot: number, hflip: number): void {
+    const q = this.add(mat, x, y, x + dw, y + dh) * 8, t = this.uv;
     // source corners TL, TR, BR, BL; destination corner i samples src[(i - rot) mod 4], hflip swaps TL/TR and BL/BR
     for (let i = 0; i < 4; i++) {
       const s = ((hflip ? i ^ 1 : i) - rot + 4) & 3;

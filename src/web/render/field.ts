@@ -24,8 +24,8 @@ export class Field extends FieldMap {
 
   constructor(protected override assets: WebAssets, private compositor: Compositor) {
     super(assets);
-    this.under = new SpriteLayer(assets);
-    this.view = new SpriteLayer(assets);
+    this.under = compositor.newLayer(assets);
+    this.view = compositor.newLayer(assets);
   }
 
   /** Load a map and pre-render its static under-layer. */

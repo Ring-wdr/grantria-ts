@@ -8,7 +8,6 @@ import galmuriUrl from 'galmuri/dist/Galmuri9.woff2?url';
 import './styles/ui.css';
 import { type Cmf } from '../core/data/assets';
 import { WebAssets } from './assets';
-import { Compositor } from './render/compositor';
 import { DEFAULT_EQUIP, SpriteLayer } from './render/sprites';
 import { VIEW_H, VIEW_W } from './render/field';
 import { Input } from './input/input';
@@ -20,23 +19,26 @@ import { RankingScene } from './game/ranking';
 import { ReplayListScene } from './game/replay';
 import { SandboxScene } from './game/sandbox';
 import { AVK } from '../core/keys';
-import { DomUi, beginDomFrame, endDomFrame, installBlink, padScroll } from './render/domUi';
-import { GameAudio } from './audio';
+import { beginDomFrame, endDomFrame, installBlink, padScroll } from './render/domUi';
 import { loadOptions, optionFps } from '../core/save/options';
 import { loadBindings } from './input/bindings';
 import { platform } from '../core/platform';
 import { dev } from '../core/rules/dev';
+import { powerProfile } from './power';
 import { exportPerf, perf, perfRecordCount, setPerfSource, startPerf, stopPerf, type PerfContext } from './perfLog';
 
 let tickMs = 50;
+/** the refresh-rate cap last sent to the host (null: not yet) */
+let refreshCap: boolean | null = null;
 
 loadBindings();                                                  // key / pad bindings from the platform store
 const stage = document.getElementById('stage')!;
 const canvas = document.getElementById('screen') as HTMLCanvasElement;
 const debug = document.getElementById('hud')!;
-// the canvas is never read back (the compositor reads its own targets) and nothing is depth-tested: no preserved
-// buffer (the browser swaps instead of copying each frame), no depth or stencil buffer
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, depth: false, stencil: false, powerPreference: 'low-power' });
+const options = loadOptions();
+/** 절전 모드 on: the current way, off: the 0.1.7 way (power.ts), fixed at launch */
+const power = powerProfile(options);
+const renderer = new THREE.WebGLRenderer({ canvas, ...power.gl });
 renderer.setPixelRatio(1);
 renderer.setSize(VIEW_W, VIEW_H, false);
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
@@ -45,15 +47,15 @@ const font = new FontFace('Galmuri', `url(${galmuriUrl})`);
 const assets = new WebAssets();
 await Promise.all([assets.init(), font.load().then((f) => document.fonts.add(f)).catch(() => { /* system font fallback */ })]);
 installBlink(assets.tables.blinkColors as [number, number][]);
-const compositor = new Compositor(renderer);
+const compositor = new power.Compositor(renderer);
 // DOM layers in paint order: field HUD, screen UI, the 1.3x overlay layer L1
 // the screen UI and L1 stay inside 480x320 (.stage-clip); only the HUD may reach into the side margins (edge layout)
 const clip = document.createElement('div');
 clip.className = 'stage-clip';
-const hud = new DomUi(assets, compositor, stage, 'hud');
+const hud = new power.DomUi(assets, compositor, stage, 'hud');
 stage.append(clip);
-const ui = new DomUi(assets, compositor, clip, 'main');
-const ui13 = new DomUi(assets, compositor, clip, 'zoom', 1.3);
+const ui = new power.DomUi(assets, compositor, clip, 'main');
+const ui13 = new power.DomUi(assets, compositor, clip, 'zoom', 1.3);
 const cmfs: Record<string, Cmf> = {};
 await Promise.all(MENU_CMFS.map(async (n) => { cmfs[n] = await assets.cmf(n); }));
 const layer = new SpriteLayer(assets);
@@ -64,10 +66,12 @@ await Promise.all([ui.init([...MENU_IMAGES, ...spriteImages]), ui13.init([...MEN
 let scene: Scene;
 for (const l of [hud, ui, ui13]) l.onKeys = (keys, pointerType) => ctx.input.inject(keys, pointerType);
 const ctx: GameContext = {
-  assets, renderer, compositor, ui, ui13, hud, cmfs, audio: new GameAudio(),
-  options: loadOptions(),
+  assets, renderer, compositor, ui, ui13, hud, cmfs, audio: new power.Audio(),
+  power,
+  options,
   applyOptions() {
     this.audio.setEnabled(this.options.volume !== 0, this.options.bgm, this.options.sfx);
+    if (refreshCap !== power.refreshCap) platform().refreshCap(refreshCap = power.refreshCap);
     tickMs = 1000 / optionFps(this.options);
     document.documentElement.style.setProperty('--tick', `${tickMs}ms`);
     fit();
@@ -104,14 +108,7 @@ function drawScene(): void {
   if (import.meta.env.DEV) debug.textContent = scene.debugLine?.() ?? '';   // dev only: a string and a DOM write per tick
 }
 
-/** Animation frames are only requested around the ticks (a timer wakes the loop WAKE_MS before the next one is due),
- *  except while a gamepad is connected: then every frame, so short presses are not missed. Each animation frame runs
- *  a BeginMainFrame through Blink and the WebView compositor even when the tick draws nothing (3 of 4 frames at 15 Hz).
- *  A tick runs on the frame nearest its due time (up to EARLY_MS early;
- *  `acc` keeps the average rate exact). WAKE_MS leaves the timer some slack over EARLY_MS, or a timer firing a little
- *  late misses that frame and the tick lands a frame later (33 / 67 ms gaps instead of 50). CSS animations are
- *  unaffected: transform / opacity ones run on the compositor, others request their own frames from Blink. */
-const WAKE_MS = 10, EARLY_MS = 8;
+/** ticks and frames follow the power profile's pacer (pacing.ts, legacy/pacing.ts) */
 let acc = 0, last = performance.now();
 function frame(now: number): void {
   const p = perf;                                                // 성능 기록 (perfLog.ts): null unless switched on
@@ -121,7 +118,7 @@ function frame(now: number): void {
   acc += Math.min(250, now - last);
   last = now;
   let stepped = false;
-  while (acc >= tickMs - EARLY_MS) {
+  while (power.pacer.due(acc, tickMs)) {
     const t0 = p ? performance.now() : 0;
     scene.update(ctx.input.takePresses());
     if (p) p.update(performance.now() - t0);
@@ -133,10 +130,7 @@ function frame(now: number): void {
     drawScene();
     if (p) p.drawn(performance.now() - t0);
   }
-  // from the frame time `now`, not from here: the tick and the draw above took part of the wait already
-  const wait = tickMs - acc - WAKE_MS - (performance.now() - now);
-  if (ctx.input.padConnected || wait < 20) requestAnimationFrame(frame);
-  else setTimeout(() => requestAnimationFrame(frame), wait);
+  power.pacer.next(frame, now, acc, tickMs, ctx.input.padConnected);
 }
 
 // dev-only test hook: advance ticks without requestAnimationFrame (hidden panes throttle it)

@@ -50,6 +50,18 @@ test('no shell hooks: no window globals for the shell, no host-name branches, no
   assert.deepEqual(bad, []);
 });
 
+// 절전 모드: the 0.1.7 ways live in web/legacy/ and only web/power.ts picks between them and the current ones, so no
+// other module branches on the option and retiring a legacy way touches nothing else
+test('only web/power.ts imports web/legacy and reads powerSave', () => {
+  const web = join(root, 'web'), power = join(web, 'power.ts'), legacy = join(web, 'legacy');
+  const settings = join(web, 'game', 'convenience.ts');                    // the 편의 설정 row that sets it
+  const bad = files(web).filter((f) => f !== power && !f.startsWith(legacy)).flatMap((f) => [
+    ...imports(f).filter((s) => /(^|\/)legacy\//.test(s)).map((s) => `${relative(root, f)}: ${s}`),
+    ...(f !== settings && /\bpowerSave\b/.test(readFileSync(f, 'utf-8')) ? [`${relative(root, f)}: powerSave`] : []),
+  ]);
+  assert.deepEqual(bad, []);
+});
+
 test('tauri uses only core, the shared web entry points and @tauri-apps', () => {
   const ok = (s: string) => s.startsWith('@tauri-apps/') || s.startsWith('../core/') || s === '../web/platform' || s === '../web/app' || s.startsWith('./');
   const bad = files(join(root, 'tauri')).flatMap((f) => imports(f).filter((s) => !ok(s)).map((s) => `${relative(root, f)}: ${s}`));

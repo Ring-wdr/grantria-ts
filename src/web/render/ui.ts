@@ -404,7 +404,7 @@ export class GlUi extends Ui {
     super(assets, zoom);
     const hw = VIEW_W / 2 / zoom, hh = VIEW_H / 2 / zoom;
     this.cam = new THREE.OrthographicCamera(VIEW_W / 2 - hw, VIEW_W / 2 + hw, VIEW_H / 2 - hh, VIEW_H / 2 + hh, -1, 1);
-    this.layer = new SpriteLayer(assets);
+    this.layer = compositor.newLayer(assets);
     this.text = new TextRenderer(assets);
     this.white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
     this.white.needsUpdate = true;

@@ -51,6 +51,9 @@ export interface Platform {
   now(): number;
   /** phone / pad rumble, ms */
   vibrate(ms: number): void;
+  /** 절전 모드: on a 90 / 120 Hz screen ask for the 60 Hz display mode (Android), off back to the system's choice;
+   *  hosts that cannot pick a display mode do nothing */
+  refreshCap(on: boolean): void;
   /** one-line text input; null when cancelled */
   prompt(message: string, initial: string): Promise<string | null>;
   lifecycle: HostLifecycle;
@@ -81,6 +84,7 @@ const headless: Platform = {
   },
   now: () => Date.now(),
   vibrate: () => {},
+  refreshCap: () => {},
   prompt: async () => null,
   lifecycle: { onPause: () => {}, setBackHandler: () => {} },
   touchFirst: () => false,

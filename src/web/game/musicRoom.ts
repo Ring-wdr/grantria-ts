@@ -85,7 +85,7 @@ export class MusicRoomScene {
     heardFromSaves(new StoryDb(ctx.assets));
     this.heard = new Set(heardBgm());
     ctx.input.uiMode = true; ctx.input.zones = []; ctx.input.padField = false; ctx.input.confirm = false;
-    ctx.audio.setBgmLoop?.(!continuous);
+    ctx.audio.setBgmLoop(!continuous);
     this.select(this.cur);
   }
 
@@ -99,16 +99,16 @@ export class MusicRoomScene {
       else if (k === AVK.TAB_L) this.prev();
       else if (k === AVK.TAB_R) this.next();
       else if (k === AVK.K3) shuffle = !shuffle;
-      else if (k === AVK.STAR) { continuous = !continuous; this.ctx.audio.setBgmLoop?.(!continuous); }
+      else if (k === AVK.STAR) { continuous = !continuous; this.ctx.audio.setBgmLoop(!continuous); }
       else if (k === AVK.CLR) { this.leave(); return; }
     }
-    if (continuous && this.ctx.audio.bgmTime?.()?.ended) this.next();
+    if (continuous && this.ctx.audio.bgmTime()?.ended) this.next();
   }
 
   /** back to the title: its track loops again, and a paused or finished one makes way for it */
   private leave(): void {
-    const a = this.ctx.audio, t = a.bgmTime?.();
-    a.setBgmLoop?.(true);
+    const a = this.ctx.audio, t = a.bgmTime();
+    a.setBgmLoop(true);
     if (t?.paused || t?.ended) a.stopBgm();
     this.ctx.go(new TitleScene(this.ctx));
   }
@@ -133,7 +133,7 @@ export class MusicRoomScene {
   }
 
   private prev(): void {
-    const t = this.ctx.audio.bgmTime?.();
+    const t = this.ctx.audio.bgmTime();
     if (t && !t.ended && t.t > RESTART_S) { this.play(this.playing, false); return; }
     if (shuffle && this.history.length) { this.play(this.history.pop()!, false); return; }
     const order = this.order();
@@ -141,10 +141,10 @@ export class MusicRoomScene {
   }
 
   private togglePause(): void {
-    const t = this.ctx.audio.bgmTime?.();
+    const t = this.ctx.audio.bgmTime();
     if (!t) return;
     if (t.ended) this.play(this.playing, false);
-    else this.ctx.audio.pauseBgm?.(!t.paused);
+    else this.ctx.audio.pauseBgm(!t.paused);
   }
 
   private select(i: number): void {
@@ -196,7 +196,7 @@ export class MusicRoomScene {
   }
 
   draw(): void {
-    const pt = this.ctx.audio.bgmTime?.() ?? null, stopped = !!pt && (pt.paused || pt.ended);
+    const pt = this.ctx.audio.bgmTime() ?? null, stopped = !!pt && (pt.paused || pt.ended);
     render(this.ctx, () => {
       const u = this.ctx.ui;
       frozenTitle(this.ctx);
@@ -209,4 +209,4 @@ export class MusicRoomScene {
   }
 }
 
-type BgmTime = NonNullable<ReturnType<NonNullable<Sound['bgmTime']>>>;
+type BgmTime = NonNullable<ReturnType<Sound['bgmTime']>>;

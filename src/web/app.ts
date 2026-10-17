@@ -26,6 +26,7 @@ import { loadBindings } from './input/bindings';
 import { platform } from '../core/platform';
 import { dev } from '../core/rules/dev';
 import { addHeard } from '../core/rules/records';
+import { GameAudio } from './audio';
 import { powerProfile } from './power';
 import { exportPerf, perf, perfRecordCount, setPerfSource, startPerf, stopPerf, type PerfContext } from './perfLog';
 
@@ -67,7 +68,7 @@ await Promise.all([ui.init([...MENU_IMAGES, ...spriteImages]), ui13.init([...MEN
 
 let scene: Scene;
 for (const l of [hud, ui, ui13]) l.onKeys = (keys, pointerType) => ctx.input.inject(keys, pointerType);
-const audio = new power.Audio();
+const audio = new GameAudio();
 const playBgm = audio.playBgm.bind(audio);
 audio.playBgm = (n) => { addHeard([n]); playBgm(n); };   // 음악감상 lists the tracks ever played
 const ctx: GameContext = {

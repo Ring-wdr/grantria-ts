@@ -6,7 +6,6 @@
 // line here.
 import type { WebGLRenderer, WebGLRendererParameters } from 'three';
 import type { Options } from '../core/save/options';
-import { GameAudio, type Sound } from './audio';
 import { tickAligned, type FramePacer } from './pacing';
 import { Compositor } from './render/compositor';
 import { DomUi } from './render/domUi';
@@ -19,7 +18,6 @@ export interface PowerProfile {
   readonly gl: Omit<WebGLRendererParameters, 'canvas'>;
   /** ask the host for 60 Hz on a 90 / 120 Hz screen (Platform.refreshCap) */
   readonly refreshCap: boolean;
-  readonly Audio: new () => Sound;
   /** the compositor, and through it the kind of sprite layer (Compositor.newLayer) */
   readonly Compositor: new (renderer: WebGLRenderer) => Compositor;
   readonly DomUi: typeof DomUi;
@@ -32,7 +30,6 @@ export const SAVING: PowerProfile = {
   gl: { antialias: false, depth: false, stencil: false, powerPreference: 'low-power' },
   // the game draws at 20 Hz and its UI animations need no more than 60
   refreshCap: true,
-  Audio: GameAudio,
   Compositor,
   DomUi,
 };

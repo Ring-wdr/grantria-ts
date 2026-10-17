@@ -9,7 +9,7 @@
 // previous track stay decoded, SFX (short) stay cached.
 import { platform } from '../core/platform';
 
-/** what the game asks of the sound (GameContext.audio): GameAudio here, or the 0.1.7 one (legacy/audio.ts) */
+/** what the game asks of the sound (GameContext.audio) */
 export interface Sound {
   enabled: boolean;
   setPaused(p: boolean): void;
@@ -18,9 +18,9 @@ export interface Sound {
   stopBgm(): void;
   playSfx(n: number): void;
   /** 음악감상's player: where the BGM is, pause / go on, loop or play each track once */
-  bgmTime?(): { t: number; d: number; paused: boolean; ended: boolean } | null;
-  pauseBgm?(on: boolean): void;
-  setBgmLoop?(loop: boolean): void;
+  bgmTime(): { t: number; d: number; paused: boolean; ended: boolean } | null;
+  pauseBgm(on: boolean): void;
+  setBgmLoop(loop: boolean): void;
 }
 
 export class GameAudio implements Sound {

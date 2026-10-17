@@ -2,9 +2,9 @@
 // as 0.1.7 had it. Bug fixes and features since 0.1.7 stay in (each legacy file names the ones it keeps).
 // Retired from here (both ways now): the debug line under the stage, built in dev builds only; the never-drawn
 // #overlay canvas, gone; the virtual stick, drawn after the other touch buttons; the minimap upload, skipped when
-// the pixels have not changed (the same picture either way).
+// the pixels have not changed (the same picture either way); the sound: the 'playback' latency, the context
+// suspended while nothing can be heard, only the current and the previous BGM kept decoded.
 import type { PowerProfile } from '../power';
-import { LegacyAudio } from './audio';
 import { LegacyCompositor } from './compositor';
 import { LegacyDomUi } from './domUi';
 import { everyFrame } from './pacing';
@@ -13,7 +13,6 @@ export const LEGACY: PowerProfile = {
   pacer: everyFrame,
   gl: { antialias: false, preserveDrawingBuffer: true },
   refreshCap: false,                                               // the screen's own refresh rate
-  Audio: LegacyAudio,
   Compositor: LegacyCompositor,
   DomUi: LegacyDomUi,
 };

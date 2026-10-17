@@ -705,7 +705,7 @@ export class FieldScene implements Scene {
       if (this.gimmicks.length < 15) this.gimmicks.push(gm);
     }
     await field.preloadSprite('cmf_oc', field.oc);
-    this.minimap ??= new ctx.power.Minimap(ctx.assets);
+    this.minimap ??= new Minimap(ctx.assets);
     this.minimap.build(field.map, field.kind0Markers());
     this.run = null;
     this.gatherFx = [];

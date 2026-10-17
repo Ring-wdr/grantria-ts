@@ -20,8 +20,8 @@ export class Minimap {
   private bits = new Uint8Array(0);
   private mask: Uint8Array | null = null;
   private canvas = document.createElement('canvas');
-  protected ctx2d: CanvasRenderingContext2D;
-  protected tex: THREE.CanvasTexture;
+  private ctx2d: CanvasRenderingContext2D;
+  private tex: THREE.CanvasTexture;
   /** the pixels last put into the canvas */
   private last: Uint32Array | null = null;
 
@@ -125,8 +125,8 @@ export class Minimap {
     u.texture(this.tex, 120, 108, 0, 45);
   }
 
-  /** Put this tick's pixels into the canvas texture (legacy/minimap.ts: every tick, as 0.1.7). */
-  protected put(img: ImageData): void {
+  /** Put this tick's pixels into the canvas texture. */
+  private put(img: ImageData): void {
     const words = new Uint32Array(img.data.buffer);
     let same = !!this.last;
     for (let i = 0; same && i < words.length; i++) same = words[i] === this.last![i];

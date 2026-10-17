@@ -6,12 +6,10 @@
 // line here.
 import type { WebGLRenderer, WebGLRendererParameters } from 'three';
 import type { Options } from '../core/save/options';
-import type { WebAssets } from './assets';
 import { GameAudio, type Sound } from './audio';
 import { tickAligned, type FramePacer } from './pacing';
 import { Compositor } from './render/compositor';
 import { DomUi } from './render/domUi';
-import { Minimap } from './render/minimap';
 import { LEGACY } from './legacy/power';
 
 export interface PowerProfile {
@@ -25,7 +23,6 @@ export interface PowerProfile {
   /** the compositor, and through it the kind of sprite layer (Compositor.newLayer) */
   readonly Compositor: new (renderer: WebGLRenderer) => Compositor;
   readonly DomUi: typeof DomUi;
-  readonly Minimap: new (assets: WebAssets) => Minimap;
 }
 
 export const SAVING: PowerProfile = {
@@ -38,7 +35,6 @@ export const SAVING: PowerProfile = {
   Audio: GameAudio,
   Compositor,
   DomUi,
-  Minimap,
 };
 
 export function powerProfile(o: Options): PowerProfile {

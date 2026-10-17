@@ -1,7 +1,7 @@
 // 음악감상 (not in the original): title screen → 음악감상 → the 19 BGM tracks (s0..s18), the ones ever heard
 // playable (records.heard, account-wide, written by every playBgm in app.ts). The tracks heard before that record
 // are read from what the slots and the records already show: the zones of visited maps, the BGM switches of the
-// story events seen, a boss kill. The track names are this port's own (the original names none).
+// story events seen, a boss kill, a death. The track names are this port's own (the original names none).
 // The player: OK plays the chosen row (or pauses the one playing), 이전 / 다음 곡 go through the heard tracks only,
 // 셔플 picks them at random (이전 곡 then walks back what was played), 계속 재생 plays each once and goes on to the
 // next instead of looping it.
@@ -52,6 +52,7 @@ function heardFromSaves(sdb: StoryDb): void {
     const s = loadSlot(i);
     if (!s?.story) continue;
     for (const z of Story.from(s.story, s.cls).zones) if (ZONE_BGM[z] !== undefined) tracks.add(ZONE_BGM[z]);
+    if ((s.story.counters?.deaths ?? 0) > 0) tracks.add(18);       // the death BGM (achievement counter 'deaths')
   }
   if (Object.keys(records().bosses).length) tracks.add(12);
   for (const cls of [0, 1, 2]) for (const e of seenEvents(cls)) {

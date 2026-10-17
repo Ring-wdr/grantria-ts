@@ -13,7 +13,10 @@ import type { Sound } from '../audio';
 export class LegacyAudio implements Sound {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, Promise<AudioBuffer | null>>();
-  private bgm: { n: number; src: AudioBufferSourceNode | null } = { n: -1, src: null };
+  /** at: context time the loop started from; off: where a paused track stopped; ended: a one-shot track ran out */
+  private bgm: { n: number; src: AudioBufferSourceNode | null; at?: number; off?: number; ended?: boolean } = { n: -1, src: null };
+  /** BGM loops (the game always); 음악감상's 계속 재생 plays each track once */
+  private bgmLoop = true;
   private sfx: AudioBufferSourceNode | null = null;
   private bgmGain: GainNode | null = null;
   private sfxGain: GainNode | null = null;
@@ -77,20 +80,73 @@ export class LegacyAudio implements Sound {
   playBgm(n: number): void {
     this.wanted = n;
     if (n < 0 || n >= 19 || this.bgm.n === n || !this.ctx) return;
-    this.bgm.src?.stop();
+    const old = this.bgm.src;
+    this.bgm.src = null;
+    old?.stop();
+    this.pausedBuf = null;
     // compared by identity: after stopBgm() and the same track again, both decodes would pass a check of n and the
     // first source would play on with no reference left to stop it
-    const cur = this.bgm = { n, src: null as AudioBufferSourceNode | null };
+    const cur: typeof this.bgm = this.bgm = { n, src: null };
     void this.load(n).then((buf) => {
       if (!buf || !this.ctx || this.bgm !== cur) return;
-      const src = this.ctx.createBufferSource();
-      src.buffer = buf;
-      src.loop = true;
-      src.connect(this.bgmGain!);
-      src.start();
-      cur.src = src;
+      this.startBgm(cur, buf, 0);
     });
     if (this.bgmGain) this.bgmGain.gain.value = this.bgmValue();
+  }
+
+  /** a source for track `cur` from `off` seconds in */
+  private startBgm(cur: typeof this.bgm, buf: AudioBuffer, off: number): void {
+    const ctx = this.ctx!, src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = this.bgmLoop;
+    src.connect(this.bgmGain!);
+    src.onended = () => { if (cur.src === src) cur.ended = true; };   // a stop() clears cur.src first
+    src.start(0, off);
+    cur.src = src;
+    cur.at = ctx.currentTime - off;
+    cur.off = undefined;
+    cur.ended = false;
+  }
+
+  /** where the current BGM is (seconds into it) and its length; null before it has started (음악감상) */
+  bgmTime(): { t: number; d: number; paused: boolean; ended: boolean } | null {
+    const { src, at, off, ended } = this.bgm, d = (src ?? this.pausedBuf)?.buffer?.duration;
+    if (!this.ctx || !d || at === undefined) return null;
+    if (off !== undefined) return { t: off, d, paused: true, ended: false };
+    if (ended) return { t: d, d, paused: false, ended: true };
+    const t = this.ctx.currentTime - at;
+    return { t: this.bgmLoop ? t % d : Math.min(t, d), d, paused: false, ended: false };
+  }
+
+  /** the stopped source of a paused track, kept for its buffer */
+  private pausedBuf: AudioBufferSourceNode | null = null;
+
+  /** 음악감상: pause the BGM where it is, or go on from there */
+  pauseBgm(on: boolean): void {
+    const cur = this.bgm, t = this.bgmTime();
+    if (!t || !this.ctx) return;
+    if (on && !t.paused && !t.ended) {
+      const src = cur.src!;
+      cur.src = null;
+      src.stop();
+      this.pausedBuf = src;
+      cur.off = t.t;
+    } else if (!on && t.paused && this.pausedBuf?.buffer) {
+      const buf = this.pausedBuf.buffer;
+      this.pausedBuf = null;
+      this.startBgm(cur, buf, cur.off!);
+    }
+  }
+
+  /** 음악감상's 계속 재생: false plays the current and later tracks once (bgmTime().ended), true loops them again */
+  setBgmLoop(loop: boolean): void {
+    if (this.bgmLoop === loop) return;
+    const t = this.bgmTime();
+    this.bgmLoop = loop;
+    const src = this.bgm.src;
+    if (!src || !t || t.ended) return;
+    src.loop = loop;
+    if (!loop) this.bgm.at = this.ctx!.currentTime - t.t;          // the loops already played do not count
   }
 
   private bgmValue(): number { return this.enabled ? 0.5 * this.bgmLevel / 10 : 0; }
@@ -106,8 +162,10 @@ export class LegacyAudio implements Sound {
   }
 
   stopBgm(): void {
-    this.bgm.src?.stop();
+    const src = this.bgm.src;
     this.bgm = { n: -1, src: null };
+    src?.stop();
+    this.pausedBuf = null;
     this.wanted = -1;
   }
 

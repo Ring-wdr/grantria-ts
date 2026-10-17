@@ -33,6 +33,8 @@ export interface Records {
    *  record have been read into it once */
   seen?: Record<string, number[]>;
   seenFromSlots?: boolean;
+  /** BGM tracks (0..18) ever played, for 음악감상 on the title screen */
+  heard?: number[];
 }
 
 let cache: Records | null = null;
@@ -41,7 +43,7 @@ export function records(): Records {
   if (cache) return cache;
   const r = loadJson<Partial<Records>>(KEY) ?? {};
   cache = { items: r.items ?? {}, bosses: r.bosses ?? {}, rush: r.rush, abyss: r.abyss ?? {}, replays: r.replays ?? 0, extraPaid: r.extraPaid ?? [],
-    seen: r.seen ?? {}, seenFromSlots: r.seenFromSlots ?? false };
+    seen: r.seen ?? {}, seenFromSlots: r.seenFromSlots ?? false, heard: r.heard ?? [] };
   return cache;
 }
 
@@ -107,6 +109,17 @@ export function addSeen(cls: number, events: Iterable<number>): void {
 
 /** the slots made before the seen record were read into it (once) */
 export function markSeenFromSlots(): void { records().seenFromSlots = true; saveRecords(); }
+
+/** BGM tracks heard, sorted */
+export function heardBgm(): number[] { return [...(records().heard ?? [])].sort((a, b) => a - b); }
+
+/** BGM tracks were heard; saved when any is new */
+export function addHeard(tracks: Iterable<number>): void {
+  const r = records(), list = (r.heard ??= []);
+  let changed = false;
+  for (const n of tracks) if (n >= 0 && n < 19 && !list.includes(n)) { list.push(n); changed = true; }
+  if (changed) saveRecords();
+}
 
 export function extraPaid(id: number): boolean { return !!records().extraPaid?.includes(id); }
 

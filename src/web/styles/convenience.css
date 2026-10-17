@@ -63,11 +63,17 @@
 .ui-view .shop-qty.shop-qty-wide { width: 214px; }
 .mc-quest-other { filter: hue-rotate(160deg) saturate(1.3); opacity: 0.85; }
 
-/* title 회상 button (screens.ts titleButtons): the original buttons' white lettering with a dark outline; dimmed
-   as a whole like the unchosen originals (alpha 0x1A / 32) */
-.u-group.title-dim { opacity: 0.8125; }
-.title-btn-label { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 700; letter-spacing: 1px;
-  text-shadow: -1px 0 #102850, 1px 0 #102850, 0 -1px #102850, 0 1px #102850, 1px 1px #102850; }
+/* title menu (screens.ts titleButtons): a text column at the left, white lettering with the dark outline of the
+   original buttons; the chosen row gold, on a band fading out to the right, with a pointer at its left. No CSS
+   animations: the element moves in the DOM now and then, which would restart them (the fade-in is timed in screens.ts) */
+.tm-list { width: 100%; height: 100%; }
+.tm-item { position: relative; display: flex; align-items: center; padding-left: 18px; color: #dfe8ff; font-size: 15px;
+  letter-spacing: 1px; opacity: 0.85; text-shadow: -1px 0 #102850, 1px 0 #102850, 0 -1px #102850, 0 1px #102850, 1px 1px #102850;
+  transition: color 0.12s, opacity 0.12s, padding-left 0.12s; }
+.tm-item.sel { color: #ffe066; opacity: 1; padding-left: 22px;
+  background: linear-gradient(90deg, rgba(10, 26, 66, 0.8), rgba(10, 26, 66, 0.45) 60%, rgba(10, 26, 66, 0)); }
+.tm-item.sel::before { content: ''; position: absolute; left: 7px; top: 50%; margin-top: -4px; border: 4px solid transparent;
+  border-left: 6px solid #ffe066; border-right-width: 0; }
 
 /* 회차 tag on a save slot card (screens.ts SlotScene) */
 .slot-lap { width: 100%; height: 100%; font-size: 8px; line-height: 10px; color: #8df1f2; white-space: nowrap;
@@ -152,3 +158,58 @@
 .rc-check { width: 10px; height: 10px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 9px;
   line-height: 10px; color: #8df1f2; border: 1px solid #5d7092; border-radius: 2px; }
 .rc-chain.on .rc-check { border-color: #8df1f2; }
+
+/* 음악감상 (musicRoom.ts): the 회상 screen's frame (.rc-screen / .rc-top / .rc-body), a track list and a player */
+.mr-count { color: #8df1f2; font-size: 10px; }
+.mr-list-box { width: 270px; height: 274px; flex: none; padding: 2px; background: rgba(0, 0, 0, 0.6); }
+.mr-scroll { width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; }
+.mr-row { gap: 8px; padding: 0 8px; border-radius: 3px; font-size: 11px; color: #e6efff; pointer-events: auto; cursor: pointer;
+  border: 1px solid transparent; }
+.mr-row.cur { border-color: #8df1f2; background: rgba(141, 241, 242, 0.1); }
+.mr-row.playing { color: #ffe066; }
+.mr-row.locked { color: #4d566a; }
+.mr-no { width: 16px; flex: none; color: #6b7a96; font-size: 9px; }
+.mr-row.playing .mr-no { color: #ffe066; }
+.mr-name { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mr-len { flex: none; color: #6b7a96; font-size: 9px; }
+.mr-eq { flex: none; display: flex; align-items: flex-end; gap: 1px; height: 9px; }
+.mr-eq i { width: 2px; height: 100%; background: #ffe066; transform-origin: bottom; animation: mr-eq 0.9s ease-in-out infinite; }
+.mr-eq i:nth-child(2) { animation-delay: -0.3s; }
+.mr-eq i:nth-child(3) { animation-delay: -0.6s; }
+@keyframes mr-eq { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+.mr-info { width: 186px; flex: none; gap: 5px; padding-top: 14px; }   /* under the close button (Ui.closeButton) */
+.mr-detail { gap: 4px; padding: 8px; min-height: 0; }
+.mr-label { font-size: 9px; color: #9aa6bd; letter-spacing: 1px; }
+.mr-title { font-size: 16px; line-height: 20px; color: #ffe066; }
+.mr-where { font-size: 10px; color: #8df1f2; }
+.mr-disc { width: 72px; height: 72px; margin: auto; flex: none; border-radius: 50%; border: 1px solid #3a4a66;
+  background: radial-gradient(circle, #ffe066 0 7px, #10141e 8px 13px, #1c2333 14px 15px, #10141e 16px 25px, #1c2333 26px 27px,
+    #10141e 28px 37px, #1c2333 38px 39px, #10141e 40px);
+  animation: mr-spin 4s linear infinite paused; }
+.mr-disc::after { content: ''; display: block; width: 100%; height: 100%; border-radius: 50%;
+  background: conic-gradient(from 30deg, transparent 0 40deg, rgba(141, 241, 242, 0.18) 60deg, transparent 80deg 220deg, rgba(141, 241, 242, 0.12) 240deg, transparent 260deg); }
+.mr-disc.spin { animation-play-state: running; }
+.mr-disc.locked { opacity: 0.3; }
+@keyframes mr-spin { to { transform: rotate(360deg); } }
+.mr-progress { gap: 3px; margin-top: auto; }
+.mr-bar { height: 4px; border-radius: 2px; background: #2a3346; overflow: hidden; }
+.mr-fill { height: 100%; background: #8df1f2; }
+.mr-times { justify-content: space-between; font-size: 9px; color: #9aa6bd; }
+.mr-row.playing.stopped .mr-eq i { animation-play-state: paused; }
+.mr-transport { justify-content: center; align-items: center; gap: 10px; margin-top: 4px; }
+.mr-ctl { position: relative; width: 30px; height: 30px; flex: none; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid #3a4a66; background: rgba(0, 0, 0, 0.5); pointer-events: auto; cursor: pointer; color: #e6efff; }
+.mr-ctl.main { width: 38px; height: 38px; border-color: #8df1f2; color: #8df1f2; }
+.mr-ctl:active { transform: scale(0.94); }
+.mr-ctl .v-pad-corner { right: -6px; bottom: -4px; top: auto; }
+.mr-ic { position: relative; display: block; }
+.mr-ic.play { margin-left: 3px; border: 7px solid transparent; border-left: 11px solid currentColor; border-right-width: 0; }
+.mr-ic.pause { width: 10px; height: 12px; border-left: 3px solid currentColor; border-right: 3px solid currentColor; }
+.mr-ic.prev, .mr-ic.next { border: 5px solid transparent; border-right-width: 0; border-left: 8px solid currentColor; }
+.mr-ic.prev { transform: scaleX(-1); }
+.mr-ic.prev::after, .mr-ic.next::after { content: ''; position: absolute; left: 0; top: -5px; width: 2px; height: 10px; background: currentColor; }
+.mr-modes { gap: 4px; }
+.mr-mode { flex: 1 1 0; gap: 4px; height: 18px; padding: 0 4px; font-size: 9px; color: #9aa6bd; border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6); pointer-events: auto; cursor: pointer; }
+.mr-mode.on { color: #e6efff; }
+.mr-mode.on .rc-check { border-color: #8df1f2; }

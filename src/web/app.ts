@@ -17,6 +17,7 @@ import { CharSelectScene, LogoScene, MENU_CMFS, MENU_IMAGES, PlayScene, SlotScen
 import { DataScene } from './game/dataScene';
 import { RankingScene } from './game/ranking';
 import { ReplayListScene } from './game/replay';
+import { MusicRoomScene } from './game/musicRoom';
 import { SandboxScene } from './game/sandbox';
 import { AVK } from '../core/keys';
 import { beginDomFrame, endDomFrame, installBlink, padScroll } from './render/domUi';
@@ -24,6 +25,7 @@ import { loadOptions, optionFps } from '../core/save/options';
 import { loadBindings } from './input/bindings';
 import { platform } from '../core/platform';
 import { dev } from '../core/rules/dev';
+import { addHeard } from '../core/rules/records';
 import { powerProfile } from './power';
 import { exportPerf, perf, perfRecordCount, setPerfSource, startPerf, stopPerf, type PerfContext } from './perfLog';
 
@@ -65,8 +67,11 @@ await Promise.all([ui.init([...MENU_IMAGES, ...spriteImages]), ui13.init([...MEN
 
 let scene: Scene;
 for (const l of [hud, ui, ui13]) l.onKeys = (keys, pointerType) => ctx.input.inject(keys, pointerType);
+const audio = new power.Audio();
+const playBgm = audio.playBgm.bind(audio);
+audio.playBgm = (n) => { addHeard([n]); playBgm(n); };   // 음악감상 lists the tracks ever played
 const ctx: GameContext = {
-  assets, renderer, compositor, ui, ui13, hud, cmfs, audio: new power.Audio(),
+  assets, renderer, compositor, ui, ui13, hud, cmfs, audio,
   power,
   options,
   applyOptions() {
@@ -152,7 +157,7 @@ if (import.meta.env.DEV) {
  *  would be 'qa'), hence the explicit names for the main scenes. */
 const SCENE_NAMES: [Function, string][] = [
   [PlayScene, 'play'], [TitleScene, 'title'], [LogoScene, 'logo'], [SlotScene, 'slot'], [CharSelectScene, 'charSelect'],
-  [DataScene, 'data'], [RankingScene, 'ranking'], [ReplayListScene, 'replayList'], [SandboxScene, 'sandbox'],
+  [DataScene, 'data'], [RankingScene, 'ranking'], [ReplayListScene, 'replayList'], [MusicRoomScene, 'musicRoom'], [SandboxScene, 'sandbox'],
 ];
 function sceneName(s: Scene): string {
   for (const [cls, name] of SCENE_NAMES) if (s instanceof cls) return name;

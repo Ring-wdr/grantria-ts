@@ -29,6 +29,7 @@ import { keyHint } from '../input/keyHints';
 import { BacklogView, backlog } from './backlog';
 import { SandboxScene } from './sandbox';
 import { ReplayListScene } from './replay';
+import { MusicRoomScene } from './musicRoom';
 import { saveOptions } from '../../core/save/options';
 
 export const MENU_IMAGES = ['c', 't', 'f', 'logo', 'h_logo', 'title_bg', 'title_bg2', 'char_slot'];
@@ -43,6 +44,9 @@ const CLOUD_PIECES: Piece[] = [
   [0, 0x69, 0xf0, 0x77, 0, 0x77, 0x09], [0, 0x69, 0xf0, 0x77, 0, 0, 0x00],
   [0, 0x69, 0xf0, 0x77, 0xf0, 0x77, 0x08], [0, 0x69, 0xf0, 0x77, 0xf0, 0, 0x01],
 ];
+
+/** the logo and the island sit this far right of the original's centre, leaving the left for the menu column */
+const ART_DX = 56;
 
 /** FUN_0002df9c title background (states 8/9); t = frame counter. */
 function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
@@ -62,7 +66,7 @@ function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
     cy += cy >> 1;                                            // touch mode
     const rise = final ? 0x8c : Math.min(t * 2, 0x8c);
     const bob = Math.abs(5 - Math.trunc(t / 12) % 10);
-    u.image('title_bg2', 0, 0, 0x17c, 0x104, W / 2 - 0xbe, H - rise + bob);   // island
+    u.image('title_bg2', 0, 0, 0x17c, 0x104, W / 2 - 0xbe + ART_DX, H - rise + bob);   // island
     // clouds, blend 1 (lighten): two 0xf0 tiles every 0x1e0, from past the left edge to past the right one (in
     // fullscreen the title reaches u.bleed into the side margins). The four mirrored / turned quarters are baked into
     // one image and drawn as a single repeating strip: as separate transformed elements their edges showed as a grid
@@ -75,9 +79,9 @@ function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
   }
   const f = (t >> 2) % cyc;
   u.pushCenter220();
-  u.frame('cmf_title', ctx.cmfs.cmf_title, f + base, 0x73, 0x6e);
+  u.frame('cmf_title', ctx.cmfs.cmf_title, f + base, 0x73 + ART_DX, 0x6e);
   u.pop();
-  if (f === 0x10) u.fill(W / 2 - 1, 0, 2, H, 0xffffff);
+  if (f === 0x10) u.fill(W / 2 - 1 + ART_DX, 0, 2, H, 0xffffff);
   else if (f > 0x10 && f < 0x18 && base === 0) {
     u.alpha = (0x17 - f) * 8;
     fillScreen(u, 0xffffff);
@@ -85,33 +89,32 @@ function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
   }
 }
 
-/** title button row (not the original's places): 게임시작 in the middle of the screen, 게임순위 and 회상 either side,
- *  the original 11 px apart; x of each 99 x 0x2C image */
-const TITLE_BTN = { rank: 80, start: 190, replay: 300, y: 0x102 };
+/** title menu (not the original's button row): a text column at the left, top to bottom */
+const TITLE_MENU = { x: 22, y: 138, w: 132, row: 28 };
+const TITLE_START = -45, TITLE_RANKING = -40, TITLE_REPLAY = -44, TITLE_MUSIC = -46;
+/** a press on the left half that misses the menu: does nothing (else Input takes it for the move stick, x < 231, and
+ *  the stick's repeats run the menu cursor up and down) */
+const TITLE_NONE = -47;
+const TITLE_ITEMS: [key: number, label: string][] = [[TITLE_START, '게임시작'], [TITLE_RANKING, '게임순위'], [TITLE_REPLAY, '회상'], [TITLE_MUSIC, '음악감상']];
 
-/** Title menu buttons (FUN_00035988): 게임시작 and 게임순위 (local ranking); the Kakao button is removed.
- *  회상 (not in the original) is the 게임순위 art with its lettering covered by the plain face (sheet columns
- *  16..21 hold no lettering), in a group so the dimming does not let the old lettering through. */
-function titleButtons(u: Ui, sel = 0): void {
-  u.alpha = sel === 0 ? 32 : 0x1a;
-  u.image('t', 0, 0xae, 99, 0x2c, TITLE_BTN.start, TITLE_BTN.y);   // 게임시작
-  u.group(sel === 2 ? '' : 'title-dim', 0, 0, 'titleReplay');
-  u.alpha = 32;
-  const rx = TITLE_BTN.replay, ry = TITLE_BTN.y;
-  u.image('t', 0x6f, 0xbe, 99, 0x2c, rx, ry);
-  for (let x = 22; x < 77; x += 6) u.image('t', 0x6f + 16, 0xbe + 9, Math.min(6, 77 - x), 26, rx + x, ry + 9);   // face rows 9..34
-  u.view('titleReplayLabel', rx + 15, ry + 9, 73, 26, h('div.title-btn-label', null, '회상'));
-  u.groupEnd();
+/** the menu column's fade-in (ms); timed here, not by a CSS animation: the logo frames draw a varying number of
+ *  pieces, which moves the menu's element in the DOM and would restart one */
+const TITLE_MENU_IN = 400;
+
+/** Title menu: the text column (k = its fade-in, 0..1), the three top-right icons (FUN_00035988's settings / help /
+ *  info) and the copyright */
+function titleButtons(u: Ui, sel = 0, k = 1): void {
+  const { x, y, w, row } = TITLE_MENU;
+  u.alpha = Math.round(32 * k);
+  u.view('titleMenu', x - Math.round(12 * (1 - k) ** 2), y, w, row * TITLE_ITEMS.length, h('div.v-col.tm-list', null,
+    TITLE_ITEMS.map(([, label], i) => h(`div.tm-item${i === sel ? '.sel' : ''}`, { style: `height:${row}px` }, label))));
   u.alpha = 0x1a;
   u.image('t', 0x40, 0xda, 0x20, 0x21, 0x157, 7);           // settings
-  u.alpha = sel === 1 ? 32 : 0x1a;
-  u.image('t', 0x6f, 0xbe, 99, 0x2c, TITLE_BTN.rank, TITLE_BTN.y);   // 게임순위 (local ranking)
-  u.alpha = 0x1a;
   u.image('t', 0, 0xda, 0x20, 0x21, 0x187, 7);              // help
   u.alpha = 32;
   u.image('t', 0x20, 0xda, 0x20, 0x21, 0x1b6, 7);           // info -> data management (backup / original saves)
-  u.alpha = 32;
-  u.string('Copyright ENERVE Co., Ltd. All rights reserved.', 0x61, 0x12f);
+  // the original's left at (97, 303) cleared the Kakao button at the right; it is gone, so centred
+  u.string('Copyright ENERVE Co., Ltd. All rights reserved.', W / 2, 0x12f, 'center');
 }
 
 /** Draw a full menu frame: screen layer, then the optional 1.3x overlay layer (popups). */
@@ -173,11 +176,12 @@ class RatingScene implements Scene {
   }
 }
 
-const TITLE_RANKING = -40, TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43, TITLE_REPLAY = -44;
-/** title buttons left to right (sel values): 게임순위, 게임시작, 회상 */
-const TITLE_ORDER = [1, 0, 2];
+const TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43;
 /** pad key -> title icon key, icon x: 옵션 (□/X = '1'), 도움말 (△/Y = '3'), 데이터 (L2 = '*') */
 const TITLE_PAD: [number, number, number][] = [[AVK.K1, TITLE_OPTION, 0x157], [AVK.K3, TITLE_HELP, 0x187], [AVK.STAR, TITLE_DATA, 0x1b6]];
+
+/** the title menu row last chosen, kept while the game runs: coming back from a screen keeps it */
+let titleSel = 0;
 
 /** States 0x08 (110-frame intro) and 0x09 (menu). */
 export class TitleScene implements Scene {
@@ -185,42 +189,53 @@ export class TitleScene implements Scene {
   private t = 0;
   private state: 8 | 9;
   private badgeUntil = performance.now() + 3500;   // rating badge for 3.5 s (FUN_00035b80)
-  /** title menu type: 0 START, 1 게임순위, 2 회상 (not in the original) */
-  private sel = 0;
+  /** title menu row (TITLE_ITEMS): 0 게임시작, 1 게임순위, 2 회상, 3 음악감상 (the last two not in the original) */
+  private sel = titleSel;
+  /** when the menu appeared (state 9), for its fade-in */
+  private menuAt = performance.now();
   constructor(private ctx: GameContext, intro = false) {
     this.state = intro ? 8 : 9;
     if (!intro) this.t = 200;
     ctx.audio.playBgm(0);
-    // touchdata[9]: 게임시작 (239,252,110,57), 게임순위 (135,258,99,44); moved with the buttons (TITLE_BTN)
-    ctx.input.uiMode = false; ctx.input.zones = [{ x: TITLE_BTN.start - 6, y: 252, w: 110, h: 57, key: AVK.OK }, { x: TITLE_BTN.rank, y: 258, w: 99, h: 44, key: TITLE_RANKING },
+    // touchdata[9]'s 게임시작 / 게임순위 zones became the menu rows; the icons keep theirs
+    const { x, y, w, row } = TITLE_MENU;
+    ctx.input.uiMode = false; ctx.input.zones = [
+      ...TITLE_ITEMS.map(([key], i) => ({ x, y: y + i * row, w, h: row, key })),
       { x: 0x157, y: 7, w: 32, h: 33, key: TITLE_OPTION }, { x: 0x187, y: 7, w: 32, h: 33, key: TITLE_HELP }, { x: 0x1b6, y: 7, w: 32, h: 33, key: TITLE_DATA },
-      { x: TITLE_BTN.replay, y: 258, w: 99, h: 44, key: TITLE_REPLAY }];
+      { x: -W, y: 0, w: W + 231, h: H, key: TITLE_NONE }];
   }
   update(presses: number[]): void {
     this.t++;
     if (this.state === 8) {
-      if (this.t > 0x6e || presses.includes(AVK.OK)) { this.state = 9; this.t = Math.max(this.t, 0x71); }
+      if (this.t > 0x6e || presses.length) { this.state = 9; this.t = Math.max(this.t, 0x71); this.menuAt = performance.now(); }   // any key or a menu row
       return;
     }
-    for (const k of presses) if (k === AVK.LEFT || k === AVK.RIGHT) {
-      const i = TITLE_ORDER.indexOf(this.sel);
-      this.sel = TITLE_ORDER[(i + (k === AVK.LEFT ? 2 : 1)) % 3];
+    const n = TITLE_ITEMS.length;
+    for (const k of presses) {
+      if (k === AVK.UP || k === AVK.LEFT) this.sel = (this.sel + n - 1) % n;
+      else if (k === AVK.DOWN || k === AVK.RIGHT) this.sel = (this.sel + 1) % n;
     }
+    // OK picks the selected row; a tapped row is picked at once (and becomes the selected one)
+    presses = presses.map((k) => (k === AVK.OK ? TITLE_ITEMS[this.sel][0] : k));
+    const tapped = TITLE_ITEMS.findIndex(([key]) => presses.includes(key));
+    if (tapped >= 0) this.sel = tapped;
+    titleSel = this.sel;
     // the three top-right icons are touch zones only; a pad reaches them with □ / △ / L2 (TITLE_PAD)
     presses = presses.map((k) => TITLE_PAD.find(([key]) => key === k)?.[1] ?? k);
     if (presses.length) frozenTick = this.t;                         // the frame at the confirming tick
     if (presses.includes(TITLE_DATA)) { this.ctx.go(new DataScene(this.ctx)); return; }
     if (presses.includes(TITLE_OPTION)) { this.ctx.go(new TitleOptionScene(this.ctx, 'settings')); return; }   // state 0x0C
     if (presses.includes(TITLE_HELP)) { this.ctx.go(new TitleOptionScene(this.ctx, 'help')); return; }         // state 0x0D
-    if (presses.includes(TITLE_RANKING) || (presses.includes(AVK.OK) && this.sel === 1)) { this.ctx.go(new RankingScene(this.ctx)); return; }
-    if (presses.includes(TITLE_REPLAY) || (presses.includes(AVK.OK) && this.sel === 2)) { this.ctx.go(new ReplayListScene(this.ctx)); return; }
-    if (presses.includes(AVK.OK)) this.ctx.go(new SlotScene(this.ctx));
+    if (presses.includes(TITLE_RANKING)) { this.ctx.go(new RankingScene(this.ctx)); return; }
+    if (presses.includes(TITLE_REPLAY)) { this.ctx.go(new ReplayListScene(this.ctx)); return; }
+    if (presses.includes(TITLE_MUSIC)) { this.ctx.go(new MusicRoomScene(this.ctx)); return; }
+    if (presses.includes(TITLE_START)) this.ctx.go(new SlotScene(this.ctx));
   }
   draw(): void {
     render(this.ctx, () => {
       titleBackground(this.ctx, this.t, this.state);
       if (performance.now() < this.badgeUntil) this.ctx.ui.image('title_bg', 0xf0, 0, 0x66, 0x78, W - 0x66, 0);
-      if (this.state === 9) titleButtons(this.ctx.ui, this.sel);
+      if (this.state === 9) titleButtons(this.ctx.ui, this.sel, Math.min(1, (performance.now() - this.menuAt) / TITLE_MENU_IN));
       const inp = this.ctx.input;
       if (this.state === 9) for (const [key, , x] of TITLE_PAD) {
         const k = keyHint(inp, key);

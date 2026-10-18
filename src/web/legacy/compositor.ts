@@ -28,7 +28,7 @@ export class LegacyCompositor extends Compositor {
    * target, the w x h view centred in it when it is wider: see pad). clear = false draws over the
    * existing content (UI passes). Returns the number of render passes.
    */
-  override draw(layer: SpriteLayer, camera: THREE.Camera, w: number, h: number, target?: THREE.WebGLRenderTarget, clear = true): number {
+  override draw(layer: SpriteLayer, camera: THREE.Camera, w: number, h: number, target?: THREE.WebGLRenderTarget, clear: boolean | number = true): number {
     const group = (layer as LegacySpriteLayer).group;
     const r = this.renderer;
     if (!target) {
@@ -42,8 +42,8 @@ export class LegacyCompositor extends Compositor {
     const parent = group.parent;
     this.scene.add(group);
     r.setRenderTarget(target);
-    if (clear) {
-      r.setClearColor(0x000000, 1);
+    if (clear !== false) {
+      r.setClearColor(clear === true ? 0x000000 : clear, 1);
       r.clear();
     }
     const auto = r.autoClear;

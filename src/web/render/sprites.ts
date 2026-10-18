@@ -162,6 +162,14 @@ const greyAmt = { value: 0 };
 export function setGrey(v: number): void { greyUniform.grey.value = v; greyAmt.value = Math.round(v * 32); }
 /** set the day/night shift from a d+0x26e0c row (dr, dg, db in RGB565 units) */
 export function setDayShift(dr: number, dg: number, db: number): void { greyUniform.shift.value.set(dr / 31, dg / 63, db / 31); }
+/** black through the current day/night shift and grey (FRAG), as 0xRRGGBB: the field outside the map */
+export function shiftedBlack(): number {
+  const s = greyUniform.shift.value, k = greyUniform.grey.value;
+  const c = [Math.max(0, Math.min(1, -s.x)), Math.max(0, Math.min(1, -s.y)), Math.max(0, Math.min(1, -s.z))];
+  const L = (c[0] * 31 * 612 + c[1] * 63 * 601 + c[2] * 31 * 234) / 1024;
+  const g = [L / 2 / 31, L / 63, L / 2 / 31];
+  return c.reduce((v, x, i) => (v << 8) | Math.round((x + (g[i] - x) * k) * 255), 0);
+}
 
 /** Shared destination snapshot, owned by the compositor. */
 export const dstUniforms = {

@@ -174,12 +174,13 @@ export class Compositor {
 
   /**
    * Draw the layer's quads (in painter's order) through camera into target (default: the internal target, the
-   * w x h view centred in it when it is wider: see pad). clear = false draws over the existing content (UI passes).
+   * w x h view centred in it when it is wider: see pad). clear = false draws over the existing content (UI passes),
+   * a number clears to that colour instead of black (the field: its day/night backdrop, Field.render).
    * Consecutive quads sharing a material are one draw call; a quad whose blend reads the destination gets a
    * snapshot of everything drawn before it, taken anew only when it may cover a pixel drawn since the last one.
    * Returns the number of render passes.
    */
-  draw(layer: SpriteLayer, camera: THREE.Camera, w: number, h: number, target?: THREE.WebGLRenderTarget, clear = true): number {
+  draw(layer: SpriteLayer, camera: THREE.Camera, w: number, h: number, target?: THREE.WebGLRenderTarget, clear: boolean | number = true): number {
     const r = this.renderer;
     if (!target) {
       if (this.rt.width !== this.width || this.rt.height !== VIEW_H) this.rt.setSize(this.width, VIEW_H);
@@ -190,8 +191,8 @@ export class Compositor {
     layer.sync();
     this.scene.add(mesh);
     r.setRenderTarget(target);
-    if (clear) {
-      r.setClearColor(0x000000, 1);
+    if (clear !== false) {
+      r.setClearColor(clear === true ? 0x000000 : clear, 1);
       r.clear();
     }
     const auto = r.autoClear;

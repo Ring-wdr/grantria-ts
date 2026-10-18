@@ -8,7 +8,7 @@ import { FieldMap, STONE_OBJ } from '../../core/world/fieldMap';
 import { actorDepth, depthSort, objDepth, type DepthItem } from '../../core/world/world';
 import type { WebAssets } from '../assets';
 import { Compositor, createTarget } from './compositor';
-import { SpriteLayer, DEFAULT_EQUIP, type Equip } from './sprites';
+import { SpriteLayer, DEFAULT_EQUIP, shiftedBlack, type Equip } from './sprites';
 
 export { VIEW_H, VIEW_W, type Drawable };
 const TILE = 16;
@@ -108,6 +108,7 @@ export class Field extends FieldMap {
     this.viewCam.top = camY;
     this.viewCam.bottom = camY + VIEW_H;
     this.viewCam.updateProjectionMatrix();
-    this.passes = this.compositor.draw(V, this.viewCam, VIEW_W + 2 * pad, VIEW_H);
+    // outside the map is black too: cleared to black through the day/night shift, like the map's own black pixels
+    this.passes = this.compositor.draw(V, this.viewCam, VIEW_W + 2 * pad, VIEW_H, undefined, shiftedBlack());
   }
 }

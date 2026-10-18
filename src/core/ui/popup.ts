@@ -6,6 +6,15 @@ import { popupRole, type OpenOpts, type Overlay, type OverlayStack } from './ove
 
 let serial = 0;
 
+/** an item icon cell on its original sheet */
+export interface IconRect { image: string; sx: number; sy: number }
+
+/** what a card popup shows above its text: the enhance result (FUN_0005f948 case 10: the item cell, its name, a red
+ *  line when destroyed) or a coupon purchase (case 0xB: icon, name, description 0xC48 + sub, coupons held -> left) */
+export type PopupCard =
+  | { kind: 'item'; icon: IconRect; name: string; destroyed: boolean }
+  | { kind: 'coupon'; icon: IconRect; name: string; sub: number; have: number; price: number };
+
 export class Popup {
   /** identifies this popup to the host's drawing (a new popup plays its opening animation) */
   readonly serial = ++serial;
@@ -14,8 +23,10 @@ export class Popup {
   h: number;
   readonly textId: number;
   sel: number;
-  /** host view content above the body text (result item cell, fortune result); web: a VChild */
+  /** host view content above the body text (the fortune popups); web: a VChild */
   content?: () => unknown;
+  /** a card the host draws above the body text (logic-made popups carry this instead of a view) */
+  card?: PopupCard;
   /** the content replaces the body text (popup 0x55 fortune result) */
   hideBody = false;
   private readonly assets: Assets;

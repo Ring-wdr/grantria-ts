@@ -12,7 +12,7 @@ function run(input: Partial<QuantityInput> & { held: number; stack: boolean }, s
   const machine = quantityFlow.provide({ actions: { commit: (_, p) => { commits.push(p.n); } } });
   const step = (name: string) => (): Step<QuantityEvent> => {
     visited.push(name);
-    return { handle: () => script.shift() ?? null, draw: () => {} };
+    return { handle: () => script.shift() ?? null, model: name };
   };
   const s = new OverlayStack();
   s.open(flowOverlay(machine, { tooManyBack: true, ...input }, { qty: step('qty'), none: step('none'), tooMany: step('tooMany'), confirm: step('confirm') }),

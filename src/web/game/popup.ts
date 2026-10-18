@@ -1,10 +1,10 @@
 // Popups on the 1.3x layer L1 (analysis/features/ui-screens.md §0.6); their state and keys are core/ui/popup.ts.
 import { VIEW_H as H, VIEW_W as W } from '../render/field';
 import { AVK } from '../input/input';
-import { button, gt, h, sprite, type VChild } from '../render/view';
+import { button, gt, h, sprite, type VChild, type VNode } from '../render/view';
 import type { GameContext } from './scene';
 import type { Overlay } from '../../core/ui/overlays';
-import { Popup, QtyPopup } from '../../core/ui/popup';
+import { Popup, QtyPopup, type PopupCard } from '../../core/ui/popup';
 
 export { Popup, QtyPopup };
 export { openPopup, popupOverlay } from '../../core/ui/popup';
@@ -25,6 +25,7 @@ export function drawPopup(ctx: GameContext, p: Popup): void {
   const body = h('div.v-popup-body', null,
     p.id === 0 && gt(t[0x3e1 + p.cls] ?? '', { pen: 0xffe0 }),
     p.content?.() as VChild,
+    p.card && cardView(t, p.card),
     !p.hideBody && gt(p.body()));
   const box = h(`div.v-popup.${grow ? 'v-pop-grow' : 'v-pop-fade'}`, {
     style: `width:${w}px;min-height:${ph}px;max-height:${H - 8}px`,
@@ -32,6 +33,23 @@ export function drawPopup(ctx: GameContext, p: Popup): void {
   }, h('div.u-btn.s0.v0.v-popup-bar'), body, h('div.v-popup-buttons', null, buttons));
   // modal: the backdrop swallows taps outside the popup
   u.view(`popup${p.serial}`, 0, 0, W, H, h('div.v-modal', { on: () => [] }, box));
+}
+
+/** a logic-made popup's card (core/ui/popup.ts PopupCard) */
+function cardView(t: string[], c: PopupCard): VNode {
+  const icon = sprite(c.icon.image, c.icon.sx, c.icon.sy, 16, 16);
+  if (c.kind === 'item') {                     // enhance result: the cell, then the name (wraps) and the red line beside it
+    return h('div.v-row.v-center.shop-enh-res', null,
+      h('div.shop-cell', null, icon),
+      h('div.v-col.shop-enh-res-text', null,
+        gt(c.name),
+        c.destroyed && gt(t[0x1a29] ?? '', { pen: 0xf800 })));
+  }
+  const short = c.have < c.price;              // coupon purchase card
+  return h('div.v-col.mc-card', null,
+    h('div.v-row', { style: 'gap:6px' }, icon, gt(c.name, { cls: 'v-grow v-left' })),
+    gt(t[0xc48 + c.sub] ?? '', { cls: 'v-left mc-card-desc' }),
+    short ? gt(t[0x1a3b] ?? '', { pen: 0xf800 }) : gt(`${t[0x1a54] ?? ''} ${c.have} → ${c.have - c.price}`, { pen: 0xffe0 }));
 }
 
 /** Quantity popup 0x0C: ◀ ▶, +100 / -100 and OK as tap targets around the amount */

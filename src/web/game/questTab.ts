@@ -1,11 +1,9 @@
-// Quest tab 0x21 (FUN_0005b010 / keys FUN_00056df0) and the detail popup MENUPOP 3 (FUN_00031f68,
-// keys FUN_00044564), analysis/features/ui-tabs.md §0.8. The detail's NPC portrait cell and the
-// location string are not drawn; the body (clip 7,57,204,120) is an HTML view clipped by CSS.
+// Quest tab 0x21 and the detail popup MENUPOP 3 drawn (their state and keys are core/menu/questTab.ts). The detail's
+// NPC portrait cell and the location string are not drawn; the body (clip 7,57,204,120) is an HTML view clipped by CSS.
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { Popup, openPopup, popupPaint } from './popup';
-import { OverlayStack } from '../../core/ui/overlays';
-import { untrackKey } from '../../core/rules/quests';
+import { popupPaint } from './popup';
+import { QuestTabLogic } from '../../core/menu/questTab';
 import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
 import { button, gt, h, sprite, type ScrollRef, type VChild } from '../render/view';
@@ -16,79 +14,11 @@ const YELLOW = 0xffe0;
 /** detail body: 15 px lines; rewards keep at least two */
 const LINE = 15;
 
-export class QuestTab {
-  private sel = 0;
-  private t = 0;
-  /** focus: 0 확인, 1 추적 켬 / 끔 (not in the original), 2 포기 (side quests) */
-  private detail: { q: number; scroll: ScrollRef; focus: number } | null = null;
-  /** popups over the tab */
-  private readonly overlays = new OverlayStack();
+export class QuestTab extends QuestTabLogic {
+  declare protected readonly ctx: GameContext;
+  declare protected readonly fs: FieldScene;
 
-  constructor(private ctx: GameContext, private fs: FieldScene) {}
-
-  get busy(): boolean { return !!(this.detail || this.overlays.size); }
-
-  update(presses: number[]): boolean {
-    this.t++;
-    const active = this.fs.story.active;
-    if (this.overlays.update(presses)) return true;
-    if (this.detail) {
-      const d = this.detail, n = this.fs.sdb.mainQuest(d.q) ? 2 : 3;
-      for (const k of presses) {
-        if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
-        if (k === AVK.LEFT) d.focus = (d.focus + n - 1) % n;
-        else if (k === AVK.RIGHT) d.focus = (d.focus + 1) % n;
-        else if (k === AVK.UP) d.scroll.y = Math.max(0, d.scroll.y - 15);
-        else if (k === AVK.DOWN) d.scroll.y += 15;                     // the browser clamps at the end
-        else if (k === AVK.OK) {
-          if (d.focus === 2) openPopup(this.overlays, new Popup(this.ctx, 0x51), () => { if (this.detail) this.abandon(this.detail.q); this.detail = null; });
-          else if (d.focus === 1) this.toggleTracked(d.q);
-          else this.detail = null;
-        }
-        else if (k === AVK.CLR) this.detail = null;
-      }
-      return true;
-    }
-    for (const k of presses) {
-      if (k === AVK.UP) this.sel = (this.sel + 5) % 6;
-      else if (k === AVK.DOWN) this.sel = (this.sel + 1) % 6;
-      else if (k === AVK.OK) { const a = active[this.sel]; if (a) this.detail = { q: a.q, scroll: { y: 0 }, focus: 0 }; }
-      else return false;
-    }
-    return true;
-  }
-
-  tracked(q: number): boolean { return !this.fs.story.counters[untrackKey(q)]; }
-
-  private toggleTracked(q: number): void {
-    const c = this.fs.story.counters, k = untrackKey(q);
-    if (c[k]) delete c[k]; else c[k] = 1;
-  }
-
-  /** FUN_0001c59c: back to "available", accept items taken back, slot removed */
-  private abandon(q: number): void {
-    const { story, sdb, inv } = this.fs;
-    delete story.counters[untrackKey(q)];                            // a quest taken again is tracked again
-    story.qs[q] = 1;
-    story.active = story.active.filter((a) => a.q !== q);
-    const it = sdb.quests[q].acceptItem;
-    if (it >= 0 && it < 100) inv.removeKey(it);                     // only the key store is searched (0x1d stays)
-  }
-
-  private rewardLines(q: number): string[] {
-    const Q = this.fs.sdb.quests[q], out: string[] = [];
-    const exp = (Q.exp & 0x1fff) << 3;
-    if (exp) out.push(`EXP ${exp}`);
-    const r = this.fs.sdb.rewardOf(Q);
-    if (r) {
-      if (r.type === 0x1c) out.push(`${r.count * 50} Gold`);
-      else {
-        const it = this.fs.db.create(r.type, r.sub, 0, this.fs.rng, true);
-        out.push(`${this.fs.db.makeName(it, this.fs.rng)}${r.count > 1 ? ` x${r.count}` : ''}`);
-      }
-    }
-    return out;
-  }
+  constructor(ctx: GameContext, fs: FieldScene) { super(ctx, fs); }
 
   /** 진행도 (not in the original): kill / collect count and, for a kill quest, the habitat the monster book knows */
   private progressLine(q: number): VChild {

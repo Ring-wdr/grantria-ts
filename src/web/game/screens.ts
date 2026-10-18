@@ -5,8 +5,9 @@
 // screens, the info button opens the data screen (0x3B); hardcore mode, revival and the game menu live elsewhere.
 import { FieldScene } from './fieldScene';
 import { GameMenu } from './menu';
-import { CouponShop, couponCard, coupons } from './community';
-import { josa } from './shop';
+import { CouponShop } from './community';
+import { couponCard, coupons } from '../../core/menu/community';
+import { josa } from '../../core/text';
 import { consume, countOf } from '../../core/rules/shopRules';
 import { ShopScreen } from './shop';
 import { Popup, openPopup, popupOverlay, popupPaint } from './popup';

@@ -3,19 +3,14 @@
 // animations survive). Layout is real CSS (flex, wrapping); clicks run the node's `on` handler,
 // whose returned keys are fed to the game exactly like a key press or a tap on a hit area.
 import type { Cmf } from '../../core/data/assets';
+import type { ScrollRef } from '../../core/render';
 import type { WebAssets } from '../assets';
 import type { PadKind } from '../input/gamepad';
 import { keyHint } from '../input/keyHints';
 
 export type KeyAct = () => number[] | void;
 
-/** scroll position of a scrolling element, owned by the game state: keys move y, the browser clamps it
- *  (and wheel / touch scrolling write it back) */
-export interface ScrollRef {
-  y: number;
-  /** child index to bring into view when it changes (a key moved the cursor); touch scrolling stays free otherwise */
-  follow?: number;
-}
+export type { ScrollRef };
 
 export interface VNode {
   /** named mount point: views mounted with Ui.mount(slot, ...) become its children */

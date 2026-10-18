@@ -2001,7 +2001,9 @@ export class FieldGame {
       player.startKnock(6, src.x, src.y, { dir: c as Dir, bonus: 5 });
     } else if (type === 8 && action === 6) player.startKnock(6, src.x, src.y, { stun: true });
     if (vitals.invuln || vitals.tint) return false;
-    this.panelTarget = src;                                           // FUN_0006f370: DAT_003b3c49 = attacker
+    // FUN_0006f370: DAT_003b3c49 = attacker; for 35 / 39 the part that takes hits, so the panel keeps the HP being fought
+    const foe = src instanceof Boss ? src.hitTarget : src;
+    this.panelTarget = foe;
     const r = monsterHit(this.rng, atk, { level: this.model.level, def: this.stats.def, evade: this.stats.evade + (src.dark > 0 ? 50 : 0), stunned: player.stun > 0 });
     vitals.invuln = 5;
     if (r.miss) { hud.miss(player.x, player.y - 43); this.achieve({ k: 'evade' }); return false; }
@@ -2026,11 +2028,11 @@ export class FieldGame {
     const down = ((type === 38 || type === 42) && action === 2) || (type === 32 && action === 1);
     if (pct !== 100) dmg = rdiv(dmg * pct, 100);
     if (this.dayPh === 2 && this.mapType === 0) dmg = rdiv(dmg * 120, 100);   // night
-    if (this.buffs.isOn(20) && src.alive) {                            // 인내의 비약: reflect 2·dmg, take half
+    if (this.buffs.isOn(20) && foe.alive) {                            // 인내의 비약: reflect 2·dmg, take half
       const back = 2 * dmg;
-      src.hp -= back;
-      hud.damage(back, src.x, src.y - 60);
-      if (src.hp <= 0) src.onHit(0, false);
+      foe.hp -= back;
+      hud.damage(back, foe.x, foe.y - 60);
+      if (foe.hp <= 0) foe.onHit(0, false);
       dmg >>= 1;
     }
     if (knock && !player.knock) player.startKnock(knock, src.x, src.y, down ? { dir: 2 } : {});
@@ -2153,8 +2155,8 @@ export class FieldGame {
         this.applyBossFx(m);
         if (m.pullPlayer !== undefined) {
           this.player.pullTo = m.pullPlayer;
-          const q = this.monsters.find((o) => o instanceof Boss && o.type === 35 && o.role === 1);   // slot 3: the main body
-          this.player.pullRef = q ? { x: q.x, y: q.y } : null;
+          const q = m.main ?? m;                                       // slot 3: the main body
+          this.player.pullRef = { x: q.x, y: q.y };
         }
         if (m.grab === false) this.player.grabbed = false;
       }

@@ -154,8 +154,6 @@ export class Boss extends Monster {
   /** King Dusty jump step (+0x08 / +0x0c) */
   private jump: [number, number] = [0, 0];
   private summonDir: Dir = 0;
-  /** attack boxes already landed this action (FUN_00063218 hit list) */
-  hitThisAction = false;
   /** 35 / 39 parts: role (+0x7f), main body, the parts of a main body, active flag (35 part B) */
   role = -1;
   declare main: Boss | null;
@@ -211,6 +209,13 @@ export class Boss extends Monster {
   }
   /** EXP and drops only from the role-0 object (FUN_0006ca90: 35 part A, 39 main body) */
   get noReward(): boolean { return this.role > 0; }
+  /** the object of this group that takes hits (role 0: 35 part A, 39 main body); a lone boss is itself.
+   *  35's attacks come from its main body (role 1), whose HP the player never touches. */
+  get hitTarget(): Boss {
+    if (this.role < 0) return this;
+    const main = this.main ?? this;
+    return [main, ...main.parts].find((p) => p.role === 0) ?? this;
+  }
 
   private faceP(w: MonsterWorld, mode: number): void { this.face(w.px, w.py, mode); }
   private flipH(): void { this.lastH = (this.lastH ^ 1) as 0 | 1; this.dir = this.lastH; }
@@ -224,10 +229,16 @@ export class Boss extends Monster {
   /** One tick of the common skeleton (§2.2). */
   override update(w: MonsterWorld): 'dead' | null {
     if (this.tint > 0) this.tint = Math.max(0, this.tint - 4);
+    this.pullPlayer = undefined; this.grab = undefined;     // a request lasts one tick (a dead part asks nothing)
     if (!this.alive) return this.updateDead(w);
     const fx: BossFx = {};
     this.fx = fx;
-    if (this.type === 35 || this.type === 39) { this.partsTick(w, fx); return null; }
+    if (this.type === 35 || this.type === 39) {
+      const px0 = this.x;
+      this.partsTick(w, fx);
+      this.lastVx = this.x - px0;                            // 39 head: its beam follows (followBoss)
+      return null;
+    }
     const g = this.g;
     if (this.type === 14 && g.get(0x1d) > 0) {               // Black Leo rage: 300 ticks of +4 chase speed
       g.set(0x1e, g.get(0x1e) + 1);
@@ -236,7 +247,7 @@ export class Boss extends Monster {
     } else if (this.type === 14) this.bonus82 = 0;
     if (this.type === 8) this.timer18++;
 
-    let rec = this.cmf.anims[this.rec] ?? this.cmf.anims[0];
+    const rec = this.cmf.anims[this.rec] ?? this.cmf.anims[0];
     const n = rec.n;
     const k = this.t % n;
     this.frame = rec.frames[k];
@@ -256,7 +267,7 @@ export class Boss extends Monster {
       case 1: this.attackTick(w, step, fx); break;
       case 2: {
         if (FIXED.includes(this.type)) { this.start = 1; break; }
-        if (w.playerAlive && Math.hypot(w.px - this.x, w.py - this.y) < this.bossRange) { this.hitThisAction = false; this.start = 1; break; }
+        if (w.playerAlive && Math.hypot(w.px - this.x, w.py - this.y) < this.bossRange) { this.start = 1; break; }
         let sp = step + a26;
         if (this.type === 14) sp += this.bonus82;
         if (this.type === 23 || this.type === 26) sp = step;     // no a26 bonus
@@ -287,8 +298,7 @@ export class Boss extends Monster {
         break;
     }
     this.lastVx = this.x - x0;
-    if (!freeze) { if (this.hold > 0 && HOLD.includes(this.type)) this.hold--; else this.t++; }
-    rec = this.cmf.anims[this.rec] ?? this.cmf.anims[0];
+    if (!freeze) { if (this.hold > 0) this.hold--; else this.t++; }   // hold is only set for HOLD bosses
     if (this.t >= this.recLen()) { this.bossDecide(w); this.t = 0; }
     if (this.start > 0) {
       this.rest = this.type === 23 ? (this.form === 0 ? 4 : 2) : REST[this.type]?.[this.action] ?? 0;
@@ -297,7 +307,6 @@ export class Boss extends Monster {
       this.onPatternStart(w);
       this.rec = this.recFor(this.action);
       this.t = 0;
-      this.hitThisAction = false;
     }
     if (this.hp * 5 < this.maxHp) g.set(0x26, 4);
     return null;
@@ -309,18 +318,18 @@ export class Boss extends Monster {
   private attackTick(w: MonsterWorld, step: number, fx: BossFx): void {
     const t = this.type, f = this.frame, g = this.g;
     if (t === 5 && this.action === 12) {                     // jump smash timeline
-      if (f === 78 && this.lastJumpFrame !== 78) {
+      if (f === 78 && this.lastFxFrame !== 78) {
         const dx = w.px - 232, dy = w.py - 302;
         const c = Math.abs(dy) < Math.abs(dx) ? (dx < 0 ? 0 : 1) : (dy < 0 ? 2 : 3);
         g.set(0x1d, c);
         this.jump = [Math.trunc((KD_CORNERS[c][0] - this.x) / 4), Math.trunc((KD_CORNERS[c][1] - this.y) / 4)];
       } else if (f === 79 || f === 80 || f === 81) { this.x += this.jump[0]; this.y += this.jump[1]; }
       else if (f === 82) { const c = KD_CORNERS[g.get(0x1d)]; this.x = c[0]; this.y = c[1]; }
-      else if (f === 83 && this.lastJumpFrame !== 83) fx.shake = 2;
-      this.lastJumpFrame = f;
+      else if (f === 83 && this.lastFxFrame !== 83) fx.shake = 2;
+      this.lastFxFrame = f;
       return;
     }
-    if (FIXED.includes(t)) { this.fixedAttack(w, step, fx); this.lastJumpFrame = f; return; }
+    if (FIXED.includes(t)) { this.fixedAttack(w, step, fx); this.lastFxFrame = f; return; }
     let vx = 0, vy = 0;
     if (t === 11 && this.action === 8) [vx, vy] = this.toward(w.px, w.py, step);
     else { const s = this.dir & 1 ? step : -step; if (this.dir < 2) vx = s; else vy = s; }
@@ -330,15 +339,15 @@ export class Boss extends Monster {
       else if (r.blocked) { g.set(0x25, 1); fx.shake = 2; this.state = 0xd; this.stunT = 30; }
     }
     if (t === 14 && this.action === 9 && r.player) fx.shake = 2;
-    if (t === 11 && this.action === 4 && (f === 36 || f === 46) && this.lastJumpFrame !== f) fx.shake = 2;
-    if (t === 14 && this.action === 12 && (f === 84 || f === 88 || f === 92) && this.lastJumpFrame !== f) fx.slowPlayer = 60;
-    if (t === 17 && this.action === 9 && f === this.F * 6 + 0x41 && this.lastJumpFrame !== f) {
+    if (t === 11 && this.action === 4 && (f === 36 || f === 46) && this.lastFxFrame !== f) fx.shake = 2;
+    if (t === 14 && this.action === 12 && (f === 84 || f === 88 || f === 92) && this.lastFxFrame !== f) fx.slowPlayer = 60;
+    if (t === 17 && this.action === 9 && f === this.F * 6 + 0x41 && this.lastFxFrame !== f) {
       fx.shots = [0, 1, 2].map((i) => {
         const [bvx, bvy] = BLOB_V[this.dir][i];
         return new MonsterShot(this, this.x, this.y - 50, { frame: 0x4e, life: 45, vx: bvx, vy: bvy, selfAttack: true, stopFrame: 0x4f, moveTicks: 10, onHit: 'stop' });
       });
     }
-    if (t === 23 && this.action === 4 && f === 0x28 && this.lastJumpFrame !== f) {     // cards
+    if (t === 23 && this.action === 4 && f === 0x28 && this.lastFxFrame !== f) {     // cards
       const right = this.dir === 1, by = this.y;
       fx.shots = [0, 1, 2].map((i) => {
         const x = right ? [this.x + 100, this.x + 5, this.x + 80][i] : [this.x - 100, this.x - 40, this.x - 5][i];
@@ -349,15 +358,16 @@ export class Boss extends Monster {
     }
     if (t === 20 && this.action === 6) {
       if ((f === 46 || f === 55) && ((this.t + this.hold) & 1)) fx.flash = 5;
-      if ((f === 47 || f === 56) && this.lastJumpFrame !== f) fx.shake = 2;
+      if ((f === 47 || f === 56) && this.lastFxFrame !== f) fx.shake = 2;
     }
-    this.lastJumpFrame = f;
+    this.lastFxFrame = f;
   }
-  private lastJumpFrame = -1;
+  /** frame of the last tick: effects fire once on entering a frame (hit-stop repeats it) */
+  private lastFxFrame = -1;
 
   /** attacks of the stationary bosses 29 / 32 / 38 / 42 */
   private fixedAttack(w: MonsterWorld, step: number, fx: BossFx): void {
-    const t = this.type, f = this.frame, once = this.lastJumpFrame !== f, x = this.x, y = this.y;
+    const t = this.type, f = this.frame, once = this.lastFxFrame !== f, x = this.x, y = this.y;
     if (t === 29 && this.action === 3 && f === 20 && once) {
       fx.shots = [[-70, 0x18, -10, 10], [-20, 0x19, 0, 15], [15, 0x1a, 10, 10]].map(([dx, fr, vx, vy]) =>
         new MonsterShot(this, x + dx, y + 20, { frame: fr, life: 25, vx, vy }));
@@ -395,7 +405,7 @@ export class Boss extends Monster {
       else if (this.action === 6) g.set(0x1c, 0);
       else if (this.action === 8) g.set(0x1e, 0);
     }
-    this.lastJumpFrame = -1;
+    this.lastFxFrame = -1;
   }
 
   /** FUN_0002e824: left / right / up / down spot for a summon; must be walkable and clear of the player */
@@ -606,7 +616,6 @@ export class Boss extends Monster {
     const rec = this.cmf.anims[this.rec] ?? this.cmf.anims[0];
     this.frame = rec.frames[this.t % rec.n];
     if (!this.active) return;
-    this.pullPlayer = undefined; this.grab = undefined;
     const end = () => this.t + 1 >= rec.n;
     if (this.type === 35) {
       if (this.role === 1) {                                 // main body: decides while a1f == 1
@@ -668,10 +677,10 @@ export class Boss extends Monster {
     } else if (this.role === 2) {                            // head
       const sp = this.rec === 5 ? 5 + 2 * g.get(0x22) : 3, lo = this.rec === 5 ? -49 : -39, hi = this.rec === 5 ? -31 : -21;
       if (this.cnt === 0 || this.rec === 5) { if (w.px < this.x + lo) this.x -= sp; else if (w.px > this.x + hi) this.x += sp; }
-      if (this.rec === 5 && this.frame === 53 && this.lastJumpFrame !== 53) {
+      if (this.rec === 5 && this.frame === 53 && this.lastFxFrame !== 53) {
         fx.shots = [new MonsterShot(this, this.x - 20, this.y + 60, { frame: 0x3e, life: 4, followBoss: true, onHit: 'keep' })];
       }
-      this.lastJumpFrame = this.frame;
+      this.lastFxFrame = this.frame;
       if (end()) {
         if (this.rec === 5) { this.rec = 2; this.action = 2; g.set(0x1f, 0); }
         else {

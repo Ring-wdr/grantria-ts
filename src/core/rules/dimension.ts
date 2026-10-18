@@ -86,8 +86,13 @@ export function newRun(a: { d16(o: number): number }, d: number): DimRun {
  *  same millisecond, so rand(n) back to back in one loop repeats a pattern (one monster type per floor) */
 function pick(rng: Rng, n: number): number { return Math.floor(rng.rand(n * 1024) / 1024); }
 
-/** floor records: 3x3-walkable cells away from portals (3 cells) and arrival points (8 cells); floor 10 = the boss alone */
-export function generateFloor(run: DimRun, f: number, field: FieldMap, arrivals: [number, number][], rng: Rng): DimRecord[] {
+/** a type's spawn body box (dx, dy, w, h), null when unknown */
+export type BodyOf = (type: number) => readonly number[] | null;
+
+/** floor records: 3x3-walkable cells away from portals (3 cells) and arrival points (8 cells); floor 10 = the boss alone.
+ *  With body, a record's body box must also be clear of wall cells there: FUN_00067d4c tests the whole box, so a monster
+ *  spawned overlapping a wall (Khorkhor's box reaches the second row up) could never take a step. */
+export function generateFloor(run: DimRun, f: number, field: FieldMap, arrivals: [number, number][], rng: Rng, body?: BodyOf): DimRecord[] {
   const W = field.map.header.width, H = field.map.header.height, cfg = DUNGEONS[run.d];
   const near = (cx: number, cy: number, pts: [number, number][], r: number) => pts.some(([px, py]) => Math.abs(px - cx) < r && Math.abs(py - cy) < r);
   const portal: [number, number][] = [];
@@ -102,16 +107,26 @@ export function generateFloor(run: DimRun, f: number, field: FieldMap, arrivals:
     if (ok && !near(cx, cy, portal, 3) && !near(cx, cy, arrivals, 8)) cells.push([cx, cy]);
   }
   if (!cells.length) return [];
+  const fits = (type: number, [cx, cy]: [number, number]): boolean => {
+    const b = body?.(type);
+    if (!b || b[2] <= 0 || b[3] <= 0) return true;
+    const x = cx * 16 + 8 + b[0], y = cy * 16 + 8 + b[1];
+    for (let r = Math.max(0, y >> 4); r <= (y + b[3] - 1) >> 4; r++) for (let c = Math.max(0, x >> 4); c <= (x + b[2] - 1) >> 4; c++) if (!field.walkCell(c, r)) return false;
+    return true;
+  };
   if (f === 9) {                                                     // the cell farthest from the arrivals
-    let best = cells[0], bd = -1;
-    for (const c of cells) { const dd = Math.min(...arrivals.map(([x, y]) => Math.hypot(x - c[0], y - c[1])), 1e9); if (dd > bd) { bd = dd; best = c; } }
+    const free = cells.filter((c) => fits(run.boss, c));
+    let best = (free.length ? free : cells)[0], bd = -1;
+    for (const c of free.length ? free : cells) { const dd = Math.min(...arrivals.map(([x, y]) => Math.hypot(x - c[0], y - c[1])), 1e9); if (dd > bd) { bd = dd; best = c; } }
     return [{ type: run.boss, x: best[0] * 16 + 8, y: best[1] * 16 + 8 }];
   }
   const dens = cfg.density * ((run.depth ?? 0) > 0 && abyssRule() === 2 ? 1.5 : 1);   // 심연 물량
   const n = Math.min(MAX_PER_FLOOR, Math.max(4, Math.round(walk * dens)), cells.length), out: DimRecord[] = [];
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < n && cells.length; i++) {
     const k = pick(rng, cells.length), [cx, cy] = cells.splice(k, 1)[0];
-    out.push({ type: cfg.pool[pick(rng, cfg.pool.length)], x: cx * 16 + 8, y: cy * 16 + 8 });
+    const type = cfg.pool[pick(rng, cfg.pool.length)];
+    if (!fits(type, [cx, cy])) { i--; continue; }                     // that cell is used up; try another
+    out.push({ type, x: cx * 16 + 8, y: cy * 16 + 8 });
   }
   return out;
 }

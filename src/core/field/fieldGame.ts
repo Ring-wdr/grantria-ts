@@ -10,7 +10,7 @@ import { Gimmick } from '../world/gimmicks';
 import { drawFortune, today, type FortuneResult } from '../rules/fortune';
 import { achCheck, achEvent, challengeGold, titleBonus, type AchEvent, type Awards } from '../rules/achievements';
 import { accountBook, accountDay, clearUnsavedUses, countUnsavedUse, saveAccount, setAccountDay, takeUnsavedUses, account, secondDrop, traitBox, traitOnLevelUp, traitReset, traitStatBonus, traitVal } from '../rules/account';
-import { ABYSS_RULES, abyssHeader, abyssRule, dimLevel, dimStats, dungeonStart, generateFloor, newRun, resultValues, rollDimDrops, type DimRun } from '../rules/dimension';
+import { ABYSS_RULES, DUNGEONS, abyssHeader, abyssRule, dimLevel, dimStats, dungeonStart, generateFloor, newRun, resultValues, rollDimDrops, type DimRun } from '../rules/dimension';
 import { findPath } from '../world/pathfind';
 import { vibrate } from '../vibrate';
 import { GATHER_CAP, GatherRun, gatherExp, spawnNodes, type GatherNode } from '../rules/gather';
@@ -1336,7 +1336,10 @@ export class FieldGame {
       if (f === 0) { const [, sx, sy] = dungeonStart(this.db.a, run.d); arr.push([sx >> 4, sy >> 4]); }
       for (const p of this.field.map.portals) arr.push([(p.destX + 0x16) >> 4, (p.destY + 0x1f) >> 4]);
       for (const p of this.field.map.portals) for (const r of p.rects) arr.push([r.cx0, r.cy0]);
-      run.floors[f] = generateFloor(run, f, this.field, arr, this.rng);
+      const types = f === 9 ? [run.boss] : DUNGEONS[run.d].pool;
+      await this.preloadActors(types);                                // the body boxes the placement checks
+      const body = (t: number) => { const c = this.cmfCache.get(t); return c?.frames[c.anims[0]?.frames[0] ?? 0]?.body_box ?? null; };
+      run.floors[f] = generateFloor(run, f, this.field, arr, this.rng, body);
       run.alive[f] = run.floors[f]!.map(() => true);
     }
     return run.floors[f]!.map((r, idx) => ({ actor: r.type, x: r.x, y: r.y, param: 3, idx })).filter((a) => run.alive[f][a.idx]);

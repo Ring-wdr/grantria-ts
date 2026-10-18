@@ -54,7 +54,7 @@ test('closing an overlay drops the ones above it; draw goes bottom to top', () =
   const s = new OverlayStack(), a = fake(), b = fake(), order: string[] = [];
   a.draw = () => order.push('a'); b.draw = () => order.push('b');
   s.open(a, { kind: 'list' }); s.open(b, { kind: 'popup' });
-  s.draw();
+  s.draw(() => {});
   assert.deepEqual(order, ['a', 'b']);
   assert.equal(s.kindOpen('popup'), true);
   s.close(a, 'cancel');

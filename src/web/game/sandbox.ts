@@ -10,7 +10,7 @@ import { StoryDb, Story } from '../../core/data/story';
 import { newGame } from '../../core/save/save';
 import { seenEvents } from '../../core/rules/records';
 import { seenAlongRoute } from '../../core/data/storyChart';
-import { Popup, openPopup } from './popup';
+import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { countReplay, recordRush } from '../../core/rules/records';
 import { saveOptions } from '../../core/save/options';
@@ -176,7 +176,7 @@ export class SandboxScene implements Scene {
     u.view('sandboxBar', (W >> 1) - 90, this.mode === 'replay' ? 4 : H - 48, 180, 14, h('div.sb-bar', null, label));
     if (this.log) this.log.draw(u, this.ctx.input);
     u.end();
-    if (this.overlays.size) { this.ctx.ui13.begin(); this.overlays.draw(); this.ctx.ui13.end(); }
+    if (this.overlays.size) { this.ctx.ui13.begin(); this.overlays.draw(popupPaint(this.ctx)); this.ctx.ui13.end(); }
     this.ctx.compositor.show();
   }
 

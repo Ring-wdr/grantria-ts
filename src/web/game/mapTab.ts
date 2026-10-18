@@ -4,7 +4,7 @@
 // which matches the original draw calls in all 296 emulated cases.
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { Popup, openPopup } from './popup';
+import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import type { GameContext } from './scene';
 import { tri, type Ui } from '../render/ui';
@@ -242,7 +242,7 @@ export class MapTab {
   }
 
   drawOverlay(): void { /* no absolute-coordinate overlays */ }
-  drawPopups(): void { this.overlays.draw(); }
+  drawPopups(): void { this.overlays.draw(popupPaint(this.ctx)); }
 }
 
 const rect = (x: number, y: number, w: number, hh: number) => `left:${x}px;top:${y}px;width:${w}px;height:${hh}px;`;

@@ -7,7 +7,8 @@
 import type { Dir } from '../../core/combat/player';
 import { blur8, smear } from '../../core/world/screenfx';
 import type { FieldScene } from './fieldScene';
-import { Dialogue, HoldSkip, drawCaption, drawDialogueButtons } from './dialogue';
+import { Dialogue, HoldSkip } from '../../core/ui/dialogue';
+import { drawCaption, drawDialogue, drawDialogueButtons } from './dialogue';
 import { readLog } from '../../core/save/readLog';
 import { addSeen } from '../../core/rules/records';
 import { backlog, replayLog } from '../../core/ui/backlog';
@@ -556,7 +557,7 @@ export class EventRunner {
     }
     if (this.caption) drawCaption(u, this.caption.text, this.caption.n);
     if (this.active) u.hit(0, 0, W, H, () => [AVK.OK]);       // tap = next line
-    if (this.dialogue) { this.dialogue.draw(u, this.frame); drawDialogueButtons(u, !!this.fs.ctx.options.auto, this.fs.ctx.input); }
+    if (this.dialogue) { drawDialogue(u, this.dialogue, this.frame); drawDialogueButtons(u, !!this.fs.ctx.options.auto, this.fs.ctx.input); }
     if (this.active && this.clock >= 11 && this.skippable(this.lastCmd) && !this.skipFade) {
       // SKIP: the button at alpha 16 with the label blinking every 8 frames (CSS), centred in the button
       u.view('evSkip', W - 70 + this.fs.ctx.input.edge, 6, 50, 24,   // edge layout: at the right edge with the buttons

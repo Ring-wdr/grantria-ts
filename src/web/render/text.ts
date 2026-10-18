@@ -5,6 +5,9 @@
 import * as THREE from 'three';
 import type { WebAssets } from '../assets';
 import { platform } from '../../core/platform';
+import { isHangul, stringWidth } from '../../core/text';
+
+export { stringWidth };
 
 // Hangul piece tables (.so 0x3a9cd8, 0x3a9d2c, 0x3a9d5c, 0x3a9d98, 0x3a9de4)
 const KIND = [1, 1, 1, 1, 1, 1, 1, 1, 2, -1, -1, -1, 2, 2, -1, -1, -1, 2, 2, -1, 1];
@@ -26,20 +29,6 @@ export const NO_OUTLINE = 0xf81f;
 export function rgb565(c: number): [number, number, number] {
   const r = (c >> 11) & 31, g = (c >> 5) & 63, b = c & 31;
   return [(r << 3) | (r >> 2), (g << 2) | (g >> 4), (b << 3) | (b >> 2)];
-}
-
-const isHangul = (ch: number) => ch >= 0xac00 && ch <= 0xd7a3;
-
-/** FUN_00078e84: 2 + 10 per Hangul, 6 per ASCII; '@' and '|x' count 0. */
-export function stringWidth(s: string): number {
-  let w = 2;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s.charCodeAt(i);
-    if (ch === 0x7c) { i++; continue; }
-    if (ch === 0x40) continue;
-    w += isHangul(ch) ? 10 : ch < 0x80 ? 6 : 0;
-  }
-  return w;
 }
 
 export interface TextStyle {

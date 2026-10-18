@@ -3,7 +3,7 @@
 // slot and ranked by the original score formula FUN_00061864.
 import { AVK } from '../input/input';
 import { ItemDb, type Item } from '../../core/rules/items';
-import { Popup, openPopup } from './popup';
+import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { derive, type Derived } from '../../core/rules/rules';
 import { SLOT_COUNT, loadGamedata, loadSlot, type SaveData } from '../../core/save/save';
@@ -136,7 +136,7 @@ export class RankingScene implements Scene {
       else u.view('rank-detail', 0, 0, 0xdc, 0xd4, this.detailView());
       u.pop();
       u.closeButton();
-    }, this.overlays.size ? () => this.overlays.draw() : undefined);
+    }, this.overlays.size ? () => this.overlays.draw(popupPaint(this.ctx)) : undefined);
   }
 
   /** FUN_00034028 / FUN_00033dcc: three slot cards (class, lap mark, level, zone, play time); the

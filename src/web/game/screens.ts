@@ -9,7 +9,7 @@ import { CouponShop, couponCard, coupons } from './community';
 import { josa } from './shop';
 import { consume, countOf } from '../../core/rules/shopRules';
 import { ShopScreen } from './shop';
-import { Popup, openPopup, popupOverlay } from './popup';
+import { Popup, openPopup, popupOverlay, popupPaint } from './popup';
 import { OverlayStack, type OpenOpts } from '../../core/ui/overlays';
 import { VIEW_H as H, VIEW_W as W } from '../render/field';
 import { AVK } from '../input/input';
@@ -375,7 +375,7 @@ export class SlotScene implements Scene {
       }));
       u.pop();
       if (!this.overlays.size) u.closeButton();
-    }, this.overlays.size ? () => this.overlays.draw() : undefined);
+    }, this.overlays.size ? () => this.overlays.draw(popupPaint(this.ctx)) : undefined);
   }
 }
 
@@ -441,7 +441,7 @@ export class CharSelectScene implements Scene {
       (this.ctx.assets.text[0x10a + cls] ?? '').split('|@').forEach((ln, i) => u.string(ln, 0x6e, 0xbe + i * 15, 'center'));
       u.pop();
       if (!this.overlays.size) u.closeButton();
-    }, this.overlays.size ? () => this.overlays.draw() : undefined);
+    }, this.overlays.size ? () => this.overlays.draw(popupPaint(this.ctx)) : undefined);
   }
 }
 
@@ -720,7 +720,7 @@ export class PlayScene implements Scene {
   private drawOverlays(): void {
     if (!this.overlays.size) return;
     this.ctx.ui13.begin();
-    this.overlays.draw();
+    this.overlays.draw(popupPaint(this.ctx));
     this.ctx.ui13.end();
   }
 

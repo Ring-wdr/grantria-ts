@@ -1,6 +1,6 @@
 [package]
 name = "grantria"
-version = "0.2.1"
+version = "0.2.2"
 description = "Grantria web port in a Tauri shell"
 edition = "2021"
 publish = false

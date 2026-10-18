@@ -16,8 +16,11 @@ web/
 │  │  ├─ combat/       플레이어, 몬스터, 보스 14종, 투사체
 │  │  ├─ world/        맵 데이터·통행 레이어(FieldMap), 경로 탐색, 이벤트 액터, 기믹, 화면 필터
 │  │  ├─ field/        필드 진행(FieldGame: 상태와 20Hz 틱), 이벤트 VM, HUD 전투 글자·메시지(HudFeed)
-│  │  ├─ ui/           오버레이 스택, XState 흐름, 팝업·대사창 상태, 대사 로그
-│  │  ├─ sound.ts      로직이 쓰는 소리 포트(SoundOut)
+│  │  ├─ ui/           오버레이 스택, XState 흐름, 팝업·대사창 상태, 대사 로그와 그 읽기 상태
+│  │  ├─ menu/         게임 메뉴와 탭, 상점, 가방 관리, 커뮤니티, 차원의 문, 기록실, 편의 설정의 상태와 키
+│  │  ├─ scenes/       화면 흐름(로고·타이틀·슬롯·캐릭터 선택·필드 진행·회상·순위·음악감상·데이터 관리)과 Screens 포트
+│  │  ├─ host.ts       로직이 호스트에게 받는 것(Host: 에셋, 옵션, InputState, 소리, applyOptions)
+│  │  ├─ sound.ts      로직이 쓰는 소리 포트(SoundOut, 음악감상의 BgmPlayer)
 │  │  └─ save/         슬롯 세이브, 원본 파일 변환(XTEA·체크섬), 옵션
 │  ├─ web/             브라우저 실행 환경 (현재 게임)
 │  │  ├─ main.ts       브라우저 엔트리: createWebPlatform() → app
@@ -27,7 +30,7 @@ web/
 │  │  ├─ assets.ts     WebAssets = Assets + three.js 텍스처
 │  │  ├─ render/       컴포지터·스프라이트(WebGL), Field 렌더러, DOM UI, 글꼴
 │  │  ├─ input/        키보드·터치·게임패드 → InputState
-│  │  ├─ game/         씬·화면·탭·상점·HUD (필드는 FieldGame을 상속해 그리기만 더한다)
+│  │  ├─ game/         씬·화면·탭·상점·HUD의 그리기. 각 클래스가 core의 로직을 상속해 뷰·터치 영역만 더한다
 │  │  ├─ styles/       CSS
 │  │  └─ viewer/       맵 뷰어(index.html, 개발용)
 │  └─ tauri/           Tauri 호스트
@@ -82,11 +85,10 @@ web/
 - 필드: `core/field/fieldGame.ts`의 `FieldGame`이 상태와 `update()`를 갖고, `web/game/fieldScene.ts`의 `FieldScene`이 그것을 상속해 `draw()`와 렌더러 자원만 더한다. 로직이 호스트에게 받는 것은 `FieldHost`(에셋, 옵션, `InputState`, `SoundOut`)뿐이고, 렌더러가 필요한 곳은 빈 훅(`viewPad`, `mapLoaded`, `fortuneAsk` / `fortuneResult`)을 `FieldScene`이 덮어쓴다. 맵은 `FieldMap`이고, WebGL 쪽 `Field`가 `load` / `preloadSprite`를 덮어써 그리기 준비를 더한다.
 - 이벤트 VM은 `core/field/events.ts`, 그 위에 그리는 페이드·자막·대사창·SKIP은 `web/game/eventOverlay.ts`.
 - 팝업·대사창: `core/ui/popup.ts`, `core/ui/dialogue.ts`가 상태와 키를, `web/game/popup.ts`, `dialogue.ts`가 그리기를 맡는다. 로직이 여는 오버레이는 그리기 함수 대신 `model`(Popup, WarpList 등)을 갖고, `OverlayStack.draw(paint)`에 호스트의 그리기(`popupPaint`)를 넘긴다.
-- `tsconfig.core.json`(DOM 타입 없음)과 `tests/boundary.test.ts`가 `core`에 브라우저 API나 `web` 가져오기가 섞이지 않았는지 검사한다.
-
-## 아직 남은 분리
-
-- 메뉴 화면(`web/game`의 `menu`, `tabs`, `shop`, `community`, `mapTab`, `skillTab`, `questTab`, `optionTab`, `bagTools`, `ranking`, `archive`, `musicRoom`, `dataScene`, `dimension`의 선택 화면)과 씬 흐름(`screens.ts`, `sandbox.ts`, `replay.ts`)은 커서·키 처리와 뷰가 한 클래스에 있다. 필드와 같은 방식(상태와 `update()`는 `core`, 뷰는 `web`)으로 옮겨야 한다.
+- 메뉴: `core/menu`의 `…Logic` 클래스(`GameMenuLogic`, `InventoryTabLogic`, `ShopLogic`, `CommunityTabLogic` …)가 커서·키·규칙을 갖고, 같은 이름의 `web/game` 클래스(`GameMenu`, `InventoryTab`, `ShopScreen` …)가 상속해 뷰만 더한다. 로직이 화면을 여는 곳(메뉴의 탭 본문, 인벤토리의 상점·가방 관리, 커뮤니티의 상점들)은 추상 팩토리(`newInventory()`, `newShop()` …)를 부르고 웹 클래스가 채운다. 키 설정(`keyMap.ts`)과 개발자 모드(`devPanel.ts`)는 웹의 키 바인딩·성능 기록을 다루므로 웹 패널로 남고, 옵션 탭은 `newKeys()` / `newDev()`로 받는다.
+- 로직이 만드는 팝업 내용은 뷰 대신 데이터다: 흐름 단계(`Step.model`), 강화 결과·쿠폰 카드(`Popup.card`), 아이템 행동 메뉴(`core/menu/actionPopup.ts`를 `web/game/tabs.ts`의 `drawAction` / `actionAnchor`가 그린다), 대사 로그(`BacklogReader`를 `drawBacklog`가 그린다).
+- 화면 흐름: `core/scenes`의 로직이 다음 화면을 고르면 `SceneHost.screens`(`Screens` 포트: `title()`, `slots()`, `play(slot, save)` …)를 부르고, `web/game/screens.ts`의 `WebScreens`가 해당 씬을 만들어 `ctx.go()`한다. 터치 영역·UI 모드·탭 전달(`input.zones`, `uiMode`, `takeTaps`)과 타이틀 메뉴의 페이드 같은 표시 타이밍은 웹 씬에 남는다. 필드 진행(`PlayLogic`)은 메뉴·상점·게임 오버 쿠폰 상점·보스 러시를, 회상 목록과 샌드박스는 재생할 필드와 돌아갈 씬을 추상 메서드로 호스트에게 받는다.
+- `tsconfig.core.json`(DOM 타입 없음)과 `tests/boundary.test.ts`가 `core`에 브라우저 API나 `web` 가져오기가 섞이지 않았는지 검사하고, `tests/scenes.test.ts`가 렌더러 없이 가짜 호스트로 타이틀 흐름을 돌린다(node 테스트는 타입만 지우므로 거기서 불러오는 파일은 생성자 매개변수 속성을 쓰지 않는다).
 
 ## 문제 기록
 

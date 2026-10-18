@@ -673,6 +673,9 @@ export class Boss extends Monster {
         }
       }
       if (this.rec === 3 && this.frame === 0x23) this.grab = false;
+      // FUN_0006c540: every tick the arm faces left (+0x7a = +0x7b = 0, +0x7c = 3) before FUN_000231e4, so its boxes are
+      // never mirrored; the dir 3 copied from the main body would flip the grab (31..34) away from the player
+      this.dir = 0; this.lastH = 0; this.lastV = 3;
       if (end()) { this.cnt = Math.max(0, this.cnt - 1); if (this.rec === 3 || this.rec === 4) { this.rec = 1; this.action = 1; this.grab = false; } this.t = -1; }
     } else if (this.role === 2) {                            // head
       const sp = this.rec === 5 ? 5 + 2 * g.get(0x22) : 3, lo = this.rec === 5 ? -49 : -39, hi = this.rec === 5 ? -31 : -21;

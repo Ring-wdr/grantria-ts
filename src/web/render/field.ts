@@ -29,7 +29,7 @@ export class Field extends FieldMap {
   }
 
   /** Load a map and pre-render its static under-layer. */
-  async load(mapId: number): Promise<void> {
+  override async load(mapId: number): Promise<void> {
     await this.loadData(mapId);
     const m = this.map, hd = m.header;
     const names: (string | null)[] = [`t${hd.tileset}`];
@@ -63,10 +63,10 @@ export class Field extends FieldMap {
   }
 
   /** Load plain images drawn through Drawable.img (shadow, icons). */
-  async preloadImages(names: string[]): Promise<void> { await this.view.preload(names); }
+  override async preloadImages(names: string[]): Promise<void> { await this.view.preload(names); }
 
   /** Make sure every frame of an animated sprite has its textures loaded. */
-  async preloadSprite(cmfName: string, cmf: Cmf, equip: Equip = DEFAULT_EQUIP): Promise<void> {
+  override async preloadSprite(cmfName: string, cmf: Cmf, equip: Equip = DEFAULT_EQUIP): Promise<void> {
     await this.view.preload(this.view.allImages(cmfName, cmf, this.zone, equip));
   }
 

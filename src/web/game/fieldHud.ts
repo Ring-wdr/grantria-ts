@@ -9,6 +9,7 @@ import { expNeed } from '../../core/rules/rules';
 import type { DomUi } from '../render/domUi';
 import { ICONS } from '../render/touchIcons';
 import { keyHint } from '../input/keyHints';
+import { popDigits, type HudFeed } from '../../core/field/hudFeed';
 
 export interface HudState {
   /** day/night clock frame of cmf_status (0x51 day) */
@@ -79,89 +80,28 @@ const SLOT_X = [0xc0, 0x83, 0xb8, 0x7b, 0x72, 0x31], SLOT_Y = [0x31, 0x31, 0x67,
 const slotCentre = (i: number): [number, number] => [W - SLOT_X[i] + 20, H - SLOT_Y[i] + 20];
 
 
-/** World-space combat text. */
-interface FloatText {
-  kind: 'damage' | 'pop' | 'miss' | 'crit' | 'extra' | 'label';
-  /** 'pop': red (the player was hit) */
-  red?: boolean;
-  /** damage numbers: the object they belong to (a new one pushes the older ones away) */
-  owner?: object;
-  value: number;
-  text: string;
-  x: number;
-  y: number;
-  age: number;
-}
-
 /** d+0x24d7a (byte pairs): kind 2 reads them as (alpha, style) at 11 - c, kind 1 as (dy, style) per digit */
 const NUM_T: [number, number][] = [[0, 8], [-16, 8], [4, 7], [1, 7], [16, 9], [32, 10], [32, 10], [32, 10], [32, 9], [16, 9], [16, 9]];
-const popDigits = (v: number) => String(Math.abs(Math.trunc(v))).length;
 
 export class FieldHud {
-  private frame = 0;
-  /** floor-name slide DAT_003b3be8: -33 on map entry, +2 per frame up to 32 */
-  private slide = 32;
-  private lastMap = -1;
-  private floats: FloatText[] = [];
-  /** HUD message log (FUN_0001e6e8, 6-line queue 0x40f380): text and age */
-  private messages: { text: string; age: number }[] = [];
-
-  constructor(private ui: DomUi, private status: Cmf, private input: Input) {}
+  constructor(private ui: DomUi, private status: Cmf, private input: Input, private feed: HudFeed) {}
 
   static images = ['c', 't', 'touch', 'sIcon', 'i0', 'f', 'ec', 'oc', ...Array.from({ length: 11 }, (_, i) => `face${i}`)];
-
-  tick(): void {
-    this.frame++;
-    if (this.slide < 32) this.slide = Math.min(32, this.slide + 2);
-    for (const f of this.floats) f.age++;
-    this.floats = this.floats.filter((f) => f.age < (f.kind === 'label' ? 30 : f.kind === 'damage' ? 7 : f.kind === 'pop' ? 9 : 12));
-    for (const m of this.messages) m.age++;
-    this.messages = this.messages.filter((m) => m.age < 60);
-  }
-
-  /** FUN_00022090 kind 2: the whole number at once, 2x size (crit / EXTRA / second hits) */
-  damage(value: number, x: number, y: number, owner?: object): void { this.push({ kind: 'damage', value, text: '', x, y, age: 0, owner }); }
-  /** FUN_00022090: the owner's earlier numbers move by (c − 8, c − 16), c = what is left of their counter */
-  private push(f: FloatText): void {
-    if (f.owner) for (const o of this.floats) {
-      if (o.owner !== f.owner || (o.kind !== 'damage' && o.kind !== 'pop')) continue;
-      const c = o.kind === 'damage' ? 7 - o.age : popDigits(o.value) * 4 - o.age;
-      o.x += c - 8; o.y += c - 16;
-    }
-    this.floats.push(f);
-  }
-  /** FUN_00022090 kind 1: digits pop out one by one (normal hits); red when the player is hit */
-  pop(value: number, x: number, y: number, red = false, owner?: object): void { this.push({ kind: 'pop', value, text: '', x, y, age: 0, red, owner }); }
-  hurt(value: number, x: number, y: number, owner?: object): void { this.pop(value, x, y, true, owner); }
-  extra(x: number, y: number): void { this.floats.push({ kind: 'extra', value: 0, text: '', x, y, age: 0 }); }
-  miss(x: number, y: number): void { this.floats.push({ kind: 'miss', value: 0, text: '', x, y, age: 0 }); }
-  crit(x: number, y: number): void { this.floats.push({ kind: 'crit', value: 0, text: '', x, y, age: 0 }); }
-  label(text: string, x: number, y: number): void { this.floats.push({ kind: 'label', value: 0, text, x, y, age: 0 }); }
-
-  message(text: string): void {
-    if (!text) return;
-    this.messages.push({ text, age: 0 });
-    if (this.messages.length > 6) this.messages.shift();
-  }
 
   /** Message log, provisional placement (the original drawing position is not documented). */
   private drawMessages(): void {
     const u = this.ui;
-    this.messages.forEach((m, i) => {
+    this.feed.messages.forEach((m, i) => {
       u.alpha = m.age > 50 ? (60 - m.age) * 3 : 32;
-      u.string(m.text, 8, H - 30 - (this.messages.length - 1 - i) * 13);
+      u.string(m.text, 8, H - 30 - (this.feed.messages.length - 1 - i) * 13);
     });
     u.alpha = 32;
   }
 
-  /** arrive on mapId without the slide: FUN_0002d640 (차원의 문 entry) loads the floor without setting
-   *  DAT_003b3be8 = 0xdf, so the floor name just stands at its resting place */
-  noSlideOn(mapId: number): void { this.lastMap = mapId; this.slide = 32; }
-
   /** buttons = false while the game-over screen redraws the field (FUN_0003357c) */
   draw(s: HudState, camX: number, camY: number, buttons = true): void {
     const u = this.ui;
-    if (s.mapId !== this.lastMap) { this.lastMap = s.mapId; this.slide = -33; }
+    this.feed.seeMap(s.mapId);
     this.drawFloats(camX, camY);
     if (s.target) this.targetPanel(s.target);
     if (s.hits?.count) this.hitCounter(s.hits.count, s.hits.timer);
@@ -229,7 +169,7 @@ export class FieldHud {
     u.image('c', 0x48, 0xb0, Math.trunc(Math.max(0, s.mp) * 0x48 / Math.max(1, s.maxMp)), 7, 0x20, 0x17);
     u.image('c', 0x3c, 0x1c, 0xe, 8, 0x1e, 4);                           // "Lv."
     u.number(s.level, 0x2d, 5, 0, 0, 2);
-    if (this.frame & 4) {                                                // blinking point icons
+    if (this.feed.frame & 4) {                                                // blinking point icons
       if (s.statPoints > 0) u.image('c', 0x80, 0x50, 8, 8, 0x46, 5);
       if (s.skillPoints > 0) u.image('c', 0x88, 0x50, 8, 8, 0x4f, 5);
     }
@@ -280,7 +220,7 @@ export class FieldHud {
 
   /** FUN_000354bc floor name: round box 0x333333 alpha 16, text alpha follows the slide. */
   private floorName(mapId: number): void {
-    const u = this.ui, be8 = this.slide;
+    const u = this.ui, be8 = this.feed.slide;
     const id = 0x1e4 + mapId;
     const tw = u.width(id);
     u.alpha = 16;
@@ -378,7 +318,7 @@ export class FieldHud {
   /** Damage numbers (kind 2 style 9, kind 1 red style 6), MISS / CRITICAL from t.pxl, labels. */
   private drawFloats(camX: number, camY: number): void {
     const u = this.ui;
-    for (const f of this.floats) {
+    for (const f of this.feed.floats) {
       const x = f.x - camX, y = f.y - camY;
       if (f.kind === 'damage') {                            // style / alpha from NUM_T[11 - c], c = 7..1
         const [a, st] = NUM_T[Math.min(4 + f.age, 10)];

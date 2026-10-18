@@ -4,28 +4,25 @@
 // SPAWN_TYPE of the low ids puts an item on the ground (SPAWN_ITEM); PARTY_SWAP is not ported (unused by the
 // scripts) and FILTER1 does nothing in the original either.
 // DARKEN / the darkness steps / LIGHTNING are the RGB565 blur and smear filters of FUN_000f8b00 (screenfx.ts).
-import type { Dir } from '../../core/combat/player';
-import { blur8, smear } from '../../core/world/screenfx';
-import type { FieldScene } from './fieldScene';
-import { Dialogue, HoldSkip } from '../../core/ui/dialogue';
-import { drawCaption, drawDialogue, drawDialogueButtons } from './dialogue';
-import { readLog } from '../../core/save/readLog';
-import { addSeen } from '../../core/rules/records';
-import { backlog, replayLog } from '../../core/ui/backlog';
-import { fxScale, optionFps } from '../../core/save/options';
-import { AVK } from '../input/input';
-import type { Ui } from '../render/ui';
-import { button, h, padBadge } from '../render/view';
-import { EvActor } from '../../core/world/actors';
-import { REPEATABLE } from '../../core/data/story';
+// The fills, fades, captions, dialogue and SKIP button over the field are drawn by web/game/eventOverlay.ts.
+import type { Dir } from '../combat/player';
+import { blur8, smear } from '../world/screenfx';
+import type { FieldGame } from './fieldGame';
+import { Dialogue, HoldSkip } from '../ui/dialogue';
+import { readLog } from '../save/readLog';
+import { addSeen } from '../rules/records';
+import { backlog, replayLog } from '../ui/backlog';
+import { fxScale, optionFps } from '../save/options';
+import { AVK } from '../keys';
+import { EvActor } from '../world/actors';
+import { REPEATABLE } from '../data/story';
+import { platform } from '../platform';
 
 export { REPEATABLE };
 
-const W = 480, H = 320;
 export const PLAYER_ARG = 299;
 const PARTY_ALL = 0x120;
 const NO_SKIP = [0, 1, 4, 10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x27, 0x29, 0x2f, 0x30, 0x31, 0x32, 0x39];
-const FLASH = [32, 32, 32, 24, 24, 16, 8, 6, 24, 16, 8, 4, 2, 0, 0];
 /** end handler flag changes (FUN_0002cdc8) */
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const END_HOOK: Record<number, { set?: number[]; clr?: number[]; dim?: number[]; doors?: number[]; item?: [number, number] }> = {
@@ -95,19 +92,21 @@ export class EventRunner {
   private clock = 0;
   private textId = 0;
   wait: Wait = 0;
-  private lastCmd = 0;
+  lastCmd = 0;
   private lastTime = 0;
   private counter = 0;
   private waitUntil = 0;
   private waitActor: EvActor | null = null;
+  /** the map a MAP record (0x10) is loading; wait is 'map' until it is in */
+  private mapLoad: Promise<void> = Promise.resolve();
   private fadeActor: EvActor | null = null;
   frame = 0;
-  // screen effects
-  private fade = 0;
-  private fadeWhite = false;
-  private fill: 0 | 1 | 2 = 0;            // 1 black, 2 white
+  // screen effects (read by the overlay drawing)
+  fade = 0;
+  fadeWhite = false;
+  fill: 0 | 1 | 2 = 0;            // 1 black, 2 white
   grey = false;
-  private flash = 0;
+  flash = 0;
   shakeY = 0;
   private shakeAmp = 0;
   /** DARKEN frames (DAT_003b3c3b): the field is not redrawn and the held frame is blurred again each frame */
@@ -115,16 +114,16 @@ export class EventRunner {
   /** darkness step (DAT_003b3c3c, no cap): 1 blur, 2 smear (1), 3 smear (0) */
   private darkLevel = 0;
   /** DAT_003b3c3a = 2: LIGHTNING filters while the white fade runs */
-  private lightMode = 0;
+  lightMode = 0;
   dialogue: Dialogue | null = null;
-  private caption: { text: string | string[]; n: number; id: number } | null = null;
+  caption: { text: string | string[]; n: number; id: number } | null = null;
   /** caption index DAT_003b1dbc (reset at the start of 0x6A, hardmode.md §2.2) */
   private capIdx = -1;
-  private showItem: { icon: number; k: number; x: number; y: number } | null = null;
+  showItem: { icon: number; k: number; x: number; y: number } | null = null;
   /** QUEST_ACCEPT / QUEST_COMPLETE waiting for the popup */
   private questPending = false;
   /** skip fade (state 0x3A): frames left */
-  private skipFade = 0;
+  skipFade = 0;
   /** 회상 (not in the original): quests are not taken or completed and the end changes no flags */
   replay = false;
   /** where the lines go: the play log, or the replay's own (회상) */
@@ -147,7 +146,7 @@ export class EventRunner {
   /** event clock (DAT_00408576), read by bosses during events */
   get progress(): number { return this.clock; }
 
-  constructor(private fs: FieldScene) {}
+  constructor(private fs: FieldGame) {}
 
   debug(): string { return this.active ? `ev ${this.id} pc ${this.pc}/${this.end} t ${this.clock} wait ${this.wait} fill ${this.fill}` : ''; }
 
@@ -262,7 +261,7 @@ export class EventRunner {
         break;
       }
       case 0x14: if (![this.fs.lead!, ...this.fs.actors].some((a) => a.moving)) this.wait = 0; break;
-      case 0x15: if (performance.now() >= this.waitUntil) this.wait = 0; break;
+      case 0x15: if (platform().now() >= this.waitUntil) this.wait = 0; break;
       case 0x16:
         if (this.showItem) { this.showItem.k += 4; if (Math.sin((this.showItem.k * Math.PI) / 180 * 4) < 0 || this.showItem.k > 45 * 4) this.showItem = null; }
         if (!this.showItem) { this.wait = 0; }
@@ -279,7 +278,7 @@ export class EventRunner {
     this.pc++;
   }
 
-  private skippable(c: number): boolean {
+  skippable(c: number): boolean {
     return !NO_SKIP.includes(c) && !(c >= 5000 && c < 5300) && c < 0x17d4;
   }
 
@@ -392,7 +391,7 @@ export class EventRunner {
         if (p) { a.x = p[0]; a.y = p[1]; a.face((p[2] & 3) as Dir); }
         break;
       }
-      case 0x10: this.wait = 'map'; void fs.eventMap(arg).then(() => { this.wait = 0; }); break;
+      case 0x10: this.wait = 'map'; this.mapLoad = fs.eventMap(arg).then(() => { this.wait = 0; }); break;
       // 회상: the quest is neither taken nor completed; the wait without a popup ends the next frame like the original's
       case 0x13: if (!fast) { this.questPending = true; this.wait = 2; if (!this.replay) fs.quests.accept(arg); } break;
       case 0x14: {
@@ -434,7 +433,7 @@ export class EventRunner {
         for (const a of [fs.lead!, ...fs.actors]) { a.pose = 0; a.anim = -1; a.speed = 5; }
         EvActor.freeze = -1;
         break;
-      case 0x27: if (!fast) { this.waitUntil = performance.now() + arg; this.wait = 0x15; } break;
+      case 0x27: if (!fast) { this.waitUntil = platform().now() + arg; this.wait = 0x15; } break;
       case 0x28: break;                                        // REDRAW_BG
       case 0x29: { const a = this.actor(arg); const d = (a.dir ^ 1) as Dir; a.walkTo(fs.field, Math.floor(a.x / 16) + (d === 0 ? -1 : d === 1 ? 1 : 0), Math.floor(a.y / 16) + (d === 2 ? -1 : d === 3 ? 1 : 0)); break; }
       case 0x2a: fs.partHide = 0; break;                       // PART_SHOW
@@ -492,8 +491,7 @@ export class EventRunner {
       this.exec(r.cmd, r.arg, true);
       this.pc++;
       if ((this.wait as Wait) === 'map') {                  // continue after the map loads
-        const resume = () => { if (this.wait === 'map') { setTimeout(resume, 20); return; } this.lastTime = prev; this.fastForward(); };
-        setTimeout(resume, 20);
+        void this.mapLoad.then(() => { this.lastTime = prev; this.fastForward(); });
         return;
       }
     }
@@ -538,32 +536,4 @@ export class EventRunner {
     }
   }
 
-  drawOverlay(u: Ui): void {
-    if (this.fill) u.fill(0, 0, W, H, this.fill === 1 ? 0x000001 : 0xffffff);
-    const flashK = fxScale(this.fs.ctx.options.flash);              // 편의 설정: white flashes reduced / off
-    if (this.fade) {
-      const a = this.fade < 0 ? ((this.fade + 15) * 2) : ((this.fade - 1) * 2);
-      const k = this.fadeWhite && this.lightMode === 2 ? flashK : 1;  // LIGHTNING's white burst
-      if (a * k > 0) { u.alpha = Math.min(32, Math.round(a * k)); u.fill(0, 0, W, H, this.fadeWhite ? 0xffffff : 0); u.alpha = 32; }
-    }
-    if (this.skipFade) { u.alpha = Math.min(32, (16 - this.skipFade) * 2); u.fill(0, 0, W, H, 0); u.alpha = 32; }
-    if (this.flash && flashK) { u.alpha = Math.round((FLASH[15 - this.flash] ?? 0) * flashK); u.fill(0, 0, W, H, 0xffffff); u.alpha = 32; }
-    if (this.showItem) {
-      const s = this.showItem, r = this.fs.db.iconRect(s.icon);
-      const x = s.x < 0 ? (W >> 1) - 12 : s.x - this.fs.cam.x - 12, y = s.y < 0 ? (H >> 1) - 12 : s.y - this.fs.cam.y - 24;
-      u.alpha = Math.max(0, Math.min(32, Math.round(Math.sin((s.k * Math.PI) / 180 * 4) * 32)));
-      u.image(r.image, r.sx, r.sy, 24, 24, x, y);
-      u.alpha = 32;
-    }
-    if (this.caption) drawCaption(u, this.caption.text, this.caption.n);
-    if (this.active) u.hit(0, 0, W, H, () => [AVK.OK]);       // tap = next line
-    if (this.dialogue) { drawDialogue(u, this.dialogue, this.frame); drawDialogueButtons(u, !!this.fs.ctx.options.auto, this.fs.ctx.input); }
-    if (this.active && this.clock >= 11 && this.skippable(this.lastCmd) && !this.skipFade) {
-      // SKIP: the button at alpha 16 with the label blinking every 8 frames (CSS), centred in the button
-      u.view('evSkip', W - 70 + this.fs.ctx.input.edge, 6, 50, 24,   // edge layout: at the right edge with the buttons
- button([h('span.ev-skip', null, this.fs.db.a.text[100] ?? 'SKIP'), padBadge(this.fs.ctx.input, AVK.POUND, 'ev-skip-pad')], {
-        sel: true, glow: false, cls: 'ev-skip-btn', style: 'width:100%;height:100%', on: () => [AVK.POUND],
-      }));
-    }
-  }
 }

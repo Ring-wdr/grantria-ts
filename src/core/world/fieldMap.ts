@@ -1,6 +1,7 @@
 // A loaded map as the game logic sees it: header, object sets, the mid layer with portal markers and the
 // walk layers (FUN_0001da78). The web renderer (src/web/render/field.ts) extends this with drawing.
 import type { Assets, Cmf, GameMap, MapObject } from '../data/assets';
+import type { Equip } from '../render';
 import { buildWalk, buildWalkLayers } from './world';
 
 export const TILE = 16;
@@ -39,6 +40,13 @@ export class FieldMap {
   protected objCmf(id: number): [string, Cmf, number] {
     return id < 0 ? ['cmf_oc', this.ccmf, -id] : [this.objName, this.ocmf, id];
   }
+
+  /** Load a map; a renderer also prepares its drawing (web/render/field.ts) */
+  async load(mapId: number): Promise<void> { await this.loadData(mapId); }
+
+  /** Make sure a sprite / plain images can be drawn; nothing to load without a renderer. */
+  async preloadSprite(_cmfName: string, _cmf: Cmf, _equip?: Equip): Promise<void> {}
+  async preloadImages(_names: string[]): Promise<void> {}
 
   /** Load the map data, its object sets and the walk layers. */
   async loadData(mapId: number): Promise<void> {

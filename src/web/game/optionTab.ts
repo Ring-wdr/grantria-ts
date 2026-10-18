@@ -5,7 +5,7 @@
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { OPTION_COUNTS, OPTION_KEYS, saveOptions } from '../../core/save/options';
-import { vibrate } from '../vibrate';
+import { vibrate } from '../../core/vibrate';
 import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
 import { button, cmfFrame, cSprite, gt, h, menuList, sprite, type ScrollRef, type VChild, type VNode } from '../render/view';

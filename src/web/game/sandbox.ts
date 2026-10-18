@@ -4,7 +4,8 @@
 // the rush best, the replay count). The scene that started it waits and comes back after.
 import { AVK } from '../input/input';
 import type { GameContext, Scene } from './scene';
-import { eventMap, FieldScene, OPENING } from './fieldScene';
+import { FieldScene } from './fieldScene';
+import { eventMap, OPENING } from '../../core/field/fieldGame';
 import type { PlayScene } from './screens';
 import { StoryDb, Story } from '../../core/data/story';
 import { newGame } from '../../core/save/save';

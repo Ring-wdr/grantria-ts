@@ -8,15 +8,13 @@
 // Decoded BGM is large (a mono track of a minute is ~11 MB of float PCM at 48 kHz): only the current and the
 // previous track stay decoded, SFX (short) stay cached.
 import { platform } from '../core/platform';
+import type { SoundOut } from '../core/sound';
 
 /** what the game asks of the sound (GameContext.audio) */
-export interface Sound {
+export interface Sound extends SoundOut {
   enabled: boolean;
   setPaused(p: boolean): void;
-  playBgm(n: number): void;
   setEnabled(on: boolean, bgm?: number, sfx?: number): void;
-  stopBgm(): void;
-  playSfx(n: number): void;
   /** 음악감상's player: where the BGM is, pause / go on, loop or play each track once */
   bgmTime(): { t: number; d: number; paused: boolean; ended: boolean } | null;
   pauseBgm(on: boolean): void;

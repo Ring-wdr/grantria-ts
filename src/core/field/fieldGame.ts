@@ -36,6 +36,7 @@ import { AVK } from '../keys';
 import type { Host } from '../host';
 import { platform } from '../platform';
 import { Inventory, ItemDb } from '../rules/items';
+import { compareGear, type GearDiff } from '../rules/compare';
 import { autoLootGround, groundBox, rollBossDrops, rollDrop, updateGround, type GroundItem } from '../rules/drops';
 import { Monster, overlaps, type MonsterWorld } from '../combat/monster';
 import { Boss, BossGlobals, MonsterShot, bossDeathEvent, summonStats, type BoxTable } from '../combat/boss';
@@ -1591,6 +1592,9 @@ export class FieldGame {
     this.updateLook();
     this.vitals.mp = Math.min(this.vitals.mp, this.stats.maxMp);
   }
+
+  /** 비교: `it` against the item worn in its slot, through the stat rebuild (compare.ts) */
+  gearDiff(it: Item): GearDiff { return compareGear(it, this.inv.equip, this.model, this.tables); }
 
   /** 오토루팅 (drops.ts autoLootGround) */
   private autoLoot(): void {

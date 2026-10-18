@@ -68,9 +68,10 @@ export const CLASSES = [
   { name: '알피', stats: [7, 1, 5, 3], mainStat: 0, hpPerVit: 12, regenDiv: 14, critDiv: 33, accDiv: 33 },
 ] as const;
 
-/** Enhancement step table (.rodata 0x103834) and FUN_00037238. */
+/** Enhancement step table (.rodata 0x103834) and FUN_00037238; armour (type 3..14) under base 10 takes the level as is. */
 const ENH_T = [4, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8, 9, 11, 13, 16, 20, 25, 32, 41, 53, 68];
-export function enhBonus(base: number, enh: number): number {
+export function enhBonus(base: number, enh: number, armour = false): number {
+  if (armour && base < 10) return enh;
   let e = 0;
   for (let k = 0; k < enh; k++) e += ENH_T[k];
   return Math.max(enh, rdiv(e * base, 100));
@@ -162,7 +163,7 @@ export function skillBaseDamage(atk: number, r0: number, r3: number, lv: number,
   return d < 0 ? 1 : d;
 }
 
-const usable = (it: EquipLike, level: number, cls: number) =>
+export const usable = (it: EquipLike, level: number, cls: number): boolean =>
   it.type >= 16 || (level >= it.reqLevel && (it.type === 15 || it.type % 3 === cls));
 
 /**
@@ -199,7 +200,7 @@ export function derive(p: PlayerModel, tables?: EquipTables): Derived {
         case 61: D[13] -= v; D[14] -= v; break;      // text says "increase", the original subtracts
       }
     }
-    if (slot >= 1 && slot <= 4) D[2] += (it.enh ? enhBonus(it.base, it.enh) : 0) + rdiv(it.base * armorPct, 100);
+    if (slot >= 1 && slot <= 4) D[2] += (it.enh ? enhBonus(it.base, it.enh, true) : 0) + rdiv(it.base * armorPct, 100);
   }
   if (tables) {
     const seen = new Set<number>();

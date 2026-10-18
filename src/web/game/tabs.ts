@@ -20,7 +20,7 @@ import { clipImage } from '../render/sprites';
 import { ActionPopup } from '../../core/menu/actionPopup';
 import { ACTION, InventoryTabLogic, EquipTabLogic } from '../../core/menu/tabs';
 import '../styles/tabs.css';
-import { compareGear, equipSlot } from '../../core/rules/compare';
+import { equipSlot } from '../../core/rules/compare';
 import '../styles/convenience.css';
 import { platform } from '../../core/platform';
 
@@ -66,33 +66,44 @@ function optionDiffText(t: string[], id: number, d: number): string {
 }
 
 /**
- * 비교 (not in the original): the gear item against the one worn in its slot — main stat, every option and the
- * sockets, green for a gain and red for a loss. Nothing when it is the worn item itself or not gear.
+ * 비교 (not in the original): the gear item against the one worn in its slot — the character's main stat before and
+ * after the swap (rules.derive), every option and the sockets, green for a gain and red for a loss. Nothing when it is
+ * the worn item itself or not gear; another class's gear only says whose it is (the game has no text for that: its
+ * 착용하기 is never offered there).
  */
 export function compareView(fs: FieldScene, it: Item): VChild {
   if (it.type >= 0x10) return null;
   const worn = fs.inv.equip[equipSlot(it)] ?? null;
   if (worn === it) return null;
-  const t = fs.db.a.text, d = compareGear(it, worn);
-  const label = it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6;
+  const t = fs.db.a.text;
+  if (it.type < 15 && it.type % 3 !== fs.model.cls) {
+    return [h('div.v-rule'), gt(`${t[0x5d + (it.type % 3)] ?? ''} 전용 장비라 착용할 수 없습니다.`, { pen: 0xf800 })];
+  }
+  const d = fs.gearDiff(it);
+  const label = (t[it.type < 3 ? 0x1ad2 : it.type < 15 ? 0x1ad4 : 0x1ad6] ?? '').replace(/\|./g, '');   // "방어력|d": no yellow
   const sign = (v: number) => (v > 0 ? `+${v}` : String(v));
   const pen = (v: number) => (v > 0 ? 0x07e0 : 0xf800);
+  const [now, next] = d.stat, v = next - now;
   return [
     h('div.v-rule'),
     gt(worn ? `착용 중: ${worn.name}` : '착용 중인 장비 없음', { pen: 0xc618, cls: 'tb-ellipsis' }),
-    gt(`${t[label] ?? ''} ${d.base === 0 ? '±0' : `${sign(d.base)} ${d.base > 0 ? '▲' : '▼'}`}`, { pen: d.base === 0 ? 0xc618 : pen(d.base) }),
+    d.usable
+      ? gt(`${label} ${v === 0 ? '±0' : `${sign(v)} ${v > 0 ? '▲' : '▼'}`} (${now} → ${next})`, { pen: v === 0 ? 0xc618 : pen(v) })
+      : gt(t[0xb4] ?? '', { pen: 0xf800 }),                                   // the level: the class is handled above
     d.enh && d.enh[1] !== 0 && gt(`강화 ${optionDiffText(t, d.enh[0], d.enh[1])} ${d.enh[1] > 0 ? '▲' : '▼'}`, { pen: pen(d.enh[1]) }),
     d.options.map(([id, v]) => gt(`${optionDiffText(t, id, v)} ${v > 0 ? '▲' : '▼'}`, { pen: pen(v) })),
     (d.gems[1] || d.socketsOld[1]) ? gt(`소켓 ${d.gems[0]}/${d.gems[1]} (착용 중 ${d.socketsOld[0]}/${d.socketsOld[1]})`, { pen: 0xc618 }) : null,
   ];
 }
 
-/** main-stat change against the worn item, for the inventory name bar */
+/** character main-stat change against the worn item, for the inventory name bar; nothing for gear it cannot wear */
 function baseDelta(fs: FieldScene, it: Item | undefined): VChild {
   if (!it || it.type >= 0x10) return null;
   const worn = fs.inv.equip[equipSlot(it)] ?? null;
   if (worn === it) return null;
-  const v = compareGear(it, worn).base;
+  const d = fs.gearDiff(it);
+  if (!d.usable) return null;
+  const v = d.stat[1] - d.stat[0];
   if (v === 0) return h('span.tb-delta', null, '±0');
   return h(`span.tb-delta.${v > 0 ? 'up' : 'down'}`, null, `${v > 0 ? '▲' : '▼'}${Math.abs(v)}`);
 }
@@ -357,7 +368,7 @@ export class EquipTab extends EquipTabLogic {
         h('div.v-row.v-kv', null, h('span.v-grow.tb-stat-label', null, labels[i] ?? ''), String(vals[i])))));
   }
 
-  /** 0x2F candidate select (FUN_0005d948), simplified comparison (main stat only). */
+  /** 0x2F candidate select (FUN_0005d948), with the bag detail's stat line and 비교 instead of the base-only one. */
   private drawPick(u: Ui): void {
     u.hit(-200, -200, 700, 700, () => [AVK.CLR]);              // tap outside the list closes
     u.mount('tab', 'equipPick', this.pickView());
@@ -376,16 +387,14 @@ export class EquipTab extends EquipTabLogic {
     let info: VChild;
     if (!p.cands.length) info = h('div.v-grow.v-row.v-center', null, gt(t[0x1a1e] ?? ''));
     else {
-      const it = inv.items[p.cands[p.cur]], old = inv.equip[this.slot];
-      const label = t[this.slot === 0 ? 0x1ad2 : this.slot === 5 ? 0x1ad6 : 0x1ad4] ?? '';
-      const d = it.base - (old?.base ?? 0);
-      const cmp = d > 0 ? `${label} ${it.base}(|e+${d}|b)` : d < 0 ? `${label} ${it.base}|b(|c${d}|b)` : `${label} ${it.base}`;
+      const it = inv.items[p.cands[p.cur]], stat = detailLines(a, it).stat;
       info = [
         h('div.v-row', { style: 'gap:6px' }, cellView(fs, it, { cls: 'eq' }), gt(it.name, { cls: 'v-grow tb-ellipsis' })),
         h('div.v-row.tb-sub', null, h('span.v-grow'), `${t[0x24] ?? 'REQUIRE LV'} ${it.reqLevel}`),
         h('div.v-rule'),
-        gt(cmp),
+        stat && gt(stat),
         it.options.filter(([id]) => id !== 0xff).map(([id, v]) => gt(optionText(t, id, v), { pen: 0x9e7f })),
+        compareView(fs, it),
       ];
     }
     return h('div.v-col.v-fill.v-tab.tb-pick', null,

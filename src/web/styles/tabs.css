@@ -150,6 +150,7 @@
 .tb-strip { gap: 10px; padding: 3px 5px; }
 .tb-pick-info { gap: 2px; margin: 0 6px; padding: 6px 10px; text-align: center; }
 .tb-pick-info > .v-row:first-child { text-align: left; }
+.tb-pick-info > * { flex-shrink: 0; }                  /* 비교 lines scroll, not squash (as .tb-detail-body) */
 
 @keyframes tb-pulse {
   0%, 100% { opacity: 0.5; }

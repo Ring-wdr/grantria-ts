@@ -4,7 +4,7 @@
 // crafting FUN_0004ce34. Account traits gd[0x36A..0x36F] come from account.ts (tracks 5..10).
 import type { Assets } from '../data/assets';
 import type { Inventory, Item, ItemDb } from './items';
-import type { Rng } from './rules';
+import { enhBonus as ruleEnhBonus, type Rng } from './rules';
 import { traitVal } from './account';
 import { cfmt } from '../data/skillDetail';
 
@@ -200,16 +200,19 @@ export function enhEffect(it: Item, d = 0): { value: number; opt: number } | nul
  *   raised it, else 0x1AFE / 0x1B00; accessories "모든저항력" 0x1B01 / 0x1B02 without an enhancement part.
  * - enh: text 0x1C65 "|e+%d강:%s" around the option text of enhEffect.
  */
-/** main stat of gear (FUN_0004eea0 / FUN_00039820): base plus the options that raise it (weapon 0x1b / 0, armour
- *  0x21 / 2: base·v/100; accessory 0x24: v), and the enhancement bonus FUN_00037238 (none on accessories) */
+/** main stat of gear: base plus the options that raise it (weapon 0x1b / 0, armour 0x21 / 2: %; accessory 0x24: v),
+ *  and the enhancement bonus FUN_00037238 (none on accessories). The original's item detail (FUN_0004eea0) truncates
+ *  base·v/100 per option and leaves the bonus apart; this follows the stat rebuild (rules.derive) instead, so the line
+ *  matches what wearing the item gives: the % options summed and rounded once, and on a weapon the % also lifts the
+ *  enhancement bonus (bonus = rounded total - value). */
 export function mainStat(it: Item): { value: number; bonus: number } {
   const ids = it.type < 3 ? [0x1b, 0] : it.type < 15 ? [0x21, 2] : [0x24];
-  let value = it.base;
-  for (const [id, val] of it.options) {
-    if (id === 0xff) break;
-    if (ids.includes(id)) value += it.type === 15 ? val : Math.trunc((val * it.base) / 100);
-  }
-  return { value, bonus: it.type < 15 ? enhBonus(it, 0) : 0 };
+  let add = 0;
+  for (const [id, val] of it.options) if (id !== 0xff && ids.includes(id)) add += val;
+  if (it.type === 15) return { value: it.base + add, bonus: 0 };
+  const value = rdiv(it.base * (100 + add), 100);
+  if (it.type >= 3) return { value, bonus: enhBonus(it, 0) };
+  return { value, bonus: rdiv((it.base + enhBonus(it, 0)) * (100 + add), 100) - value };
 }
 
 export function detailLines(a: Assets, it: Item): { stat: string | null; enh: string | null } {
@@ -225,12 +228,7 @@ export function detailLines(a: Assets, it: Item): { stat: string | null; enh: st
 
 /** enhancement bonus FUN_00037238(it, d): base + bonus shown on the enhance screen */
 export function enhBonus(it: Item, d: number): number {
-  const STEP = [4, 4, 4, 5, 5, 5, 6, 6, 7, 7, 8, 9, 11, 13, 16, 20, 25, 32, 41, 53, 68];
-  const e = it.enh + d;
-  if (it.type >= 3 && it.type <= 14 && it.base < 10) return e;
-  let sum = 0;
-  for (let i = 0; i < e; i++) sum += STEP[i] ?? 0;
-  return Math.max(e, rdiv(sum * it.base, 100));
+  return ruleEnhBonus(it.base, it.enh + d, it.type >= 3 && it.type <= 14);
 }
 
 // ---- decomposition ----

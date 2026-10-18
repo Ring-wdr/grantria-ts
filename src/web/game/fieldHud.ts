@@ -51,8 +51,8 @@ export interface HudExtra {
 }
 
 export type SlotView =
-  | { skill: number; cd: number; maxCd: number; noMp?: boolean }
-  | { icon: { image: string; sx: number; sy: number }; count: number; cd: number; maxCd: number };
+  | { skill: number; cd: number; maxCd: number; noMp?: boolean; secs?: number }
+  | { icon: { image: string; sx: number; sy: number }; count: number; cd: number; maxCd: number; secs?: number };
 
 /** Touch zones of the field screen (touchdata.dat state 0x10, game-flow-ui.md §5.2).
  *  edge: the zone moves out with Input.edge toward that side (1 right, -1 left). The movable controls' zones follow
@@ -275,6 +275,8 @@ export class FieldHud {
         if ('skill' in v && v.noMp) u.el('t-nomp', x - 19, y - 19, 38, 38);   // FUN_00029108: MP below the cost -> greyed
         // cooldown (FUN_00029108 shrinking grey): a clockwise sweep over the ring
         if (v.cd > 0) u.el('t-cd', x - 19, y - 19, 38, 38, { vars: { '--cd': (Math.min(1, v.cd / Math.max(1, v.maxCd))).toFixed(3) } });
+        // 편의 설정 쿨다운 숫자 (not in the original): the seconds left, hidden under one second
+        if (v.secs) u.el('t-cdsec', x - 19, y - 7, 38, 14, { text: String(v.secs) });
       }
       u.groupEnd();
     }

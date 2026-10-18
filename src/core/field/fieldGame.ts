@@ -2102,7 +2102,7 @@ export class FieldGame {
     if (this.shake.length) this.shake.shift();
     this.inv.tick();
     this.ground = this.ground.filter(updateGround);
-    if (this.inv.unlocked(13)) this.autoLoot();
+    if (this.inv.unlocked(13) && this.ctx.options.autoLoot) this.autoLoot();          // 편의 설정 오토루팅 can turn it off
     this.talkTarget = this.findTalkTarget();
     if (this.player.autoWalking) presses = [];                        // FUN_00045570 returns while the path is set
     presses = this.gatherKeys(presses);

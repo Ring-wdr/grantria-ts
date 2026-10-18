@@ -21,7 +21,9 @@ import { buyBag } from './community';
 import { ActionPopup } from './actionPopup';
 
 /** Action ids of the item action popup (text 0x171 + id), kind 0 = inventory, 4 = equipment tab. */
-export const ACTION = { DETAIL: 1, USE: 2, DECOMPOSE: 3, QUICK: 5, DROP: 4, CANCEL: 6, UNEQUIP: 7, EQUIP: 8, ENHANCE: 12, SOCKET: 28 } as const;
+export const ACTION = { DETAIL: 1, USE: 2, DECOMPOSE: 3, QUICK: 5, DROP: 4, CANCEL: 6, UNEQUIP: 7, EQUIP: 8, ENHANCE: 12, SOCKET: 28,
+  /** 잠금 / 잠금 해제 (not in the original, no text id: the host labels them) */
+  LOCK: 40, UNLOCK: 41 } as const;
 /** FUN_00036d24: 0x1b subs that can go on a quick slot (half HP/MP, 차원·공격·방어 elixirs, special elixirs) */
 const QUICK_1B = new Set([0x02, 0x15, 0x16, 0x17, 0x23, 0x24, 0x25, 0x26]);
 // 0x30 (황금알) and the operator boxes 0x33..0x38 are server gifts with no offline source: no "use" entry
@@ -160,10 +162,11 @@ export abstract class InventoryTabLogic {
     if (it.type === 0x11 || it.type === 0x19 || (it.type === 0x1b && USABLE_1B.has(it.sub))) e.push(ACTION.USE);
     if (it.type < 0x10 && (it.type === 15 || it.type % 3 === cls)) e.push(ACTION.EQUIP);
     if (it.type < 0x0f) e.push(ACTION.ENHANCE);
-    if (it.type < 0x10) e.push(ACTION.DECOMPOSE);
+    // 잠금 (not in the original): a locked item offers no 분해 / 버리기
+    if (it.type < 0x10 && !it.lock) e.push(ACTION.DECOMPOSE);
     if (it.type === 0x11 || (it.type === 0x1b && QUICK_1B.has(it.sub))) e.push(ACTION.QUICK);   // FUN_00036d24 (jump table 0x102F30)
-    e.push(ACTION.DROP);
-    if (it.type < 0x10) e.push(ACTION.SOCKET);
+    if (!it.lock) e.push(ACTION.DROP);
+    if (it.type < 0x10) e.push(ACTION.SOCKET, it.lock ? ACTION.UNLOCK : ACTION.LOCK);
     e.push(ACTION.CANCEL);
     const col = this.sel % 4;
     this.action = new ActionPopup(e, col > 1 ? 'left' : 'right', Math.trunc(this.sel / 4) > 1);
@@ -200,6 +203,8 @@ export abstract class InventoryTabLogic {
       else { inv.equipFrom(idx); this.fs.recompute(); }
     } else if (action === ACTION.QUICK) this.quick = { cur: Math.max(0, inv.quick.findIndex((q) => q.kind === 0)), idx };
     else if (action === ACTION.DROP) this.dropItem(idx);
+    else if (action === ACTION.LOCK) it.lock = 1;
+    else if (action === ACTION.UNLOCK) delete it.lock;
   }
 
   /** '0' in the detail: gem list (FUN_000441e4) when an empty socket exists */
@@ -325,7 +330,7 @@ export class EquipTabLogic {
       else if (k === AVK.DOWN) this.slot = (this.slot + 8) % 6;
       else if (k === AVK.OK) {
         const eq = !!inv.equip[this.slot];
-        const e = eq ? [ACTION.DETAIL, ACTION.EQUIP, ACTION.UNEQUIP, ACTION.DROP, ACTION.CANCEL] : [ACTION.EQUIP, ACTION.CANCEL];
+        const e = eq ? [ACTION.DETAIL, ACTION.EQUIP, ACTION.UNEQUIP, ...(inv.equip[this.slot]!.lock ? [] : [ACTION.DROP]), ACTION.CANCEL] : [ACTION.EQUIP, ACTION.CANCEL];
         const s = this.slot;
         this.action = new ActionPopup(e, s & 1 ? 'left' : 'right', (s >> 1) === 2);
       } else return false;

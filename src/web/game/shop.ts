@@ -104,6 +104,7 @@ export class ShopScreen extends ShopLogic {
     },
     it && this.icon(it.type, it.sub, it.icon, tint),
     it && !o.plain && fs.db.showsCount(it) && h('span.shop-count', null, String(it.count)),
+    it && !o.plain && it.lock && h('span.tb-lock'),
     o.anchor);
   }
 

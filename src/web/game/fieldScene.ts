@@ -337,10 +337,12 @@ export class FieldScene extends FieldGame implements Scene {
       exp: vitals.exp, statPoints: this.statPoints, skillPoints: this.skillPoints, mapId: field.mapId,
       dimGate: this.gardenMode !== 0 || !this.canSave,
       slots: this.inv.quick.map((q) => {
-        if (q.kind === 1) return { skill: q.id, cd: q.cd, maxCd: q.maxCd, noMp: this.vitals.mp < this.skillCost(q.id) };
+        // 쿨다운 숫자: cooldowns count field ticks, so the seconds follow the speed option
+        const fps = optionFps(this.ctx.options), secs = this.ctx.options.hudCooldown && q.cd >= fps ? Math.ceil(q.cd / fps) : 0;
+        if (q.kind === 1) return { skill: q.id, cd: q.cd, maxCd: q.maxCd, noMp: this.vitals.mp < this.skillCost(q.id), secs };
         const it = q.kind === 2 ? this.inv.items[q.id] : undefined;
         if (!it) return null;
-        return { icon: this.db.iconRect(it.icon), count: this.db.showsCount(it) ? it.count : -1, cd: q.cd, maxCd: it.type === 0x11 && it.sub >= 14 ? 900 : 100 };
+        return { icon: this.db.iconRect(it.icon), count: this.db.showsCount(it) ? it.count : -1, cd: q.cd, maxCd: it.type === 0x11 && it.sub >= 14 ? 900 : 100, secs };
       }),
       target: this.targetView(),
       hits: this.events.active ? undefined : this.hits,

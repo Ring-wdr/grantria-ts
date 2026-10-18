@@ -252,6 +252,16 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   background: conic-gradient(rgba(0, 0, 0, 0.62) calc(var(--cd) * 1turn), transparent 0);
   transition: none;
 }
+/* 쿨다운 숫자 (편의 설정): the seconds left, centred on the slot */
+.t-cdsec {
+  text-align: center;
+  font-size: 12px;
+  line-height: 14px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000;
+  pointer-events: none;
+}
 .t-nomp { border-radius: 50%; backdrop-filter: grayscale(1) brightness(0.7); background: rgba(0, 0, 0, 0.25); }
 .t-count {
   text-align: right;

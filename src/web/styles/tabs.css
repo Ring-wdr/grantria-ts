@@ -41,6 +41,18 @@
   text-shadow: 1px 0 #000, -1px 0 #000, 0 1px #000, 0 -1px #000;
   pointer-events: none;
 }
+/* 잠금 (not in the original): a padlock at the top left of a locked item's cell */
+.tb-lock {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 9px;
+  height: 9px;
+  background: #ffd45a;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 4V3a2 2 0 0 1 4 0v1h1v5H2V4zm1 0h2V3a1 1 0 0 0-2 0z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M3 4V3a2 2 0 0 1 4 0v1h1v5H2V4zm1 0h2V3a1 1 0 0 0-2 0z'/%3E%3C/svg%3E") center / contain no-repeat;
+  pointer-events: none;
+}
 .tb-shade { position: absolute; inset: 1px; border-radius: 3px; pointer-events: none; }
 .tb-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tb-wide { min-width: 62px; }
@@ -98,6 +110,9 @@
 /* item action list (ActionPopup) */
 .tb-actions { gap: 3px; align-items: flex-start; }
 .tb-actions > .v-btn { min-width: 62px; height: 22px; }
+/* 8 actions (잠금 added to gear): shorter keys, so the column opened from the top rows stays on screen */
+.tb-actions.dense { gap: 2px; }
+.tb-actions.dense > .v-btn { height: 18px; min-height: 18px; }
 
 /* quick slot register overlay: touch slots, the cursor slot pulsing yellow */
 .tb-qslot { position: relative; width: 31px; height: 31px; flex: none; }

@@ -21,6 +21,9 @@ export interface Item {
   name: string;          // display name with colour code, fixed at creation
   /** +0x0a price unit, computed at creation (FUN_0003967c); absent in older saves */
   price?: number;
+  /** 잠금 (not in the original, equipment only): kept out of 버리기 / 분해 / 판매 and the bulk orders; absent = unlocked.
+   *  Saved with the item in the slot JSON; the original save.dat export drops it */
+  lock?: 1;
 }
 
 export interface QuickSlot {

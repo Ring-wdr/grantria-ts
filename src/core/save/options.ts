@@ -28,12 +28,18 @@ export interface Options {
   flash: number;
   /** hold '5' (or the 빨리 넘기기 key) through dialogue: 0 off, 1 read lines only, 2 every line */
   skip: number;
+  /** 이벤트 SKIP goes through the key waits and on after a quest popup (off by default: the original stops there) */
+  skipThrough: number;
   /** extra HUD information (display only): HP / MP / EXP numbers (off by default: the original shows none), buff
    *  icons, boss HP bar, quest tracker (on by default) */
   hudNumbers: number;
   hudBuffs: number;
   hudBoss: number;
   hudQuests: number;
+  /** seconds left on a quick slot's cooldown ring (on by default; display only) */
+  hudCooldown: number;
+  /** 오토루팅 once bought: on (the original, by default) or off — ground items are picked up by hand again */
+  autoLoot: number;
   /** minimap quest NPC / warp stone icons, every active quest's destination on the map tab (on by default) */
   minimapIcons: number;
   mapQuests: number;
@@ -56,13 +62,13 @@ export const OPTION_KEYS: (keyof Options)[] = ['volume', 'vibration', 'speed', '
  *  but the HP / MP / EXP numbers only add information and start on) */
 export const EXTRA_COUNTS: Partial<Record<keyof Options, number>> = {
   fullscreen: 2, fullscreenSet: 2, bgm: 11, sfx: 11, textSpeed: 4, auto: 2, autoSpeed: 3, shake: 3, flash: 3,
-  skip: 3, hudNumbers: 2, hudBuffs: 2, hudBoss: 2, hudQuests: 2, minimapIcons: 2, mapQuests: 2, autosaveMap: 2, abyss: 2, replayChain: 2, powerSave: 2,
+  skip: 3, skipThrough: 2, hudNumbers: 2, hudBuffs: 2, hudBoss: 2, hudQuests: 2, hudCooldown: 2, autoLoot: 2, minimapIcons: 2, mapQuests: 2, autosaveMap: 2, abyss: 2, replayChain: 2, powerSave: 2,
 };
 
 export function defaultOptions(): Options {
   return { volume: 1, vibration: 1, speed: 2, minimap: 1, effects: 1, fullscreen: 0, fullscreenSet: 0,
     bgm: 10, sfx: 10, textSpeed: 0, auto: 0, autoSpeed: 1, shake: 0, flash: 0,
-    skip: 1, hudNumbers: 0, hudBuffs: 1, hudBoss: 1, hudQuests: 1, minimapIcons: 1, mapQuests: 1, autosaveMap: 0, abyss: 0, replayChain: 0,
+    skip: 1, skipThrough: 0, hudNumbers: 0, hudBuffs: 1, hudBoss: 1, hudQuests: 1, hudCooldown: 1, autoLoot: 1, minimapIcons: 1, mapQuests: 1, autosaveMap: 0, abyss: 0, replayChain: 0,
     powerSave: 0 };
 }
 

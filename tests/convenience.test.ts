@@ -49,6 +49,11 @@ test('bulk sell takes plain gear up to the grade only', async () => {
   assert.deepEqual(bulkSellPick(items, 2), [0, 1, 5]);
 });
 
+test('bulk orders leave a locked item', async () => {
+  const { bulkSellPick } = await import('../src/core/rules/bulkSell.ts');
+  assert.deepEqual(bulkSellPick([gear({ grade: 0 }), gear({ grade: 0, lock: 1 }), gear({ grade: 1 })], 1), [0, 2]);
+});
+
 test('recipe bulk discard takes recipes up to the grade only', async () => {
   const { bulkRecipePick } = await import('../src/core/rules/bulkSell.ts');
   const items = [gear({ type: 0x19, grade: 0 }), gear({ grade: 0 }), gear({ type: 0x19, grade: 2 }), null, gear({ type: 0x1b, grade: 0 }), gear({ type: 0x19, grade: 3 })];

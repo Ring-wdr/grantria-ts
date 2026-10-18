@@ -136,6 +136,8 @@ export class EventRunner {
   private lastSeen = false;
   /** SKIP ('#') was used in this event (회상: a skipped replay is not counted as watched) */
   skipped = false;
+  /** 편의 설정 SKIP 이어 넘기기: the skip stopped at a quest command and goes on once its popup is dismissed */
+  private skipResume = false;
   /** camera: follow an actor or a fixed cell */
   camTarget: EvActor | null = null;
   camCell: [number, number] | null = null;
@@ -165,7 +167,7 @@ export class EventRunner {
     this.wait = 0x19;
     this.fill = 0; this.fade = 0; this.grey = false; this.flash = 0; this.darken = 0; this.darkLevel = 0;
     this.dialogue = null; this.caption = null; this.showItem = null; this.questPending = false;
-    this.lastSeen = false; this.hold.reset(); this.skipped = false;
+    this.lastSeen = false; this.hold.reset(); this.skipped = false; this.skipResume = false;
     this.fs.beginEvent();
     this.camTarget = this.fs.lead;
     this.camCell = null;
@@ -276,6 +278,7 @@ export class EventRunner {
     this.questPending = false;
     this.clock++;
     this.pc++;
+    if (this.skipResume) { this.skipResume = false; this.skip(); }
   }
 
   skippable(c: number): boolean {
@@ -474,7 +477,9 @@ export class EventRunner {
     this.fade = -16; this.fadeWhite = false;
   }
 
-  /** FUN_00065534: apply the remaining state-changing commands at once, stop at quest commands */
+  /** FUN_00065534: apply the remaining state-changing commands at once, stop at quest commands. With 편의 설정 SKIP
+   *  이어 넘기기 (not in the original) the key waits 0x11 / 0x12 / 0x15 are passed and only the quest accept / complete
+   *  (0x13 / 0x14) stop, to show their popup; next() then skips on from there */
   private fastForward(): void {
     this.fs.partHide = 0;
     if (this.wait === 1 || this.wait === 2) this.pc++;        // the shown talk is already counted
@@ -486,7 +491,12 @@ export class EventRunner {
       const r = this.rec(this.pc);
       this.clock += r.time - prev;
       prev = r.time;
-      if (r.cmd >= 0x11 && r.cmd <= 0x15) { this.clock = r.time; this.run(); break; }
+      const through = !!this.fs.ctx.options.skipThrough;
+      if (r.cmd >= 0x11 && r.cmd <= 0x15 && (!through || r.cmd === 0x13 || r.cmd === 0x14)) {
+        this.clock = r.time; this.run();
+        this.skipResume = through && this.pc < this.end;
+        break;
+      }
       if (r.cmd === 2) this.fill = 1; else if (r.cmd === 3) this.fill = 2;
       this.exec(r.cmd, r.arg, true);
       this.pc++;

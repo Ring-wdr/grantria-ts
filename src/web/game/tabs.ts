@@ -18,7 +18,7 @@ import type { Ui } from '../render/ui';
 import { button, cmfFrame, cSprite, gt, h, padBadge, sprite, TAB_BODY, type KeyAct, type VChild, type VNode } from '../render/view';
 import { clipImage } from '../render/sprites';
 import { ActionPopup } from '../../core/menu/actionPopup';
-import { InventoryTabLogic, EquipTabLogic } from '../../core/menu/tabs';
+import { ACTION, InventoryTabLogic, EquipTabLogic } from '../../core/menu/tabs';
 import '../styles/tabs.css';
 import { compareGear, equipSlot } from '../../core/rules/compare';
 import '../styles/convenience.css';
@@ -44,12 +44,14 @@ export function itemIcon(fs: FieldScene, it: Item, cls = ''): VNode {
   });
 }
 
-/** FUN_0003bcf0 item cell as a view: bevelled cell, icon, count badge; `empty` fills an empty cell */
+/** FUN_0003bcf0 item cell as a view: bevelled cell, icon, count badge, a padlock on a 잠금 item (not in the original);
+ *  `empty` fills an empty cell */
 export function cellView(fs: FieldScene, it: Item | null | undefined, opts: { sel?: boolean; on?: KeyAct; cls?: string; empty?: VChild; shade?: VChild; anchor?: VChild } = {}): VNode {
   return h('div.tb-cell', { cls: [opts.cls, opts.sel && 'v-sel'].filter(Boolean).join(' '), on: opts.on },
     it ? itemIcon(fs, it) : opts.empty,
     it && opts.shade,
     it && fs.db.showsCount(it) && h('span.tb-count', null, String(it.count)),
+    it?.lock && h('span.tb-lock'),
     opts.anchor);
 }
 
@@ -106,11 +108,14 @@ export function drawAction(u: Ui, a: ActionPopup): void {
   u.hit(-1000, -1000, 3000, 3000, () => [AVK.CLR]);
 }
 
+/** actions with no game text (잠금, not in the original) */
+const ACTION_LABEL: Record<number, string> = { [ACTION.LOCK]: '잠금', [ACTION.UNLOCK]: '잠금 해제' };
+
 /** the action menu as keycaps, attached to the selected cell by CSS (cellView opts.anchor: beside it, sliding in), not
  *  at computed coordinates */
 export function actionAnchor(t: string[], a: ActionPopup): VNode {
   return h(`div.tb-anchor.${a.side}${a.up ? '.up' : ''}`, null,
-    h('div.v-col.tb-actions', null, a.entries.map((v, i) => button(gt(t[v === 0x1c ? 0x1bca : v === 0x14 ? 0x198 : 0x171 + v] ?? ''), {
+    h(`div.v-col.tb-actions${a.entries.length > 7 ? '.dense' : ''}`, null, a.entries.map((v, i) => button(gt(ACTION_LABEL[v] ?? t[v === 0x1c ? 0x1bca : v === 0x14 ? 0x198 : 0x171 + v] ?? ''), {
       sel: i === a.sel, on: () => { a.sel = i; return [AVK.OK]; },
     }))));
 }

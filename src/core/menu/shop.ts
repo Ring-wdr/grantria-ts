@@ -349,10 +349,11 @@ export class ShopLogic {
     const ids = [0x1a1, 0x1a2, 0x1a3, 0x1a4, 0x1a5, 0x1a6, 0x1a7, 0x1a8];
     let s = this.text(ids[code] ?? 0x1a1).replace('%s', code >= 5 ? it.name : this.verb()).replace('%d', String(n));
     if (code === 7) s = this.text(0x1a8).replace('%s', it.name).replace('%s', this.verb());
+    if (code === 9) s = `${it.name}|b|@잠긴 아이템입니다. 가방에서 잠금을 풀어 주세요.`;
     this.msg(0x18, s);
   }
 
-  /** FUN_0004e6d8 for buy / sell / enhance / decompose: 8 = pass, else the failure code */
+  /** FUN_0004e6d8 for buy / sell / enhance / decompose: 8 = pass, else the failure code (9 잠금, not in the original) */
   private precheck(action: number, it: Item): number {
     const inv = this.inv, db = this.fs.db;
     if (action === 0) {
@@ -366,6 +367,7 @@ export class ShopLogic {
     if (action === 2) { if (inv.gold < enhGold(this.a, it)) return 0; if (it.enh >= 20) return 6; }
     if (action === 4) { if (inv.gold < decomposeCost(it)) return 0; if (inv.items.length + 2 >= inv.cap) return 2; if (it.type >= 0x10) return 7; }
     if (action === 1 && (it.type === 0x1a || it.type === 0x1b || it.type === 0x1d)) return 7;
+    if ((action === 1 || action === 4) && it.lock) return 9;                 // 잠금 (not in the original)
     return 8;
   }
 

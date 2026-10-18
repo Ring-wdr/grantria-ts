@@ -14,6 +14,8 @@ test('편의 설정 defaults keep the original behaviour', () => {
   assert.equal(o.abyss, 0);
   assert.equal(o.hudNumbers, 0);                            // no HP / MP / EXP numbers on the HUD, like the original                                 // a dimension clear shows the original result
   assert.equal(optionFps(o), 20);
+  assert.equal(o.skipThrough, 0);                          // SKIP stops at quest commands and key waits, like the original
+  assert.equal(o.autoLoot, 1);                             // a bought 오토루팅 picks items up, like the original
   assert.equal(o.powerSave, 0);                             // 절전 모드 off: the frame loop / refresh rate / audio of 0.1.7
 });
 

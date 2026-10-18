@@ -22,7 +22,7 @@ export class ConveniencePanel extends ConveniencePanelLogic {
   view(): VNode {
     const o = this.ctx.options;
     const rows = ROWS.map((r, i) => {
-      const v = r.key === 'touchLayout' ? 0 : o[r.key], cur = i === this.cur;
+      const v = r.key === 'touchLayout' || r.key === 'reset' ? 0 : o[r.key], cur = i === this.cur;
       const value = r.values
         ? r.values[v] ?? ''
         : [h('span.cv-bar', null, Array.from({ length: 10 }, (_, k) => h(`i${k < v ? '.on' : ''}`))), String(v)];

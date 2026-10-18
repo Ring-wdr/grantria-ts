@@ -7,6 +7,7 @@ import type { Cmf } from '../data/assets';
 import type { Drawable } from '../render';
 import type { Item, ItemDb } from './items';
 import { idiv, rdiv, type Rng } from './rules';
+import { rareMul } from './dev';
 
 const BOUNCE: Record<number, number> = { 1: -12, 2: 2, 3: 3, 4: 3, 5: 4, 7: -2, 9: 1 };
 const DESPAWN = 550;
@@ -38,21 +39,45 @@ export function dropSub(rng: Rng, t: number, L: number, hard: boolean, cap10 = f
 }
 
 /** FUN_00037b60(t, L, sub): grade; MF = luck (gimmicks.md §3.3) */
-export function dropGrade(rng: Rng, db: ItemDb, t: number, sub: number, mf: number): number {
+export function dropGrade(rng: Rng, db: ItemDb, t: number, sub: number, mf: number, mul = rareMul()): number {
   if (t === 0x11 || t === 0x12 || (t >= 0x1a && t <= 0x1d)) return 0;
   const r = rng.rand(10000), max = (s: number) => db.a.d8(0x24636 + s);
+  let at: (r: number) => number;
   if (t === 0x19) {
-    const g = r <= 1999 - 3 * mf ? 0 : r < 4000 - mf ? 1 : r <= 7999 - idiv(mf, 2) ? 2 : 3;
-    return g < max(sub & 15) ? g : max(sub & 15) - 1;
-  }
-  if (t === 0x10) {
+    at = (r) => {
+      const g = r <= 1999 - 3 * mf ? 0 : r < 4000 - mf ? 1 : r <= 7999 - idiv(mf, 2) ? 2 : 3;
+      return g < max(sub & 15) ? g : max(sub & 15) - 1;
+    };
+  } else if (t === 0x10) {
     const tier = sub % 5;
-    const g = r <= 8499 - 5 * mf ? 0 : r < 9200 - mf ? 1
-      : (tier < 2 || r <= 9799 - idiv(mf, 2)) ? 2 : (tier > 3 && r > 9989 + idiv(mf, -50)) ? 4 : 3;
-    return Math.min(g, tier < 2 ? 2 : tier < 4 ? 3 : 4);
+    at = (r) => {
+      const g = r <= 8499 - 5 * mf ? 0 : r < 9200 - mf ? 1
+        : (tier < 2 || r <= 9799 - idiv(mf, 2)) ? 2 : (tier > 3 && r > 9989 + idiv(mf, -50)) ? 4 : 3;
+      return Math.min(g, tier < 2 ? 2 : tier < 4 ? 3 : 4);
+    };
+  } else {
+    at = (r) => Math.min(r <= 7999 - 5 * mf ? 0 : r < 9000 - mf ? 1 : r <= 9699 - idiv(mf, 2) ? 2 : r <= 9998 + idiv(mf, -250) ? 3 : 4, max(sub));
   }
-  const g = r <= 7999 - 5 * mf ? 0 : r < 9000 - mf ? 1 : r <= 9699 - idiv(mf, 2) ? 2 : r <= 9998 + idiv(mf, -250) ? 3 : 4;
-  return Math.min(g, max(sub));
+  return at(mul > 1 ? rareRoll(r, at, mul) : r);
+}
+
+/**
+ * 개발자 모드 영웅·전설 배율 (not in the original): the roll r moved so the 영웅 (3) and 전설 (4) bands of a grade
+ * function come up `mul` times as often (at most every roll) and the lower bands shrink in proportion. The grade is still
+ * read from the original function, so the luck terms and the per-item grade caps hold. Grades rise with r on every
+ * path, so each band is found by a binary search.
+ */
+export function rareRoll(r: number, at: (r: number) => number, mul: number): number {
+  const N = 10000;
+  const from = (g: number) => { let lo = 0, hi = N; while (lo < hi) { const m = (lo + hi) >> 1; if (at(m) >= g) hi = m; else lo = m + 1; } return lo; };
+  const b3 = from(3), b4 = from(4);
+  if (b3 >= N) return r;                                           // no 영웅 on this path: the original roll
+  const n4 = Math.min(N, (N - b4) * mul), n3 = Math.min(N - n4, (b4 - b3) * mul), n0 = N - n3 - n4;
+  // the new bands [0, n0) [n0, n0 + n3) [n0 + n3, N) laid onto the original [0, b3) [b3, b4) [b4, N)
+  const map = (u: number, a: number, w: number, b: number, v: number) => b + Math.min(v - 1, Math.floor(((u - a) * v) / w));
+  if (r < n0) return map(r, 0, n0, 0, b3);
+  if (r < n0 + n3) return map(r, n0, n3, b3, b4 - b3);
+  return map(r, n0 + n3, n4, b4, N - b4);
 }
 
 /** FUN_00037e04 band -> item type (0xff none, 0x1c gold) */

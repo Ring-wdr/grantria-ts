@@ -1,4 +1,4 @@
-// 환경설정 → 개발자 모드 (not in the original, core/rules/dev.ts): whole-number kill / drop multipliers, the
+// 환경설정 → 개발자 모드 (not in the original, core/rules/dev.ts): whole-number kill / drop / 영웅·전설 multipliers, the
 // 성능 기록 switch and its JSON export (web/perfLog.ts), and a row that hides the mode again. Same keys and look as
 // 편의 설정 (convenience.ts): ↑↓ row, ←→ / 5 change, Esc closes.
 import { AVK } from '../input/input';
@@ -8,7 +8,7 @@ import { exportPerf, perf, perfRecordCount, startPerf, stopPerf } from '../perfL
 import '../styles/convenience.css';
 
 interface Row {
-  key: 'killMul' | 'dropMul' | 'perfLog' | 'perfExport' | 'lock';
+  key: 'killMul' | 'dropMul' | 'rareMul' | 'perfLog' | 'perfExport' | 'lock';
   label: string;
   help: string;
 }
@@ -16,6 +16,7 @@ interface Row {
 const ROWS: Row[] = [
   { key: 'killMul', label: '사냥 경험치 배율', help: '한 마리를 이 수만큼 잡은 것으로 칩니다(경험치·도감·퀘스트·업적).' },
   { key: 'dropMul', label: '드랍 배율', help: '한 마리의 드랍을 이 횟수만큼 굴립니다(바닥은 25개까지).' },
+  { key: 'rareMul', label: '영웅·전설 확률', help: '장비·보석·조합서가 영웅·전설 등급으로 나올 확률을 이 배만큼 높입니다.' },
   { key: 'perfLog', label: '성능 기록', help: '1분마다 프레임 시간·롱태스크·메모리를 기록합니다(켜면 새로 시작, 앱을 다시 켜도 유지).' },
   { key: 'perfExport', label: '성능 기록 내보내기', help: '지금까지의 기록을 JSON 파일로 저장합니다(최근 4시간).' },
   { key: 'lock', label: '개발자 모드 닫기', help: '배율을 모두 ×1로 되돌리고 이 메뉴를 숨깁니다.' },

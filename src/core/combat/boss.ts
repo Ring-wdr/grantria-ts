@@ -681,7 +681,8 @@ export class Boss extends Monster {
       const sp = this.rec === 5 ? 5 + 2 * g.get(0x22) : 3, lo = this.rec === 5 ? -49 : -39, hi = this.rec === 5 ? -31 : -21;
       if (this.cnt === 0 || this.rec === 5) { if (w.px < this.x + lo) this.x -= sp; else if (w.px > this.x + hi) this.x += sp; }
       if (this.rec === 5 && this.frame === 53 && this.lastFxFrame !== 53) {
-        fx.shots = [new MonsterShot(this, this.x - 20, this.y + 60, { frame: 0x3e, life: 4, followBoss: true, onHit: 'keep' })];
+        // FUN_00062d98 case 0x27: x = head x - 20 + head vx, frame++ every tick (0x3f..0x42 over its 4 ticks)
+        fx.shots = [new MonsterShot(this, this.x - 20, this.y + 60, { frame: 0x3e, life: 4, followBoss: true, frameStep: true, onHit: 'keep' })];
       }
       this.lastFxFrame = this.frame;
       if (end()) {

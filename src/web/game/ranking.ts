@@ -4,7 +4,7 @@
 import { AVK } from '../input/input';
 import { ItemDb, type Item } from '../../core/rules/items';
 import { Popup, openPopup } from './popup';
-import { OverlayStack } from './overlays';
+import { OverlayStack } from '../../core/ui/overlays';
 import { derive, type Derived } from '../../core/rules/rules';
 import { SLOT_COUNT, loadGamedata, loadSlot, type SaveData } from '../../core/save/save';
 import type { GameContext, Scene } from './scene';

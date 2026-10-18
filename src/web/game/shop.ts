@@ -13,9 +13,9 @@ import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { BAG_COUNT, type Item } from '../../core/rules/items';
 import { Popup, openPopup, popupOverlay } from './popup';
-import { OverlayStack } from './overlays';
-import { flowOverlay, type Step } from './flow';
-import { quantityFlow, type QuantityEvent } from './flows/quantityFlow';
+import { OverlayStack } from '../../core/ui/overlays';
+import { flowOverlay, type Step } from '../../core/ui/flow';
+import { quantityFlow, type QuantityEvent } from '../../core/ui/flows/quantityFlow';
 import type { GameContext } from './scene';
 import {
   auxNeeded, buyCost, combine, combineNeeds, countOf, craftPotion, decompose, decomposeCost, enhBonus,

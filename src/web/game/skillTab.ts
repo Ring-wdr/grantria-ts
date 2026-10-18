@@ -5,9 +5,10 @@ import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
 import { Popup, openPopup } from './popup';
-import { OverlayStack } from './overlays';
+import { OverlayStack } from '../../core/ui/overlays';
 import { account, traitCheck, traitCommit } from '../../core/rules/account';
-import { effectiveSkillLevel, rdiv } from '../../core/rules/rules';
+import { effectiveSkillLevel } from '../../core/rules/rules';
+import { skillMaxCd } from '../../core/rules/skills';
 import { cfmt, skillDetail, skillReqLevel } from '../../core/data/skillDetail';
 import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
@@ -16,20 +17,8 @@ import '../styles/skill-quest.css';
 
 const CELLS = [9, 7, 12];
 
-/** Active skill record d+0x21160 + class*234 + s*26 (13 x u16). */
-export function skillRec(fs: FieldScene, s: number): number[] {
-  const a = fs.db.a, base = 0x21160 + fs.model.cls * 234 + s * 26;
-  return Array.from({ length: 13 }, (_, i) => a.d16(base + i * 2));
-}
-
 /** Tab cell (tier*3 + group) -> action id / icon index (group*3 + tier); d+0x2558b is the inverse. */
 export const actionOf = (idx: number) => (idx % 3) * 3 + Math.trunc(idx / 3);
-
-/** Max cooldown when registering a skill (FUN_000379ac): class-0 record [5] minus cooldown-reduction %. */
-export function skillMaxCd(fs: FieldScene, action: number): number {
-  const s = fs.db.a.d8(0x2558b + action);
-  return rdiv(fs.db.a.d16(0x2116a + 26 * s) * (100 - Math.min(75, fs.stats.D[45])), 100);
-}
 
 export class SkillTab {
   private sub = 0;

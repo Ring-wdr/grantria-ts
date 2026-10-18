@@ -20,7 +20,7 @@ import { MapTab } from './mapTab';
 import { CommunityTab } from './community';
 import type { Ui } from '../render/ui';
 import { Popup, popupOverlay } from './popup';
-import { OverlayStack } from './overlays';
+import { OverlayStack } from '../../core/ui/overlays';
 import { button, cSprite, gt, h, menuList, padBadge, slot, sprite, win, type VChild, type VNode } from '../render/view';
 import { tabHint } from '../input/keyHints';
 

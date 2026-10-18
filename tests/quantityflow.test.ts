@@ -2,9 +2,9 @@
 // and the commit action.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { flowOverlay, type Step } from '../src/web/game/flow.ts';
-import { quantityFlow, type QuantityEvent, type QuantityInput } from '../src/web/game/flows/quantityFlow.ts';
-import { OverlayStack } from '../src/web/game/overlays.ts';
+import { flowOverlay, type Step } from '../src/core/ui/flow.ts';
+import { quantityFlow, type QuantityEvent, type QuantityInput } from '../src/core/ui/flows/quantityFlow.ts';
+import { OverlayStack } from '../src/core/ui/overlays.ts';
 
 /** steps that answer from a script: each tick the current state's step sends the next scripted event */
 function run(input: Partial<QuantityInput> & { held: number; stack: boolean }, script: QuantityEvent[]) {

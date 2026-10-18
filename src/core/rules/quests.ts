@@ -174,3 +174,7 @@ export class QuestLog {
     return { mark: 0, q: 0 };
   }
 }
+
+/** 추적 (not in the original): a quest left off the HUD quest tracker, kept in the slot's story counters so the
+ *  save format does not change */
+export const untrackKey = (q: number): string => `qhide${q}`;

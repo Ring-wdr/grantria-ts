@@ -3,7 +3,7 @@ import { VIEW_H as H, VIEW_W as W } from '../render/field';
 import { AVK } from '../input/input';
 import { button, gt, h, sprite, type VChild } from '../render/view';
 import type { GameContext } from './scene';
-import { popupRole, type OpenOpts, type Overlay, type OverlayStack } from './overlays';
+import { popupRole, type OpenOpts, type Overlay, type OverlayStack } from '../../core/ui/overlays';
 
 /** Popup (FUN_0005f948 + FUN_0005f4f8) on the 1.3x layer: definition d.dat 0x4009d7 + id*6. */
 let serial = 0;

@@ -8,7 +8,7 @@ import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { BAG_COUNT, BAG_MAX, UNLOCK_1B, type Item } from '../../core/rules/items';
 import { Popup, openPopup } from './popup';
-import { OverlayStack } from './overlays';
+import { OverlayStack } from '../../core/ui/overlays';
 import { Rng } from '../../core/rules/rules';
 import { loadWarehouse, saveWarehouse } from '../../core/save/save';
 import type { GameContext } from './scene';

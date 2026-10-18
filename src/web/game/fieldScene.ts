@@ -7,28 +7,30 @@ import { Buffs, buffItem, DAY_EVENTS, TINT_BASE, clockFrame, dayPhase, isSafeMap
 import { boxEquipment } from '../../core/rules/boxes';
 import { Gimmick } from '../../core/world/gimmicks';
 import { Minimap } from '../render/minimap';
-import { drawFortune, fortuneAskView, fortuneResultView, FORTUNE_CMF, today, type FortuneArt } from './fortune';
+import { drawFortune, FORTUNE_CMF, today, type FortuneArt } from '../../core/rules/fortune';
+import { fortuneAskView, fortuneResultView } from './fortune';
 import { achCheck, achEvent, challengeGold, titleBonus, type AchEvent, type Awards } from '../../core/rules/achievements';
 import { accountBook, accountDay, clearUnsavedUses, countUnsavedUse, saveAccount, setAccountDay, takeUnsavedUses, account, secondDrop, traitBox, traitOnLevelUp, traitReset, traitStatBonus, traitVal } from '../../core/rules/account';
-import { ABYSS_RULES, abyssHeader, abyssRule, dimLevel, dimStats, dungeonStart, generateFloor, newRun, resultValues, rollDimDrops, type DimRun } from './dimension';
+import { ABYSS_RULES, abyssHeader, abyssRule, dimLevel, dimStats, dungeonStart, generateFloor, newRun, resultValues, rollDimDrops, type DimRun } from '../../core/rules/dimension';
 import { findPath } from '../../core/world/pathfind';
 import { vibrate } from '../vibrate';
-import { GATHER_CAP, GatherRun, gatherExp, spawnNodes, type GatherNode } from './gather';
+import { GATHER_CAP, GatherRun, gatherExp, spawnNodes, type GatherNode } from '../../core/rules/gather';
+import { drawGatherGauge } from './gather';
 import { genDarkStock } from '../../core/rules/shopRules';
 import type { Item } from '../../core/rules/items';
 import { BossProxy, EvActor } from '../../core/world/actors';
 import { pickGuide, type Guide } from '../../core/rules/guide';
 import { Dialogue, HoldSkip, drawDialogueButtons } from './dialogue';
-import { backlog } from './backlog';
+import { backlog } from '../../core/ui/backlog';
 import { fxScale, optionFps } from '../../core/save/options';
 import { EventRunner } from './events';
 import { Popup, popupOverlay } from './popup';
-import { OverlayStack, type OpenOpts, type Overlay, type Role } from './overlays';
+import { OverlayStack, type OpenOpts, type Overlay, type Role } from '../../core/ui/overlays';
 import { deepestAbyss, extraPaid, itemKinds, markExtraPaid, records, recordAbyss, recordBoss, recordItem } from '../../core/rules/records';
 import { dropMul, killMul } from '../../core/rules/dev';
 import { extraCheck, extraKey, type ExtraChallenge } from '../../core/rules/extraChallenges';
 import { attend, fortunePrize, GOLDEN_EGG } from '../../core/rules/attendance';
-import { untrackKey } from './questTab';
+import { untrackKey } from '../../core/rules/quests';
 import { QuestLog } from '../../core/rules/quests';
 import { OPENING, Story, StoryDb } from '../../core/data/story';
 import { Field, VIEW_H, VIEW_W, type Drawable } from '../render/field';
@@ -42,7 +44,7 @@ import { groundBox, groundDrawables, rollBossDrops, rollDrop, updateGround, type
 import { Monster, overlaps, type MonsterWorld } from '../../core/combat/monster';
 import { Boss, BossGlobals, MonsterShot, bossDeathEvent, summonStats, type BoxTable } from '../../core/combat/boss';
 import { Projectile, type ProjRecord } from '../../core/combat/projectiles';
-import { skillMaxCd, skillRec } from './skillTab';
+import { skillMaxCd, skillRec } from '../../core/rules/skills';
 import { Player, type Blockers, type Dir, type Rect } from '../../core/combat/player';
 import { CLASSES, MAX_LEVEL, Rng, cdiv, derive, effectiveSkillLevel, expNeed, idiv, killExp, monsterHit, playerHit, rdiv, skillBaseDamage, type Derived, type EquipTables, type PlayerModel } from '../../core/rules/rules';
 
@@ -2410,7 +2412,7 @@ export class FieldScene implements Scene {
     const ox = this.cam.x - originX - sx, oy = this.cam.y - sy;
     this.drawQuestMarks(ox, oy);
     this.drawStatus(ox, oy);
-    if (this.run) this.run.draw(this.ui, this.run.node.x - ox, this.run.node.y - oy);
+    if (this.run) drawGatherGauge(this.ui, this.run, this.run.node.x - ox, this.run.node.y - oy);
     for (const f of this.gatherFx) {                                  // FUN_00030734 spark (alpha 32), FUN_00029604 star (alpha 16, counters 1..7)
       if (f.kind === 'spark') { this.ui.effect(f.t - 1, f.x - ox, f.y - oy); continue; }
       if (f.t >= 8) continue;

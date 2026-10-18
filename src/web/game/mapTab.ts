@@ -5,7 +5,7 @@
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { Popup, openPopup } from './popup';
-import { OverlayStack } from './overlays';
+import { OverlayStack } from '../../core/ui/overlays';
 import type { GameContext } from './scene';
 import { tri, type Ui } from '../render/ui';
 import { gt, h, sprite, TAB_BODY, type VChild, type VNode } from '../render/view';

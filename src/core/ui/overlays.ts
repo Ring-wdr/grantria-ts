@@ -3,7 +3,7 @@
 // a free moment (challenge rewards, the daily fortune, attendance) queue by priority instead of each polling its
 // own "nothing else is open" flag. Patterns from RPG Maker's SceneManager / Window_Selectable handlers / Game_Message
 // queue, Ionic's overlay roles and the HTML dialog closedby attribute.
-import { AVK } from '../../core/keys';
+import { AVK } from '../keys';
 
 /** how an overlay was closed: affirmative (yes / ok), negative (no), or a close request (CLR) */
 export type Role = 'yes' | 'no' | 'cancel';

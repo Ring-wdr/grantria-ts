@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { AVK } from '../src/core/keys.ts';
 import type { SceneHost, Screens } from '../src/core/scenes/host.ts';
-import { LogoLogic, RatingLogic, TITLE_ITEMS, TITLE_REPLAY, TitleLogic } from '../src/core/scenes/title.ts';
+import { LogoLogic, RatingLogic, TITLE_HELP, TITLE_ITEMS, TITLE_REPLAY, TitleLogic } from '../src/core/scenes/title.ts';
 
 /** a host that records the screens asked for and the BGM played */
 function host() {
@@ -24,14 +24,18 @@ test('logo -> rating -> title: after their frames, or at once on a key', () => {
   assert.deepEqual([h.went, h.bgm], [['rating', 'title true'], [0]]);
 });
 
-test('title: the intro takes a key, then the menu rows and the pad icon keys pick screens', () => {
+test('title: the intro takes a key, then the menu rows, the 엑스트라 submenu and the pad keys pick screens', () => {
   const h = host(), title = new TitleLogic(h.ctx, true);
   title.update([AVK.OK]);                                          // ends the intro only
   assert.deepEqual(h.went, []);
   title.update([AVK.UP, AVK.OK]);                                  // from 게임시작 up wraps to the last row
-  assert.deepEqual(h.went, ['musicRoom']);
-  new TitleLogic(h.ctx).update([TITLE_REPLAY]);                    // a tapped row is picked at once
-  new TitleLogic(h.ctx).update([AVK.K1]);                          // pad □ = the settings icon
-  assert.deepEqual(h.went, ['musicRoom', 'replays', 'titleOption settings']);
-  assert.equal(TITLE_ITEMS.length, 4);
+  assert.deepEqual(h.went, ['ranking']);
+  const extra = new TitleLogic(h.ctx);
+  extra.update([AVK.DOWN, AVK.DOWN, AVK.OK, AVK.CLR]);             // 게임순위 (kept) wraps to 엑스트라, opens, closes
+  extra.update([AVK.OK, AVK.DOWN, AVK.OK]);                        // opens again, 음악감상
+  new TitleLogic(h.ctx).update([TITLE_REPLAY]);                    // a tapped submenu row is picked at once
+  new TitleLogic(h.ctx).update([TITLE_HELP]);                      // so is a tapped row
+  new TitleLogic(h.ctx).update([AVK.K1]);                          // pad □ = 환경설정
+  assert.deepEqual(h.went, ['ranking', 'musicRoom', 'replays', 'titleOption help', 'titleOption settings']);
+  assert.deepEqual(TITLE_ITEMS.map(([, l]) => l), ['게임시작', '엑스트라', '환경설정', '도움말', '게임순위']);
 });

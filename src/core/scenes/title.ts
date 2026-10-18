@@ -30,29 +30,37 @@ export class RatingLogic {
   }
 }
 
-/** title menu keys (the host's touch rows and icons send them too): the four rows, the three top-right icons, and a
- *  press on the left half that misses the menu (does nothing) */
-export const TITLE_START = -45, TITLE_RANKING = -40, TITLE_REPLAY = -44, TITLE_MUSIC = -46;
+/** title menu keys (the host's touch rows and icons send them too): the rows, the 엑스트라 submenu's rows, the
+ *  top-right info icon, and a press on the left half that misses the menu (does nothing) */
+export const TITLE_START = -45, TITLE_RANKING = -40, TITLE_REPLAY = -44, TITLE_MUSIC = -46, TITLE_EXTRA = -48;
 export const TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43, TITLE_NONE = -47;
-/** title menu (not the original's button row): a column of rows, top to bottom */
-export const TITLE_ITEMS: [key: number, label: string][] = [[TITLE_START, '게임시작'], [TITLE_RANKING, '게임순위'], [TITLE_REPLAY, '회상'], [TITLE_MUSIC, '음악감상']];
-/** pad key -> title icon key: 옵션 (□/X = '1'), 도움말 (△/Y = '3'), 데이터 (L2 = '*') */
+/** title menu (not the original's button row): a column of rows, top to bottom. Settings / help were the original's
+ *  top-right icons; 게임순위 goes last, as the least used */
+export const TITLE_ITEMS: [key: number, label: string][] = [[TITLE_START, '게임시작'], [TITLE_EXTRA, '엑스트라'],
+  [TITLE_OPTION, '환경설정'], [TITLE_HELP, '도움말'], [TITLE_RANKING, '게임순위']];
+/** the 엑스트라 row's submenu (not in the original): 회상 and 음악감상 */
+export const TITLE_EXTRA_ITEMS: [key: number, label: string][] = [[TITLE_REPLAY, '회상'], [TITLE_MUSIC, '음악감상']];
+/** pad key -> title key: 옵션 (□/X = '1'), 도움말 (△/Y = '3'), 데이터 (L2 = '*') */
 export const TITLE_PAD: [pad: number, key: number][] = [[AVK.K1, TITLE_OPTION], [AVK.K3, TITLE_HELP], [AVK.STAR, TITLE_DATA]];
 
-/** the title menu row last chosen, kept while the game runs: coming back from a screen keeps it */
-let titleSel = 0;
+/** the title menu row and 엑스트라 row last chosen (-1: submenu closed), kept while the game runs: coming back from a
+ *  screen keeps them */
+let titleSel = 0, titleSub = -1;
 
 /** States 0x08 (110-frame intro) and 0x09 (menu). */
 export class TitleLogic {
   protected t = 0;
   protected state: 8 | 9;
-  /** title menu row (TITLE_ITEMS): 0 게임시작, 1 게임순위, 2 회상, 3 음악감상 (the last two not in the original) */
+  /** title menu row (TITLE_ITEMS; the original had only 게임시작 and 게임순위) */
   protected sel = titleSel;
+  /** 엑스트라 submenu row (TITLE_EXTRA_ITEMS), -1 while it is closed */
+  protected sub = titleSub;
   protected readonly ctx: SceneHost;
   constructor(ctx: SceneHost, intro = false) {
     this.ctx = ctx;
     this.state = intro ? 8 : 9;
     if (!intro) this.t = 200;
+    else this.sub = -1;
     ctx.audio.playBgm(0);
   }
   update(presses: number[]): void {
@@ -61,25 +69,49 @@ export class TitleLogic {
       if (this.t > 0x6e || presses.length) { this.state = 9; this.t = Math.max(this.t, 0x71); }   // any key or a menu row
       return;
     }
-    const n = TITLE_ITEMS.length;
-    for (const k of presses) {
+    const key = this.keys(presses);
+    titleSel = this.sel; titleSub = this.sub;
+    if (key === TITLE_DATA) this.ctx.screens.data();
+    else if (key === TITLE_OPTION) this.ctx.screens.titleOption('settings');   // state 0x0C
+    else if (key === TITLE_HELP) this.ctx.screens.titleOption('help');         // state 0x0D
+    else if (key === TITLE_RANKING) this.ctx.screens.ranking();
+    else if (key === TITLE_REPLAY) this.ctx.screens.replays();
+    else if (key === TITLE_MUSIC) this.ctx.screens.musicRoom();
+    else if (key === TITLE_START) this.ctx.screens.slots();
+  }
+  /** moves the cursors; returns the screen key picked, if any */
+  private keys(presses: number[]): number | undefined {
+    for (let k of presses) {
+      k = TITLE_PAD.find(([pad]) => pad === k)?.[1] ?? k;   // a pad / keyboard shortcut; the info icon is a touch zone
+      const sub = TITLE_EXTRA_ITEMS.findIndex(([key]) => key === k);
+      if (sub >= 0) { this.sel = TITLE_ITEMS.findIndex(([key]) => key === TITLE_EXTRA); this.sub = sub; return k; }   // a tapped submenu row
+      const row = TITLE_ITEMS.findIndex(([key]) => key === k);
+      if (row >= 0) {                                                              // a tapped row is picked at once
+        const open = this.sub >= 0;
+        this.sel = row; this.sub = -1;
+        if (open && k === TITLE_EXTRA) continue;                                   // tapped again: closes the submenu
+        k = AVK.OK;
+      }
+      if (this.sub >= 0) {                                                         // the 엑스트라 submenu
+        const n = TITLE_EXTRA_ITEMS.length;
+        if (k === AVK.UP) this.sub = (this.sub + n - 1) % n;
+        else if (k === AVK.DOWN) this.sub = (this.sub + 1) % n;
+        else if (k === AVK.OK || k === AVK.RIGHT) return TITLE_EXTRA_ITEMS[this.sub][0];
+        else if (k === AVK.CLR || k === AVK.LEFT || k === TITLE_NONE) this.sub = -1;
+        else if (k === TITLE_DATA) return k;
+        continue;
+      }
+      const n = TITLE_ITEMS.length;
       if (k === AVK.UP || k === AVK.LEFT) this.sel = (this.sel + n - 1) % n;
-      else if (k === AVK.DOWN || k === AVK.RIGHT) this.sel = (this.sel + 1) % n;
+      else if (k === AVK.DOWN) this.sel = (this.sel + 1) % n;
+      else if (k === AVK.RIGHT && TITLE_ITEMS[this.sel][0] !== TITLE_EXTRA) this.sel = (this.sel + 1) % n;
+      else if (k === AVK.OK || k === AVK.RIGHT) {
+        const picked = TITLE_ITEMS[this.sel][0];
+        if (picked !== TITLE_EXTRA) return picked;
+        this.sub = 0;                                                              // opens the submenu
+      } else if (k === TITLE_OPTION || k === TITLE_HELP || k === TITLE_DATA) return k;
     }
-    // OK picks the selected row; a tapped row is picked at once (and becomes the selected one)
-    presses = presses.map((k) => (k === AVK.OK ? TITLE_ITEMS[this.sel][0] : k));
-    const tapped = TITLE_ITEMS.findIndex(([key]) => presses.includes(key));
-    if (tapped >= 0) this.sel = tapped;
-    titleSel = this.sel;
-    // the three top-right icons are touch zones only; a pad reaches them with □ / △ / L2 (TITLE_PAD)
-    presses = presses.map((k) => TITLE_PAD.find(([key]) => key === k)?.[1] ?? k);
-    if (presses.includes(TITLE_DATA)) { this.ctx.screens.data(); return; }
-    if (presses.includes(TITLE_OPTION)) { this.ctx.screens.titleOption('settings'); return; }   // state 0x0C
-    if (presses.includes(TITLE_HELP)) { this.ctx.screens.titleOption('help'); return; }         // state 0x0D
-    if (presses.includes(TITLE_RANKING)) { this.ctx.screens.ranking(); return; }
-    if (presses.includes(TITLE_REPLAY)) { this.ctx.screens.replays(); return; }
-    if (presses.includes(TITLE_MUSIC)) { this.ctx.screens.musicRoom(); return; }
-    if (presses.includes(TITLE_START)) this.ctx.screens.slots();
+    return undefined;
   }
 }
 

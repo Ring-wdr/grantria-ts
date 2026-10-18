@@ -1,7 +1,7 @@
 // Menu screens drawn with the original art (analysis/features/ui-screens.md §0.3–0.7, ported
 // from tools/grantria_ui.py): logo (0x05) -> rating (0x06) -> title (0x08/0x09) -> slot select
 // (0x0A) -> character select (0x0B, popup 0) -> field (0x10), game over (0x1B).
-// Ranking is local (ranking.ts); the Kakao button is removed. The title settings / help buttons open the option
+// Ranking is local (ranking.ts); the Kakao button is removed. The title settings / help rows open the option
 // screens, the info button opens the data screen (0x3B); hardcore mode, revival and the game menu live elsewhere.
 // The state and keys are core/scenes/title.ts and play.ts; this draws them and makes the scenes (WebScreens).
 import { FieldScene } from './fieldScene';
@@ -28,7 +28,7 @@ import { SandboxScene } from './sandbox';
 import { ReplayListScene } from './replay';
 import { MusicRoomScene } from './musicRoom';
 import type { Screens } from '../../core/scenes/host';
-import { CLASS_KEY, CharSelectLogic, LogoLogic, RatingLogic, SLOT_KEY, SlotLogic, TITLE_DATA, TITLE_HELP, TITLE_ITEMS, TITLE_NONE, TITLE_OPTION, TITLE_PAD, TitleLogic, TitleOptionLogic, playTime } from '../../core/scenes/title';
+import { CLASS_KEY, CharSelectLogic, LogoLogic, RatingLogic, SLOT_KEY, SlotLogic, TITLE_DATA, TITLE_EXTRA, TITLE_EXTRA_ITEMS, TITLE_ITEMS, TITLE_NONE, TITLE_PAD, TitleLogic, TitleOptionLogic, playTime } from '../../core/scenes/title';
 import { PlayLogic } from '../../core/scenes/play';
 
 export const MENU_IMAGES = ['c', 't', 'f', 'logo', 'h_logo', 'title_bg', 'title_bg2', 'char_slot'];
@@ -90,23 +90,25 @@ function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
 
 /** title menu (not the original's button row): a text column at the left, top to bottom (core/scenes/title.ts TITLE_ITEMS) */
 const TITLE_MENU = { x: 22, y: 138, w: 132, row: 28 };
-/** the three top-right icons: key, x (FUN_00035988's settings / help / info) */
-const TITLE_ICONS: [key: number, x: number][] = [[TITLE_OPTION, 0x157], [TITLE_HELP, 0x187], [TITLE_DATA, 0x1b6]];
+/** the 엑스트라 submenu: a small panel at the right of its row */
+const TITLE_SUB = { x: TITLE_MENU.x + TITLE_MENU.w + 4, w: 96, y: TITLE_MENU.y + TITLE_MENU.row * TITLE_ITEMS.findIndex(([k]) => k === TITLE_EXTRA) };
+/** the top-right info icon (FUN_00035988's third; its settings / help icons are menu rows now): key, x */
+const TITLE_ICONS: [key: number, x: number][] = [[TITLE_DATA, 0x1b6]];
 
 /** the menu column's fade-in (ms); timed here, not by a CSS animation: the logo frames draw a varying number of
  *  pieces, which moves the menu's element in the DOM and would restart one */
 const TITLE_MENU_IN = 400;
 
-/** Title menu: the text column (k = its fade-in, 0..1), the three top-right icons (FUN_00035988's settings / help /
- *  info) and the copyright */
-function titleButtons(u: Ui, sel = 0, k = 1): void {
+/** Title menu: the text column (k = its fade-in, 0..1), the 엑스트라 submenu (sub = its row, -1 closed), the
+ *  top-right info icon and the copyright */
+function titleButtons(u: Ui, sel = 0, sub = -1, k = 1): void {
   const { x, y, w, row } = TITLE_MENU;
   u.alpha = Math.round(32 * k);
   u.view('titleMenu', x - Math.round(12 * (1 - k) ** 2), y, w, row * TITLE_ITEMS.length, h('div.v-col.tm-list', null,
-    TITLE_ITEMS.map(([, label], i) => h(`div.tm-item${i === sel ? '.sel' : ''}`, { style: `height:${row}px` }, label))));
-  u.alpha = 0x1a;
-  u.image('t', 0x40, 0xda, 0x20, 0x21, 0x157, 7);           // settings
-  u.image('t', 0, 0xda, 0x20, 0x21, 0x187, 7);              // help
+    TITLE_ITEMS.map(([key, label], i) => h(`div.tm-item${i === sel ? (sub >= 0 ? '.open' : '.sel') : ''}`, { style: `height:${row}px` },
+      key === TITLE_EXTRA ? [label, h('span.tm-more', null, '▸')] : label))));
+  if (sub >= 0) u.view('titleExtra', TITLE_SUB.x, TITLE_SUB.y, TITLE_SUB.w, row * TITLE_EXTRA_ITEMS.length, h('div.v-col.tm-list.tm-sub', null,
+    TITLE_EXTRA_ITEMS.map(([, label], i) => h(`div.tm-item${i === sub ? '.sel' : ''}`, { style: `height:${row}px` }, label))));
   u.alpha = 32;
   u.image('t', 0x20, 0xda, 0x20, 0x21, 0x1b6, 7);           // info -> data management (backup / original saves)
   // the original's left at (97, 303) cleared the Kakao button at the right; it is gone, so centred
@@ -181,19 +183,26 @@ export class TitleScene extends TitleLogic {
 
   constructor(ctx: GameContext, intro = false) {
     super(ctx, intro);
-    // touchdata[9]'s 게임시작 / 게임순위 zones became the menu rows; the icons keep theirs. A press on the left half that
-    // misses the menu does nothing (else Input takes it for the move stick, x < 231, and the stick's repeats run the
-    // menu cursor up and down)
+    ctx.input.uiMode = false;
+    this.setZones();
+  }
+
+  /** touchdata[9]'s 게임시작 / 게임순위 zones became the menu rows (and the open submenu's); the info icon keeps its
+   *  zone. A press on the left half that misses the menu does nothing (else Input takes it for the move stick,
+   *  x < 231, and the stick's repeats run the menu cursor up and down); it closes the submenu */
+  private setZones(): void {
     const { x, y, w, row } = TITLE_MENU;
-    ctx.input.uiMode = false; ctx.input.zones = [
+    this.ctx.input.zones = [
+      ...(this.sub >= 0 ? TITLE_EXTRA_ITEMS.map(([key], i) => ({ x: TITLE_SUB.x, y: TITLE_SUB.y + i * row, w: TITLE_SUB.w, h: row, key })) : []),
       ...TITLE_ITEMS.map(([key], i) => ({ x, y: y + i * row, w, h: row, key })),
       ...TITLE_ICONS.map(([key, ix]) => ({ x: ix, y: 7, w: 32, h: 33, key })),
       { x: -W, y: 0, w: W + 231, h: H, key: TITLE_NONE }];
   }
 
   override update(presses: number[]): void {
-    const intro = this.state === 8;
+    const intro = this.state === 8, open = this.sub >= 0;
     super.update(presses);
+    if (open !== this.sub >= 0) this.setZones();
     if (intro && this.state === 9) this.menuAt = performance.now();
     if (!intro && presses.length) frozenTick = this.t;               // the frame at the confirming tick
   }
@@ -202,11 +211,11 @@ export class TitleScene extends TitleLogic {
     render(this.ctx, () => {
       titleBackground(this.ctx, this.t, this.state);
       if (performance.now() < this.badgeUntil) this.ctx.ui.image('title_bg', 0xf0, 0, 0x66, 0x78, W - 0x66, 0);
-      if (this.state === 9) titleButtons(this.ctx.ui, this.sel, Math.min(1, (performance.now() - this.menuAt) / TITLE_MENU_IN));
+      if (this.state === 9) titleButtons(this.ctx.ui, this.sel, this.sub, Math.min(1, (performance.now() - this.menuAt) / TITLE_MENU_IN));
       const inp = this.ctx.input;
       if (this.state === 9) for (const [pad, key] of TITLE_PAD) {
-        const x = TITLE_ICONS.find(([k]) => k === key)![1];
-        const k = keyHint(inp, pad);
+        const x = TITLE_ICONS.find(([k]) => k === key)?.[1];
+        const k = x !== undefined && keyHint(inp, pad);
         if (k) this.ctx.ui.padHint(k.glyph, k.cls, x + 22, 7 + 24);
       }
     });

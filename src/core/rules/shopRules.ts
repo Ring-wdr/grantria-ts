@@ -238,9 +238,9 @@ export function decomposeCost(it: Item): number {
   const s = it.sub + (it.level > 88 ? 8 : 0);
   return (s * 40 + 20) * s + 20;
 }
-/** FUN_0003feb8: returns the gains, or null when a stack would pass 9999 */
-export function decompose(db: ItemDb, inv: Inventory, idx: number, rng: Rng, payFee: boolean): [number, number, number][] | null {
-  const a = db.a, it = inv.items[idx];
+/** FUN_0003feb8, the draw: what decomposing `it` gives — [material 0x15, 소울라이트 0x16:0, 홀리라이트 0x16:1 (sub >= 3)] */
+function decomposeGains(db: ItemDb, it: Item, rng: Rng): [number, number, number][] {
+  const a = db.a;
   const m = it.type === 0x0f ? 18 + (it.sub >> 1) : (it.type % 3) * 6 + (it.sub >> 1);
   const o = 0x26eb9 + it.sub * 4 + (it.level > 88 ? 0x2c : 0);
   const [b0, r0, b1, r1] = [a.d8(o), a.d8(o + 1), a.d8(o + 2), a.d8(o + 3)];
@@ -252,33 +252,50 @@ export function decompose(db: ItemDb, inv: Inventory, idx: number, rng: Rng, pay
   const n = it.sub & 1 ? 3 + rng.rand(3) : 1 + rng.rand(2);
   const gains: [number, number, number][] = [[0x15, m, n], [0x16, 0, s0]];
   if (s1 > 0) gains.push([0x16, 1, s1]);
-  if (gains.some(([t, s, c]) => countOf(inv, t, s) + c > 9999)) return null;
-  if (payFee) inv.gold = Math.max(0, inv.gold - decomposeCost(it));
+  return gains;
+}
+/** FUN_0003feb8, the take: the item goes, the gains come (a count of 0 is gained as 1) */
+function applyDecompose(inv: Inventory, idx: number, gains: [number, number, number][], rng: Rng): void {
   inv.remove(idx);
   for (const [t, s, c] of gains) inv.gain(t, s, 0, Math.max(c, 1), rng);
+}
+/** FUN_0003feb8: returns the gains, or null when a stack would pass 9999 */
+export function decompose(db: ItemDb, inv: Inventory, idx: number, rng: Rng, payFee: boolean): [number, number, number][] | null {
+  const it = inv.items[idx], gains = decomposeGains(db, it, rng);
+  if (gains.some(([t, s, c]) => countOf(inv, t, s) + c > 9999)) return null;
+  if (payFee) inv.gold = Math.max(0, inv.gold - decomposeCost(it));
+  applyDecompose(inv, idx, gains, rng);
   return gains;
 }
 
+/** why 일괄 분해 stopped: no bag slot for a new material stack, or a material stack would pass 9999 ([type, sub]) */
+export type DecomposeStop = { kind: 'bag' } | { kind: 'stack'; type: number; sub: number };
+
 /** 일괄 분해 (not in the original): decompose (no fee, the 마법 해체기 way) each pick from the last one, so the
- *  earlier indexes stay valid. Stops when the bag lacks the room the single decompose asks for (items + 2 < cap,
- *  shop precheck code 2) or a material stack would pass 9999. `onEach` runs per item (the 해체 achievement). */
+ *  earlier indexes stay valid. The room is counted as it will be: the item's slot is freed first and only a material
+ *  with no stack yet takes a new one (the single decompose keeps the shop's items + 2 < cap). Stops at the first
+ *  item that would not fit or would push a material stack past 9999. `onEach` runs per item (the 해체 achievement). */
 export function decomposeMany(db: ItemDb, inv: Inventory, picks: readonly number[], rng: Rng, onEach: () => void = () => {}):
-  { done: number; gains: [number, number, number][]; full: boolean } {
+  { done: number; gains: [number, number, number][]; stop: DecomposeStop | null } {
   const sum = new Map<string, [number, number, number]>();
-  let done = 0, full = false;
+  let done = 0, stop: DecomposeStop | null = null;
   for (const i of [...picks].sort((a, b) => b - a)) {
-    if (!inv.items[i] || inv.items[i].type >= 0x10) continue;
-    if (inv.items.length + 2 >= inv.cap) { full = true; break; }
-    const g = decompose(db, inv, i, rng, false);
-    if (!g) { full = true; break; }
+    const it = inv.items[i];
+    if (!it || it.type >= 0x10) continue;
+    const gains = decomposeGains(db, it, rng);
+    const over = gains.find(([t, s, c]) => countOf(inv, t, s) + Math.max(c, 1) > 9999);
+    if (over) { stop = { kind: 'stack', type: over[0], sub: over[1] }; break; }
+    const fresh = gains.filter(([t, s]) => !inv.items.some((x) => x.type === t && x.sub === s && x.grade === 0)).length;
+    if (inv.items.length - 1 + fresh > inv.cap) { stop = { kind: 'bag' }; break; }
+    applyDecompose(inv, i, gains, rng);
     done++;
     onEach();
-    for (const [t, s, c] of g) {
+    for (const [t, s, c] of gains) {
       const k = `${t}:${s}`, e = sum.get(k);
       if (e) e[2] += Math.max(c, 1); else sum.set(k, [t, s, Math.max(c, 1)]);
     }
   }
-  return { done, gains: [...sum.values()], full };
+  return { done, gains: [...sum.values()], stop };
 }
 
 // ---- combine (recipes 0x19) ----

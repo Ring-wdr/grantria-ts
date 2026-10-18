@@ -132,11 +132,18 @@ export class BagToolsLogic {
   }
 
   private decomposeAll(picks: number[]): void {
-    const fs = this.fs, t = this.ctx.assets.text;
+    const fs = this.fs, t = this.ctx.assets.text, name = (ty: number, sub: number) => t[0x7fc + fs.db.model(ty, sub, 0)] ?? '';
     const r = decomposeMany(fs.db, fs.inv, picks, fs.rng, () => fs.achieve({ k: 'dismantle' }));
     if (r.done) { fs.quests.onItems(); fs.recompute(); fs.autosave(); }
-    if (!r.done) { this.say(new Popup(this.ctx, 0x6a, 0, () => t[fs.inv.bags < BAG_MAX ? 0x4f7 : 0x507] ?? '')); return; }
-    const got = r.gains.map(([ty, s, c]) => `${t[0x7fc + fs.db.model(ty, s, 0)] ?? ''} ${c}개`).join('|@');
-    this.msg(`장비 ${r.done}개를 분해했습니다.${r.full ? `|@가방이 부족해 ${picks.length - r.done}개는 남겼습니다.` : ''}|@${got}`);
+    // why it stopped: a material at 9999 (every decompose gives 소울라이트, so one full stack stops them all), or no slot
+    const why = r.stop?.kind === 'stack' ? `${name(r.stop.type, r.stop.sub)}|] 9999개라 더 받을 수 없습니다.`
+      : r.stop ? '가방이 부족합니다.' : '';
+    if (!r.done) {
+      if (r.stop?.kind === 'stack') this.msg(`${why}|@${name(r.stop.type, r.stop.sub)}|{ 쓰거나 판 뒤 분해해 주세요.`);
+      else this.say(new Popup(this.ctx, 0x6a, 0, () => t[fs.inv.bags < BAG_MAX ? 0x4f7 : 0x507] ?? ''));
+      return;
+    }
+    const got = r.gains.map(([ty, s, c]) => `${name(ty, s)} ${c}개`).join('|@');
+    this.msg(`장비 ${r.done}개를 분해했습니다.${r.stop ? `|@${why} ${picks.length - r.done}개는 남겼습니다.` : ''}|@${got}`);
   }
 }

@@ -60,7 +60,7 @@ test('bags: up to BAG_MAX bought, 20 bags of 16 in all', async () => {
   assert.deepEqual([inv.bags, inv.cap], [0, 48]);
 });
 
-test('일괄 분해 takes the picks from the back and keeps the bag room check', { skip }, async () => {
+test('일괄 분해 takes the picks from the back, counts the room it needs and tells a full stack from a full bag', { skip }, async () => {
   const { Inventory } = await import('../src/core/rules/items.ts');
   const { decomposeMany } = await import('../src/core/rules/shopRules.ts');
   const { bulkSellPick } = await import('../src/core/rules/bulkSell.ts');
@@ -74,11 +74,20 @@ test('일괄 분해 takes the picks from the back and keeps the bag room check',
   assert.deepEqual(picks, [0, 2]);                                      // no premium, enhanced or grade-4 item
   let n = 0;
   const r = decomposeMany(db, inv, picks, rng, () => n++);
-  assert.deepEqual([r.done, n, r.full], [2, 2, false]);
+  assert.deepEqual([r.done, n, r.stop], [2, 2, null]);
   assert.ok(inv.items.some((it) => it.type === 0x1b && it.sub === 0x1b));   // the coupon stays
   assert.equal(inv.items.filter((it) => it.type < 0x10).length, 2);
   assert.ok(r.gains.every(([t]) => t === 0x15 || t === 0x16));
-  inv.cap = inv.items.length + 2;                                       // no room: nothing taken
-  const r2 = decomposeMany(db, inv, bulkSellPick(inv.items, 4), rng);
-  assert.deepEqual([r2.done, r2.full], [0, true]);
+  inv.cap = inv.items.length + 2;                                       // two slots left: its materials already have stacks
+  const r2 = decomposeMany(db, inv, bulkSellPick(inv.items, 4), rng);   // (the shop's items + 2 < cap would refuse)
+  assert.deepEqual([r2.done, r2.stop], [1, null]);
+  inv.cap = inv.items.length - 1;                                       // over the cap already (an old save): no new stack fits
+  inv.items.push(item(0, 7, 0));
+  const before = inv.items.length;
+  const r3 = decomposeMany(db, inv, [inv.items.length - 1], rng);
+  assert.deepEqual([r3.done, r3.stop, inv.items.length], [0, { kind: 'bag' }, before]);
+  inv.cap = 320;                                                        // 소울라이트 at 9999: not the bag, the stack
+  inv.items.find((it) => it.type === 0x16 && it.sub === 0)!.count = 9999;
+  const r4 = decomposeMany(db, inv, [inv.items.length - 1], rng);
+  assert.deepEqual([r4.done, r4.stop, inv.items.length], [0, { kind: 'stack', type: 0x16, sub: 0 }, before]);
 });

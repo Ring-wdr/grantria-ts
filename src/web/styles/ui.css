@@ -211,6 +211,8 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   --t-ease: calc(var(--tick) * 2);
 }
 .t-circle, .t-pill, .t-stick, .t-knob, .t-arrow, .t-btn {
+  /* 조작 배치 (touchLayout.ts): size of the control (about its centre) and the overall opacity */
+  scale: var(--sc, 1);
   transition: opacity var(--t-ease) ease-out, transform var(--t-ease) ease-out, box-shadow var(--t-ease) ease-out,
     border-color var(--t-ease) ease-out, color var(--t-ease) ease-out;
 }
@@ -223,10 +225,10 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.75;
+  opacity: calc(0.75 * var(--t-alpha, 1));
 }
 .t-circle.on, .t-btn.on > .t-circle {
-  opacity: 1;
+  opacity: var(--t-alpha, 1);
   border-color: var(--t-accent);
   box-shadow: 0 0 6px rgba(141, 241, 242, 0.65), inset 0 0 8px rgba(141, 241, 242, 0.25);
 }
@@ -241,9 +243,9 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 .t-menu svg { width: 50%; height: 50%; }
 
 /* quick slots: the whole slot (ring, icon, cooldown, count) scales as one */
-.t-btn { opacity: 0.85; }
-.t-btn.on { opacity: 1; transform: scale(0.93); }
-.t-slot { opacity: 1; }
+.t-btn { opacity: calc(0.85 * var(--t-alpha, 1)); }
+.t-btn.on { opacity: var(--t-alpha, 1); transform: scale(0.93); }
+.t-slot, .t-btn.on > .t-slot { opacity: 1; }   /* the group carries the opacity */
 .t-slot.empty { background: rgba(12, 19, 34, 0.35); border-style: dashed; }
 .t-cd {
   border-radius: 50%;
@@ -264,21 +266,21 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   border-radius: 50%;
   border: 1.5px solid var(--t-line);
   background: radial-gradient(circle, rgba(12, 19, 34, 0.15) 40%, rgba(12, 19, 34, 0.45));
-  opacity: 0.7;
+  opacity: calc(0.7 * var(--t-alpha, 1));
 }
-.t-stick.on { opacity: 1; border-color: var(--t-accent); }
+.t-stick.on { opacity: var(--t-alpha, 1); border-color: var(--t-accent); }
 .t-knob {
   border-radius: 50%;
   background: radial-gradient(circle at 40% 35%, #c9f6ff, #4fb4d8 45%, #1d5f86);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), inset 0 -2px 3px rgba(0, 0, 0, 0.3);
   transform: translate(var(--kx, 0), var(--ky, 0));
   transition: transform var(--tick) linear, opacity var(--t-ease);
-  opacity: 0.8;
+  opacity: calc(0.8 * var(--t-alpha, 1));
 }
-.t-knob.on { opacity: 1; }
-.t-arrow { color: #cfe2ff; opacity: 0.7; transform: rotate(var(--rot)); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7)); }
+.t-knob.on { opacity: var(--t-alpha, 1); }
+.t-arrow { color: #cfe2ff; opacity: calc(0.7 * var(--t-alpha, 1)); transform: rotate(var(--rot)); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7)); }
 .t-arrow svg { width: 100%; height: 100%; stroke-width: 3; }
-.t-arrow.on { color: var(--t-accent); opacity: 1; transform: rotate(var(--rot)) scale(1.2); }
+.t-arrow.on { color: var(--t-accent); opacity: var(--t-alpha, 1); transform: rotate(var(--rot)) scale(1.2); }
 
 /* QUEST / SAVE / SHOP / coupon shop pills */
 .t-pill {
@@ -293,10 +295,10 @@ input, textarea { -webkit-user-select: text; user-select: text; }
   color: #e6efff;
   font-size: 10px;
   line-height: 10px;
-  opacity: 0.85;
+  opacity: calc(0.85 * var(--t-alpha, 1));
 }
 .t-pill svg { width: 11px; height: 11px; flex: none; }
-.t-pill.on { opacity: 1; border-color: var(--t-accent); color: #fff; transform: scale(0.95); box-shadow: 0 0 6px rgba(141, 241, 242, 0.6); }
+.t-pill.on { opacity: var(--t-alpha, 1); border-color: var(--t-accent); color: #fff; transform: scale(0.95); box-shadow: 0 0 6px rgba(141, 241, 242, 0.6); }
 
 /* ---- declarative views (view.ts): menu and popup contents laid out by CSS ---- */
 /* each view is its own stacking context: z-index inside a view (item counts, anchors, backdrops) orders things

@@ -10,6 +10,7 @@ import type { DomUi } from '../render/domUi';
 import { ICONS } from '../render/touchIcons';
 import { keyHint } from '../input/keyHints';
 import { popDigits, type HudFeed } from '../../core/field/hudFeed';
+import { ctrlAt, ctrlSide, onTouchLayoutChange, touchLayout, zoneCtrl, BASE, type CtrlId } from '../input/touchLayout';
 
 export interface HudState {
   /** day/night clock frame of cmf_status (0x51 day) */
@@ -53,8 +54,11 @@ export type SlotView =
   | { skill: number; cd: number; maxCd: number; noMp?: boolean }
   | { icon: { image: string; sx: number; sy: number }; count: number; cd: number; maxCd: number };
 
-/** Touch zones of the field screen (touchdata.dat state 0x10, game-flow-ui.md §5.2). */
-export const FIELD_ZONES: { x: number; y: number; w: number; h: number; key: number; edge?: 1; mouseOnly?: true }[] = [
+/** Touch zones of the field screen (touchdata.dat state 0x10, game-flow-ui.md §5.2).
+ *  edge: the zone moves out with Input.edge toward that side (1 right, -1 left). The movable controls' zones follow
+ *  조작 배치 (touchLayout.ts): changed in place, so Input.zones / confirmZones holding these objects see it. */
+export type Zone = { x: number; y: number; w: number; h: number; key: number; edge?: 1 | -1; mouseOnly?: true };
+const BASE_ZONES: Zone[] = [
   { x: 0, y: 0, w: 40, h: 40, key: AVK.CLR },
   { x: 194, y: 0, w: 56, h: 32, key: 10000 },                        // QUEST -> quest tab (key 10000 lights it, FUN_0004b128 idx 12)
   { x: 255, y: 0, w: 60, h: 32, key: AVK.SAVE },
@@ -71,14 +75,22 @@ export const FIELD_ZONES: { x: number; y: number; w: number; h: number; key: num
   { x: 346, y: 265, w: 50, h: 50, key: AVK.K3, edge: 1 },
   { x: 402, y: 208, w: 78, h: 110, key: AVK.OK, edge: 1 },
 ];
+export const FIELD_ZONES: Zone[] = BASE_ZONES.map((z) => ({ ...z }));
+const SLOT_KEYS = [AVK.K1, AVK.K3, AVK.K7, AVK.K9, AVK.STAR, AVK.POUND];
+const ZONE_KEYS = { OK: AVK.OK, CLR: AVK.CLR, LOG: AVK.LOG, slots: SLOT_KEYS };
 
-/** touch control centres (original sprite rects: stick ring, attack 62x60, MENU 40x39, slots 40x39) */
-const STICK = { x: 0x53, y: H - 0x4a + 1 };
-const ATTACK = { x: W - 0x4c + 31, y: H - 0x5a + 30 };
-const MENU = { x: W - 0x2e + 20, y: H - 0xe5 + 20 };
-const SLOT_X = [0xc0, 0x83, 0xb8, 0x7b, 0x72, 0x31], SLOT_Y = [0x31, 0x31, 0x67, 0x66, 0x9c, 0x9b];
-const slotCentre = (i: number): [number, number] => [W - SLOT_X[i] + 20, H - SLOT_Y[i] + 20];
-
+function layoutZones(): void {
+  const l = touchLayout();
+  BASE_ZONES.forEach((b, i) => {
+    const id = zoneCtrl(b.key, ZONE_KEYS, b.x), z = FIELD_ZONES[i];
+    if (!id) return;
+    const c = BASE[id], p = l.ctrls[id];
+    Object.assign(z, { x: c.x + p.dx + (b.x - c.x) * p.s, y: c.y + p.dy + (b.y - c.y) * p.s, w: b.w * p.s, h: b.h * p.s, edge: ctrlSide(id, l) });
+  });
+  document.documentElement.style.setProperty('--t-alpha', String(l.alpha));
+}
+layoutZones();
+onTouchLayoutChange(layoutZones);
 
 /** d+0x24d7a (byte pairs): kind 2 reads them as (alpha, style) at 11 - c, kind 1 as (dy, style) per digit */
 const NUM_T: [number, number][] = [[0, 8], [-16, 8], [4, 7], [1, 7], [16, 9], [32, 10], [32, 10], [32, 10], [32, 9], [16, 9], [16, 9]];
@@ -232,7 +244,8 @@ export class FieldHud {
 
   /**
    * Touch controls (FUN_0004b128 layout, stick mode 1 centre (0x53, H-0x4a)) redrawn as CSS + SVG
-   * (ui.css .t-*): same places and touch zones, idle / pressed states as CSS transitions.
+   * (ui.css .t-*): same places and touch zones, idle / pressed states as CSS transitions. Moved and sized by
+   * 조작 배치 (touchLayout.ts): each control is drawn at its original size around its centre and scaled by --sc.
    */
   private touchButtons(s: HudState): void {
     const u = this.ui, inp = this.input;
@@ -241,13 +254,15 @@ export class FieldHud {
       [AVK.K9]: 7, [AVK.STAR]: 8, [AVK.POUND]: 9, [-7]: 10, [AVK.SAVE]: 11, [10000]: 12, [AVK.LOG]: 14 } as Record<number, number>)[held] ?? 0xff;
     const on = (b: boolean) => (b ? ' on' : '');
     u.alpha = 32;
-    const e = inp.edge;                                               // edge layout: stick left, right cluster right
+    const e = inp.edge;                                               // edge layout: each control toward its side
+    const at = (id: CtrlId) => ctrlAt(id, e);
     // attack
-    u.el(`t-circle t-attack${on(inp.isHeld(AVK.OK))}`, ATTACK.x + e - 29, ATTACK.y - 29, 58, 58, { html: ICONS.sword });
+    const a = at('attack');
+    u.el(`t-circle t-attack${on(inp.isHeld(AVK.OK))}`, a.x - 29, a.y - 29, 58, 58, { html: ICONS.sword, vars: { '--sc': a.s } });
     // quick slots 1, 3, 7, 9, *, #: the skill / item icon stays the game's art inside a CSS ring
     for (let i = 0; i < 6; i++) {
-      const [x0, y] = slotCentre(i), x = x0 + e, v = s.slots[i];
-      u.group(`t-btn${on(idx === i + 4)}`, x, y, `slot${i}`);
+      const { x, y, s: sc } = at(`slot${i}` as CtrlId), v = s.slots[i];
+      u.group(`t-btn${on(idx === i + 4)}`, x, y, `slot${i}`, { '--sc': sc });
       u.el(`t-circle t-slot${v ? '' : ' empty'}`, x - 19, y - 19, 38, 38);
       if (v) {
         if ('skill' in v) {
@@ -263,25 +278,28 @@ export class FieldHud {
       }
       u.groupEnd();
     }
-    u.el(`t-circle t-menu${on(held === AVK.CLR)}`, MENU.x + e - 19, MENU.y - 19, 38, 38, { html: ICONS.menu });
+    const m = at('menu');
+    u.el(`t-circle t-menu${on(held === AVK.CLR)}`, m.x - 19, m.y - 19, 38, 38, { html: ICONS.menu, vars: { '--sc': m.s } });
     // QUEST / SAVE / SHOP (the original swaps the QUEST/SHOP highlight) and 대사 로그 (not in the original)
     for (const [lit, icon, label, x] of [[12, 'quest', 'QUEST', 194], [11, 'save', 'SAVE', 258], [10, 'shop', 'SHOP', 322]] as const)
       u.el(`t-pill${on(idx === lit)}`, x, 6, 52, 20, { html: `${ICONS[icon]}<span>${label}</span>` });
     // 대사 로그 where the coupon shop button was (the shop stays in the community menu), on every device; it moves out
     // with the right cluster on a wide touch screen
-    u.el(`t-pill${on(idx === 14)}`, W - 0x50 + e, H - 0x102, 0x4c, 22, { html: `${ICONS.log}<span>대사 로그</span>` });
+    const g = at('log');
+    u.el(`t-pill${on(idx === 14)}`, g.x - 0x26, g.y - 11, 0x4c, 22, { html: `${ICONS.log}<span>대사 로그</span>`, vars: { '--sc': g.s }, key: 't-pill-log' });
     // virtual stick: ring, four chevrons, a knob that follows the finger (radius 22); touch only, keyboard and
     // pads have their own directions. Drawn after the other buttons (it overlaps none of them): while the knob's
     // transform transition runs, Chromium promotes everything painted after it to its own layer and re-rasters the
     // whole HUD at each start and end, about 4 times a second under a dragging finger.
     if (inp.device === 'touch') {
-      const cx = STICK.x - e, cy = STICK.y;
-      u.el(`t-stick${on(inp.stick.active)}`, cx - 30, cy - 30, 60, 60);
+      const { x: cx, y: cy, s: sc } = at('stick');
+      u.el(`t-stick${on(inp.stick.active)}`, cx - 30, cy - 30, 60, 60, { vars: { '--sc': sc } });
       ([[0, -42, 0], [-43, 0, 270], [0, 42, 180], [43, 0, 90]] as const).forEach(([dx, dy, rot], i) =>
-        u.el(`t-arrow${on(idx === i)}`, cx + dx - 10, cy + dy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` }, key: `t-arrow${rot}` }));
-      const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 ? 22 / d : 1;
+        u.el(`t-arrow${on(idx === i)}`, cx + dx * sc - 10, cy + dy * sc - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg`, '--sc': sc }, key: `t-arrow${rot}` }));
+      // the knob is scaled with the ring, so its offset is in unscaled pixels
+      const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 * sc ? 22 / d : 1 / sc;
       u.el(`t-knob${on(idx < 4)}`, cx - 15, cy - 15, 30, 30,
-        { vars: { '--kx': `${Math.round(inp.stick.dx * k)}px`, '--ky': `${Math.round(inp.stick.dy * k)}px` } });
+        { vars: { '--kx': `${Math.round(inp.stick.dx * k)}px`, '--ky': `${Math.round(inp.stick.dy * k)}px`, '--sc': sc } });
     } else this.padHints();
   }
 
@@ -289,11 +307,11 @@ export class FieldHud {
   confirmControls(): void {
     const u = this.ui, inp = this.input, e = inp.edge;
     u.alpha = 32;
-    const cx = STICK.x - e, cy = STICK.y;
-    u.el('t-stick', cx - 30, cy - 30, 60, 60);
+    const { x: cx, y: cy, s: sc } = ctrlAt('stick', e), a = ctrlAt('attack', e);
+    u.el('t-stick', cx - 30, cy - 30, 60, 60, { vars: { '--sc': sc } });
     ([[-43, 270], [43, 90]] as const).forEach(([dx, rot]) =>
-      u.el('t-arrow', cx + dx - 10, cy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg` }, key: `t-arrow${rot}` }));
-    u.el(`t-circle t-attack t-confirm${inp.isHeld(AVK.OK) ? ' on' : ''}`, ATTACK.x + e - 29, ATTACK.y - 29, 58, 58, { html: ICONS.check });
+      u.el('t-arrow', cx + dx * sc - 10, cy - 10, 20, 20, { html: ICONS.chevron, vars: { '--rot': `${rot}deg`, '--sc': sc }, key: `t-arrow${rot}` }));
+    u.el(`t-circle t-attack t-confirm${inp.isHeld(AVK.OK) ? ' on' : ''}`, a.x - 29, a.y - 29, 58, 58, { html: ICONS.check, vars: { '--sc': a.s } });
   }
 
   /** the pad glyph or keyboard key on each touch button it presses (follows the device used last) */
@@ -304,14 +322,20 @@ export class FieldHud {
       if (k) u.padHint(k.glyph, k.cls, x, y);
     };
     const e = this.input.edge;
-    hint(AVK.OK, ATTACK.x + e + 16, ATTACK.y + 17);
-    [AVK.K1, AVK.K3, AVK.K7, AVK.K9, AVK.STAR, AVK.POUND].forEach((k, i) => { const [x, y] = slotCentre(i); hint(k, x + e + 9, y + 9); });
-    hint(AVK.CLR, MENU.x + e + 9, MENU.y + 9);
+    // at the lower right of each control, where its scaled edge is
+    const corner = (key: number, id: CtrlId, r: number, ox: number, oy: number) => {
+      const c = ctrlAt(id, e);
+      hint(key, c.x + (r * c.s) * ox, c.y + (r * c.s) * oy);
+    };
+    corner(AVK.OK, 'attack', 29, 0.55, 0.59);
+    SLOT_KEYS.forEach((k, i) => corner(k, `slot${i}` as CtrlId, 19, 0.47, 0.47));
+    corner(AVK.CLR, 'menu', 19, 0.47, 0.47);
     hint(AVK.SAVE, 258 + 44, 6 + 12);
     hint(AVK.MAP, 4, 47);
     hint(HUD.QUEST, 194 + 44, 6 + 12);                                       // d-pad on the field (PAD_FIELD)
     hint(HUD.SHOP, 322 + 44, 6 + 12);
-    hint(AVK.LOG, W - 0x50 + e + 0x4c - 8, H - 0x102 + 14);
+    const g = ctrlAt('log', e);
+    hint(AVK.LOG, g.x + (0x26 - 8) * g.s, g.y + 3 * g.s);
     hint(HUD.COMMUNITY, 156 + 24, 2 + 24);                                  // gate icon -> community                                                    // minimap -> map tab
   }
 

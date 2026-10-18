@@ -404,10 +404,12 @@ export class DomUi extends Ui {
     return o >= 1 ? '' : `opacity:${Math.max(0, Math.round(o * 1000) / 1000)};`;
   }
 
-  override group(cls: string, cx: number, cy: number, id = ''): void {
+  override group(cls: string, cx: number, cy: number, id = '', vars?: Record<string, string | number>): void {
     const node = this.node('group', DomUi.div(`u-group ${cls}`), id);
     if (node.el.className !== `u-group ${cls}`) node.el.className = `u-group ${cls}`;
-    DomUi.set(node, `transform-origin:${px(cx + this.ox)} ${px(cy + this.oy)};`);
+    let st = `transform-origin:${px(cx + this.ox)} ${px(cy + this.oy)};`;
+    for (const [k, v] of Object.entries(vars ?? {})) st += `${k}:${v};`;
+    DomUi.set(node, st);
     this.parents.push(node.el);
   }
 

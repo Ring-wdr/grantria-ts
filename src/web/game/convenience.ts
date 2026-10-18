@@ -5,6 +5,7 @@ import { AVK } from '../input/input';
 import type { GameContext } from './scene';
 import { gt, h, type VNode } from '../render/view';
 import { ConveniencePanelLogic, ROWS } from '../../core/menu/convenience';
+import { openTouchLayoutEditor } from './touchLayoutEditor';
 import '../styles/convenience.css';
 
 export class ConveniencePanel extends ConveniencePanelLogic {
@@ -12,10 +13,16 @@ export class ConveniencePanel extends ConveniencePanelLogic {
 
   constructor(ctx: GameContext) { super(ctx); }
 
+  protected override openAction(key: string): void {
+    if (key !== 'touchLayout') return;
+    this.busy = true;
+    void openTouchLayoutEditor(this.ctx.input).then(() => { this.busy = false; });
+  }
+
   view(): VNode {
     const o = this.ctx.options;
     const rows = ROWS.map((r, i) => {
-      const v = o[r.key], cur = i === this.cur;
+      const v = r.key === 'touchLayout' ? 0 : o[r.key], cur = i === this.cur;
       const value = r.values
         ? r.values[v] ?? ''
         : [h('span.cv-bar', null, Array.from({ length: 10 }, (_, k) => h(`i${k < v ? '.on' : ''}`))), String(v)];

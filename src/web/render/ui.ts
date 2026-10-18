@@ -72,7 +72,7 @@ export abstract class Ui {
    * Group the following draws (until groupEnd) so they can be animated together, e.g. a popup
    * opening. cls names the CSS animation; the GL backend ignores groups.
    */
-  group(_cls: string, _cx: number, _cy: number, _id = ''): void { /* GL: no-op */ }
+  group(_cls: string, _cx: number, _cy: number, _id = '', _vars?: Record<string, string | number>): void { /* GL: no-op */ }
   groupEnd(): void { /* GL: no-op */ }
 
   /** declarative HTML view laid out by CSS in the (x, y, w, h) box (view.ts); DOM only */

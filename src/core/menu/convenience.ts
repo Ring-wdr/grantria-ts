@@ -8,7 +8,8 @@ import type { Host } from '../host';
 import type { ScrollRef } from '../render';
 
 interface Row {
-  key: keyof Options;
+  /** the option it changes, or an action row that opens a screen of the host (openAction) */
+  key: keyof Options | 'touchLayout';
   label: string;
   /** value names; a volume row (bar) has none */
   values?: string[];
@@ -33,6 +34,7 @@ export const ROWS: Row[] = [
   { key: 'mapQuests', label: '퀘스트 위치', values: ['끔', '켬'], count: 2, help: '지도에 진행 중인 모든 퀘스트의 목적지를 파란 표시로 더합니다(방문한 방만).' },
   { key: 'autosaveMap', label: '맵 이동 자동 저장', values: ['끔', '켬'], count: 2, help: '저장할 수 있는 맵에 들어갈 때마다 저장합니다(쓰러지면 그곳부터).' },
   { key: 'abyss', label: '심연 도전', values: ['끔', '켬'], count: 2, help: '차원의 문 보스를 잡으면 결과 대신 더 강한 심연으로 내려갈지 묻습니다.' },
+  { key: 'touchLayout', label: '조작 배치', values: ['편집'], count: 1, help: '터치 버튼과 스틱의 위치·크기·투명도를 바꿉니다.' },
   { key: 'powerSave', label: '절전 모드', values: ['끔', '켬'], count: 2, help: '발열을 줄입니다(실험). 기기에 따라 덜 부드러울 수 있습니다.' },
 ];
 
@@ -49,6 +51,7 @@ export class ConveniencePanelLogic {
 
   /** false once closed (CLR) */
   update(presses: number[]): boolean {
+    if (this.busy) return true;
     for (const k of presses) {
       if (!((k === AVK.LEFT || k === AVK.RIGHT || k === AVK.OK) && ROWS[this.cur].key === 'hudBuffs')) this.taps = 0;
       if (k === AVK.UP) this.move((this.cur + ROWS.length - 1) % ROWS.length);
@@ -68,8 +71,15 @@ export class ConveniencePanelLogic {
     else if (top + ROW_H > this.scroll.y + view) this.scroll.y = top + ROW_H - view;
   }
 
+  /** an action row (조작 배치) was chosen; the host opens its screen and sets busy until it closes */
+  protected openAction(_key: Row['key']): void { /* no such screen on this host */ }
+  /** a host screen opened from a row is up: keys are dropped */
+  protected busy = false;
+
   private change(d: number): void {
-    const r = ROWS[this.cur], o = this.ctx.options, v = o[r.key];
+    const r = ROWS[this.cur];
+    if (r.key === 'touchLayout') { if (d > 0) this.openAction(r.key); return; }
+    const o = this.ctx.options, v = o[r.key];
     // volumes stop at the ends; the other rows wrap like the original option rows
     o[r.key] = r.values ? (v + d + r.count) % r.count : Math.max(0, Math.min(r.count - 1, v + d));
     this.ctx.applyOptions();

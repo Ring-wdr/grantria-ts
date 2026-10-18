@@ -8,6 +8,7 @@ import { AVK } from '../../core/keys';
 import type { InputDevice, InputState, Stick } from '../../core/input';
 import { KEYMAP, RESERVED_KB } from './bindings';
 import { platform } from '../../core/platform';
+import { ctrlAt } from './touchLayout';
 export { AVK };
 
 /** Virtual stick state: angle in degrees (0 = right, 90 = down), speed level 0 or 5..8. */
@@ -27,12 +28,10 @@ export class Input implements InputState {
   private presses: number[] = [];
   readonly stick: Stick = { active: false, angle: 0, level: 0, key: 0, dx: 0, dy: 0 };
   private stickId: number | null = null;
-  /** stick centre: fixed (0x53, H-0x4a) in joystick mode 1 (FUN_0004b128, ui-screens.md §0.2) */
-  private center = { x: 83, y: 246 };
   /** touch zones -> virtual key for the current screen (touchdata.dat), checked before the stick;
-   *  edge: 1 = the zone belongs to the right control cluster and moves out by `edge` (see below) */
-  zones: { x: number; y: number; w: number; h: number; key: number; edge?: 1; mouseOnly?: true }[] = [];
-  /** touch-first screens wider than 3:2: the stick moves left and the right cluster right by this many
+   *  edge: the zone moves out by `edge` (see below) to the right (1) or the left (-1) */
+  zones: { x: number; y: number; w: number; h: number; key: number; edge?: 1 | -1; mouseOnly?: true }[] = [];
+  /** touch-first screens wider than 3:2: the controls move toward their side (the stick left, the right cluster right) by this many
    *  virtual pixels, into the side margins, so the thumbs stay at the screen edges (app.ts fit()) */
   edge = 0;
   /** fullscreen bleed: the canvas reaches `pad` virtual pixels past both sides of the 480-wide view (app.ts fit()) */
@@ -40,7 +39,7 @@ export class Input implements InputState {
   /** touch confirm mode (PlayScene: dialogue, event or popup on the field): the OK zones stay live in UI mode
    *  and a tap beside the stick centre sends LEFT / RIGHT (yes / no), so the thumbs keep their places */
   confirm = false;
-  confirmZones: { x: number; y: number; w: number; h: number; key: number; edge?: 1 }[] = [];
+  confirmZones: { x: number; y: number; w: number; h: number; key: number; edge?: 1 | -1 }[] = [];
   /** UI mode (menus, popups, dialogue): pointer downs become taps instead of zones / stick */
   uiMode = false;
   /** field play with nothing open (PlayScene sets it every tick, a scene change clears it): the pad's d-pad
@@ -205,7 +204,9 @@ export class Input implements InputState {
         this.surface.setPointerCapture(e.pointerId);
         return;
       }
-      if (p.x < 231 && this.stickId === null) {                 // stick area (FUN_00042ac8: x < 231; the margin counts too)
+      // stick area (FUN_00042ac8: x < 231; the margin counts too), the right half when 조작 배치 put the stick there
+      const left = this.stickAt().x < 240;
+      if ((left ? p.x < 231 : p.x >= 249) && this.stickId === null) {
         this.stickId = e.pointerId;
         this.padStick = false;
         this.surface.setPointerCapture(e.pointerId);
@@ -222,9 +223,9 @@ export class Input implements InputState {
       Object.assign(this.stick, { active: false, level: 0, key: 0, dx: 0, dy: 0 });
       return;
     }
-    const dx = p.x - (this.center.x - this.edge), dy = p.y - this.center.y;
-    const dist = Math.hypot(dx, dy);
-    // dead zone 12px; distance bands 12/24/36/48 -> speed level 5..8 (FUN_00042ac8)
+    const c = this.stickAt(), dx = p.x - c.x, dy = p.y - c.y;
+    const dist = Math.hypot(dx, dy) / c.s;
+    // dead zone 12px; distance bands 12/24/36/48 -> speed level 5..8 (FUN_00042ac8), in the stick's own size
     const level = dist <= 12 ? 0 : Math.min(8, 4 + Math.ceil((dist - 12) / 12));
     const angle = (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360;
     const key = level === 0 ? 0 : Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? AVK.LEFT : AVK.RIGHT) : (dy < 0 ? AVK.UP : AVK.DOWN);
@@ -235,10 +236,13 @@ export class Input implements InputState {
   private confirmAt(p: { x: number; y: number }): 'ok' | 'left' | 'right' | null {
     const z = this.confirmZones.find((r) => { const x = r.x + (r.edge ?? 0) * this.edge; return p.x >= x && p.x < x + r.w && p.y >= r.y && p.y < r.y + r.h; });
     if (z) return 'ok';
-    const dx = p.x - (this.center.x - this.edge), dy = p.y - this.center.y;
-    if (Math.hypot(dx, dy) > 50 || Math.abs(dx) < 8) return null;
+    const c = this.stickAt(), dx = p.x - c.x, dy = p.y - c.y;
+    if (Math.hypot(dx, dy) > 50 * c.s || Math.abs(dx) < 8 * c.s) return null;
     return dx < 0 ? 'left' : 'right';
   }
+
+  /** stick centre: (0x53, H-0x4a) in joystick mode 1 (FUN_0004b128, ui-screens.md §0.2), moved and sized by 조작 배치 */
+  private stickAt(): { x: number; y: number; s: number } { return ctrlAt('stick', this.edge); }
 
   /** Keys produced by clicking an HTML view element: pressed this tick, not held. */
   inject(keys: number[], pointerType: string): void {

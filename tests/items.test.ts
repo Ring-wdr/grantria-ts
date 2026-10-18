@@ -91,3 +91,27 @@ test('일괄 분해 takes the picks from the back, counts the room it needs and 
   const r4 = decomposeMany(db, inv, [inv.items.length - 1], rng);
   assert.deepEqual([r4.done, r4.stop, inv.items.length], [0, { kind: 'stack', type: 0x16, sub: 0 }, before]);
 });
+
+test('오토루팅 takes a refused drop once the bag has room, and still leaves coupons', async () => {
+  const { Inventory } = await import('../src/core/rules/items.ts');
+  const { autoLootGround } = await import('../src/core/rules/drops.ts');
+  const rng = { rand: () => 0 } as never;
+  const inv = new Inventory(db);
+  const gear = (sub: number) => ({ type: 0, sub, grade: 0, base: 10, icon: 0, count: 0, enh: 0, level: 1, reqLevel: 1,
+    aux: 0, sockets: [0xff, 0xff, 0xff, 0xff, 0xff], options: [] as [number, number][], name: '' });
+  for (let i = 0; i < inv.cap; i++) inv.items.push(gear(0));          // a full bag
+  const drop = { x: 0, y: 0, item: gear(1), gold: 0, phase: 0, failed: false };
+  const coupon = { x: 0, y: 0, item: { ...gear(0), type: 0x1b, sub: 0x1b }, gold: 0, phase: 0, failed: false };
+  let logs = 0;
+  inv.log = () => { logs++; };
+  let ground = [drop, coupon];
+  const loot = () => { ground = autoLootGround(ground, inv, rng).ground; };
+  loot();
+  assert.deepEqual([ground.length, drop.failed, logs], [2, true, 1]);   // refused: "bag full" once
+  loot(); loot();
+  assert.equal(logs, 1);                                                // no line every frame while it stays full
+  inv.remove(0);                                                        // room again
+  loot();
+  assert.deepEqual(ground, [coupon]);                                // taken; the coupon stays on the ground
+  assert.ok(inv.items.includes(drop.item));
+});

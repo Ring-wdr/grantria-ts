@@ -36,7 +36,7 @@ import { AVK } from '../keys';
 import type { Host } from '../host';
 import { platform } from '../platform';
 import { Inventory, ItemDb } from '../rules/items';
-import { groundBox, rollBossDrops, rollDrop, updateGround, type GroundItem } from '../rules/drops';
+import { autoLootGround, groundBox, rollBossDrops, rollDrop, updateGround, type GroundItem } from '../rules/drops';
 import { Monster, overlaps, type MonsterWorld } from '../combat/monster';
 import { Boss, BossGlobals, MonsterShot, bossDeathEvent, summonStats, type BoxTable } from '../combat/boss';
 import { Projectile, type ProjRecord } from '../combat/projectiles';
@@ -1592,18 +1592,11 @@ export class FieldGame {
     this.vitals.mp = Math.min(this.vitals.mp, this.stats.maxMp);
   }
 
-  /** 오토루팅 (0x1b sub 13, +0x32a5 bit 3; FUN_0002f184 kind 0): every ground item is gained as it is drawn,
-   *  coupons (0x1b sub 0x1b) excepted; a refused one is marked failed like a '5' pickup (no pickup sound) */
+  /** 오토루팅 (drops.ts autoLootGround) */
   private autoLoot(): void {
-    let got = false;
-    this.ground = this.ground.filter((g) => {
-      if (g.failed || (g.item?.type === 0x1b && g.item.sub === 0x1b)) return true;
-      const ok = g.item ? this.inv.gain(g.item.type, g.item.sub, g.item.grade, 1, this.rng, g.item) : this.inv.gain(0x1c, g.gold, 0, 1, this.rng);
-      if (!ok) g.failed = true;
-      got ||= ok;
-      return !ok;
-    });
-    if (got) this.quests.onItems();
+    const r = autoLootGround(this.ground, this.inv, this.rng);
+    this.ground = r.ground;
+    if (r.got) this.quests.onItems();
   }
 
   /** FUN_000610e0: the first ground item overlapping the player (DAT_003b3bd3) */

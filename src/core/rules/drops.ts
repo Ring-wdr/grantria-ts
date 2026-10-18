@@ -5,7 +5,7 @@
 // pickup animation in the original: '5' plays the player's interaction action and the item is gained on its frame.
 import type { Cmf } from '../data/assets';
 import type { Drawable } from '../render';
-import type { Item, ItemDb } from './items';
+import type { Inventory, Item, ItemDb } from './items';
 import { idiv, rdiv, type Rng } from './rules';
 import { rareMul } from './dev';
 
@@ -182,6 +182,26 @@ export function updateGround(g: GroundItem): boolean {
   g.y += BOUNCE[p] ?? 0;
   g.phase++;
   return true;
+}
+
+/**
+ * 오토루팅 (0x1b sub 13, +0x32a5 bit 3; FUN_0002f184 kind 0): every ground item is gained as it is drawn, coupons
+ * (0x1b sub 0x1b) excepted; a refused one is marked failed like a '5' pickup (no pickup sound). The original never tries
+ * a failed item again, so a full bag left every drop on the ground for good; here (not in the original) a failed item
+ * is taken as soon as the bag can hold it, checked quietly so the "bag full" line shows only once. Returns the items
+ * left on the ground and whether any was gained.
+ */
+export function autoLootGround(ground: GroundItem[], inv: Inventory, rng: Rng): { ground: GroundItem[]; got: boolean } {
+  let got = false;
+  const left = ground.filter((g) => {
+    if (g.item?.type === 0x1b && g.item.sub === 0x1b) return true;
+    if (g.failed && g.item && !inv.canGain(g.item.type, g.item.sub, g.item.grade, 1)) return true;
+    const ok = g.item ? inv.gain(g.item.type, g.item.sub, g.item.grade, 1, rng, g.item) : inv.gain(0x1c, g.gold, 0, 1, rng);
+    if (!ok) g.failed = true;
+    got ||= ok;
+    return !ok;
+  });
+  return { ground: left, got };
 }
 
 /** Pickup box around the item [-30,-30,60,60]. */

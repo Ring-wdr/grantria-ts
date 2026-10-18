@@ -160,6 +160,17 @@ export const greyUniform = { grey: { value: 0 }, shift: { value: new THREE.Vecto
 const greyAmt = { value: 0 };
 /** SetGray amount 0..1 for both shader paths */
 export function setGrey(v: number): void { greyUniform.grey.value = v; greyAmt.value = Math.round(v * 32); }
+/** the shift for the sheets FUN_0001cf0c leaves alone */
+const NO_SHIFT = { value: new THREE.Vector3(0, 0, 0) };
+/**
+ * Sheets the day/night palette shift does not reach (FUN_0001cf0c, misc-systems.md §4.3): it recolours only the
+ * tilesets, oc, the zone objects, the loaded character / monster sheets and the player's equipment. UI (c, t), item
+ * icons, faces, effects, skill icons and the shadow keep their colours — shifted, the black ground of an added effect
+ * (the ground item sparkle, es) turned into a blue square at night.
+ */
+export function shiftless(name: string): boolean {
+  return /^(c|t|i\d|face.*|e\d?|ec|es|sIcon|shadow)$/.test(name);
+}
 /** set the day/night shift from a d+0x26e0c row (dr, dg, db in RGB565 units) */
 export function setDayShift(dr: number, dg: number, db: number): void { greyUniform.shift.value.set(dr / 31, dg / 63, db / 31); }
 /** black through the current day/night shift and grey (FRAG), as 0xRRGGBB: the field outside the map */
@@ -299,10 +310,12 @@ export class SpriteLayer {
     return k;
   }
 
-  protected material(tex: THREE.Texture, blend: number, alpha8: number): THREE.ShaderMaterial {
+  /** shifted: the day/night shift reaches this sheet (shiftless) */
+  protected material(tex: THREE.Texture, blend: number, alpha8: number, shifted = true): THREE.ShaderMaterial {
     const fx = this.fx;
     const amt = fx?.amount ?? 0, a32 = fx?.alpha ?? 32, tint = fx?.tint ?? [0, 0, 0];
-    const key = `${tex.uuid}|${blend}|${alpha8}|${tint.join(',')}|${amt}|${a32}`;
+    const key = `${tex.uuid}|${blend}|${alpha8}|${tint.join(',')}|${amt}|${a32}|${shifted ? 1 : 0}`;
+    const shift = shifted ? greyUniform.shift : NO_SHIFT;
     let m = this.materials.get(key);
     if (!m) {
       const alpha = (alpha8 / 8) * (a32 / 32);
@@ -315,7 +328,7 @@ export class SpriteLayer {
       m = b
         ? new THREE.ShaderMaterial({
             ...common,
-            uniforms: { map: { value: tex }, alpha: { value: alpha }, mode: { value: b.shaderMode }, ...fxUniforms, ...greyUniform },
+            uniforms: { map: { value: tex }, alpha: { value: alpha }, mode: { value: b.shaderMode }, ...fxUniforms, grey: greyUniform.grey, shift },
             fragmentShader: FRAG,
             blending: THREE.CustomBlending,
             blendSrc: b.src,
@@ -330,7 +343,7 @@ export class SpriteLayer {
             ...common,
             uniforms: {
               map: { value: tex }, mode: { value: blend }, a32: { value: Math.floor((alpha8 * a32) / 8) }, ...dstUniforms,
-              grey: greyAmt, shift: greyUniform.shift, tint: fxUniforms.tint, tintAmt: { value: amt },
+              grey: greyAmt, shift, tint: fxUniforms.tint, tintAmt: { value: amt },
             },
             fragmentShader: DST_FRAG,
             blending: THREE.NoBlending,
@@ -383,7 +396,7 @@ export class SpriteLayer {
     const u0 = sx / img.width, u1 = (sx + w) / img.width;
     let v0 = sy / img.height, v1 = (sy + h) / img.height;
     if (bottomUp) [v0, v1] = [1 - v0, 1 - v1];
-    this.emit(this.material(tex, blend, alpha8), x, y, dw, dh, u0, v0, u1, v1, rot, hflip);
+    this.emit(this.material(tex, blend, alpha8, !shiftless(name!)), x, y, dw, dh, u0, v0, u1, v1, rot, hflip);
   }
 
   /** Record one quad of quad() (legacy/sprites.ts: one mesh each, as 0.1.7). */

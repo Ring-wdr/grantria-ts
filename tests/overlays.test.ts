@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { AVK } from '../src/core/keys.ts';
-import { OverlayStack, popupRole, type Overlay, type Role } from '../src/web/game/overlays.ts';
+import { OverlayStack, popupRole, type Overlay, type Role } from '../src/core/ui/overlays.ts';
 
 /** an overlay that answers `role` on OK and records the keys it saw */
 function fake(role: Role = 'yes'): Overlay & { seen: number[][]; draws: number } {

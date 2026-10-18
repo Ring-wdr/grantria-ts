@@ -1,44 +1,16 @@
 // 대사 로그 (not in the original): event talk, captions and NPC lines of this play session, newest last.
 // L / pad □ during dialogue (or L on the field) opens it over the game, which stands still while it is open;
-// ↑↓ scroll a line, ←→ a page, Esc / 5 / L close. Kept in memory only (a new PlayScene starts it empty).
+// ↑↓ scroll a line, ←→ a page, Esc / 5 / L close. The log itself is core/ui/backlog.ts.
 import { AVK } from '../input/input';
 import { button, gt, h, type ScrollRef } from '../render/view';
 import type { Ui } from '../render/ui';
 import { inlineHint } from './dialogue';
 import type { PadKind } from '../input/gamepad';
 import '../styles/convenience.css';
+import { backlog, type Backlog } from '../../core/ui/backlog';
 
 const W = 480, H = 320;
-const MAX = 300;
 const LINE = 13;
-
-export interface LogEntry {
-  name: string;
-  text: string;
-  /** game text id, -1 when unknown */
-  textId: number;
-  kind: 'talk' | 'caption';
-}
-
-export type Backlog = ReturnType<typeof makeLog>;
-
-function makeLog() {
-  const entries: LogEntry[] = [];
-  return {
-    entries: entries as readonly LogEntry[],
-    push(e: LogEntry): void {
-      if (!e.text) return;
-      entries.push(e);
-      if (entries.length > MAX) entries.splice(0, entries.length - MAX);
-    },
-    clear(): void { entries.length = 0; },
-  };
-}
-
-/** the play session's log */
-export const backlog = makeLog();
-/** 회상: the lines of the scene being replayed (emptied when one starts), kept out of the play log */
-export const replayLog = makeLog();
 
 /** event text breaks lines with '@' (dialogue.ts); the view text uses '|@' */
 function viewText(s: string): string {

@@ -6,7 +6,7 @@
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { Popup, openPopup } from './popup';
-import { OverlayStack } from './overlays';
+import { OverlayStack } from '../../core/ui/overlays';
 import { coupons } from './community';
 import { josa } from './shop';
 import { cfmt } from '../../core/data/skillDetail';

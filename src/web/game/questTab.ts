@@ -4,7 +4,8 @@
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { Popup, openPopup } from './popup';
-import { OverlayStack } from './overlays';
+import { OverlayStack } from '../../core/ui/overlays';
+import { untrackKey } from '../../core/rules/quests';
 import type { GameContext } from './scene';
 import type { Ui } from '../render/ui';
 import { button, gt, h, sprite, type ScrollRef, type VChild } from '../render/view';
@@ -12,9 +13,6 @@ import '../styles/skill-quest.css';
 
 const YELLOW = 0xffe0;
 
-/** 추적 (not in the original): a quest left off the HUD quest tracker, kept in the slot's story counters so the
- *  save format does not change */
-export const untrackKey = (q: number): string => `qhide${q}`;
 /** detail body: 15 px lines; rewards keep at least two */
 const LINE = 15;
 

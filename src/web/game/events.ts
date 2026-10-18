@@ -10,7 +10,7 @@ import type { FieldScene } from './fieldScene';
 import { Dialogue, HoldSkip, drawCaption, drawDialogueButtons } from './dialogue';
 import { readLog } from '../../core/save/readLog';
 import { addSeen } from '../../core/rules/records';
-import { backlog, replayLog } from './backlog';
+import { backlog, replayLog } from '../../core/ui/backlog';
 import { fxScale, optionFps } from '../../core/save/options';
 import { AVK } from '../input/input';
 import type { Ui } from '../render/ui';

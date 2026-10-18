@@ -15,6 +15,9 @@ web/
 │  │  ├─ rules/        능력치·공식, 아이템·인벤토리, 버프, 상자, 드롭, 상점 공식, 퀘스트, 업적, 계정, 길안내
 │  │  ├─ combat/       플레이어, 몬스터, 보스 14종, 투사체
 │  │  ├─ world/        맵 데이터·통행 레이어(FieldMap), 경로 탐색, 이벤트 액터, 기믹, 화면 필터
+│  │  ├─ field/        필드 진행(FieldGame: 상태와 20Hz 틱), 이벤트 VM, HUD 전투 글자·메시지(HudFeed)
+│  │  ├─ ui/           오버레이 스택, XState 흐름, 팝업·대사창 상태, 대사 로그
+│  │  ├─ sound.ts      로직이 쓰는 소리 포트(SoundOut)
 │  │  └─ save/         슬롯 세이브, 원본 파일 변환(XTEA·체크섬), 옵션
 │  ├─ web/             브라우저 실행 환경 (현재 게임)
 │  │  ├─ main.ts       브라우저 엔트리: createWebPlatform() → app
@@ -24,7 +27,7 @@ web/
 │  │  ├─ assets.ts     WebAssets = Assets + three.js 텍스처
 │  │  ├─ render/       컴포지터·스프라이트(WebGL), Field 렌더러, DOM UI, 글꼴
 │  │  ├─ input/        키보드·터치·게임패드 → InputState
-│  │  ├─ game/         씬·화면·탭·상점·이벤트 VM·HUD (UI와 진행 흐름)
+│  │  ├─ game/         씬·화면·탭·상점·HUD (필드는 FieldGame을 상속해 그리기만 더한다)
 │  │  ├─ styles/       CSS
 │  │  └─ viewer/       맵 뷰어(index.html, 개발용)
 │  └─ tauri/           Tauri 호스트
@@ -72,10 +75,18 @@ web/
 2. `src/<host>/main.ts`에서 `setPlatform(...)` 후 `await import('../web/app')`. 웹뷰가 아닌 호스트라면 `web/app.ts` 대신 `core`만 쓰는 자체 렌더러와 입력을 만든다(`Drawable`, `InputState`가 경계다).
 3. HTML 엔트리와 Vite 입력을 추가한다.
 
+## 로직과 그리기
+
+브라우저 API(DOM, three.js, WebGL, Web Audio, `performance`, 타이머)가 필요 없는 것은 `core`에, 그것을 쓰는 것은 `web`에 둔다. 한 기능이 둘에 걸치면 상태와 틱은 `core`, 그리기는 `web`으로 나눈다.
+
+- 필드: `core/field/fieldGame.ts`의 `FieldGame`이 상태와 `update()`를 갖고, `web/game/fieldScene.ts`의 `FieldScene`이 그것을 상속해 `draw()`와 렌더러 자원만 더한다. 로직이 호스트에게 받는 것은 `FieldHost`(에셋, 옵션, `InputState`, `SoundOut`)뿐이고, 렌더러가 필요한 곳은 빈 훅(`viewPad`, `mapLoaded`, `fortuneAsk` / `fortuneResult`)을 `FieldScene`이 덮어쓴다. 맵은 `FieldMap`이고, WebGL 쪽 `Field`가 `load` / `preloadSprite`를 덮어써 그리기 준비를 더한다.
+- 이벤트 VM은 `core/field/events.ts`, 그 위에 그리는 페이드·자막·대사창·SKIP은 `web/game/eventOverlay.ts`.
+- 팝업·대사창: `core/ui/popup.ts`, `core/ui/dialogue.ts`가 상태와 키를, `web/game/popup.ts`, `dialogue.ts`가 그리기를 맡는다. 로직이 여는 오버레이는 그리기 함수 대신 `model`(Popup, WarpList 등)을 갖고, `OverlayStack.draw(paint)`에 호스트의 그리기(`popupPaint`)를 넘긴다.
+- `tsconfig.core.json`(DOM 타입 없음)과 `tests/boundary.test.ts`가 `core`에 브라우저 API나 `web` 가져오기가 섞이지 않았는지 검사한다.
+
 ## 아직 남은 분리
 
-- `web/game/fieldScene.ts`(필드 진행)와 `web/game/events.ts`(이벤트 VM)는 로직과 그리기가 한 클래스에 섞여 있다. 웹뷰 호스트(브라우저, Tauri)는 이대로 공유하면 되지만, 네이티브 렌더러를 붙이려면 이 둘의 진행 로직을 `core`로 옮기고 그리기만 `web`에 남겨야 한다.
-- `web/game/gather.ts`, `fortune.ts`는 로직과 뷰가 한 파일이다(작아서 남겨 둠).
+- 메뉴 화면(`web/game`의 `menu`, `tabs`, `shop`, `community`, `mapTab`, `skillTab`, `questTab`, `optionTab`, `bagTools`, `ranking`, `archive`, `musicRoom`, `dataScene`, `dimension`의 선택 화면)과 씬 흐름(`screens.ts`, `sandbox.ts`, `replay.ts`)은 커서·키 처리와 뷰가 한 클래스에 있다. 필드와 같은 방식(상태와 `update()`는 `core`, 뷰는 `web`)으로 옮겨야 한다.
 
 ## 문제 기록
 

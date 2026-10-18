@@ -3,20 +3,16 @@
 // (0x0A) -> character select (0x0B, popup 0) -> field (0x10), game over (0x1B).
 // Ranking is local (ranking.ts); the Kakao button is removed. The title settings / help buttons open the option
 // screens, the info button opens the data screen (0x3B); hardcore mode, revival and the game menu live elsewhere.
+// The state and keys are core/scenes/title.ts and play.ts; this draws them and makes the scenes (WebScreens).
 import { FieldScene } from './fieldScene';
 import { GameMenu } from './menu';
 import { CouponShop } from './community';
-import { couponCard, coupons } from '../../core/menu/community';
-import { josa } from '../../core/text';
-import { consume, countOf } from '../../core/rules/shopRules';
+import { countOf } from '../../core/rules/shopRules';
 import { ShopScreen } from './shop';
-import { Popup, openPopup, popupOverlay, popupPaint } from './popup';
-import { OverlayStack, type OpenOpts } from '../../core/ui/overlays';
+import { popupPaint } from './popup';
 import { VIEW_H as H, VIEW_W as W } from '../render/field';
 import { AVK } from '../input/input';
-import { HUD } from '../../core/keys';
-import { SLOT_COUNT, deleteSlot, loadGamedata, loadSlot, newGame, saveSlot, setLap, type SaveData } from '../../core/save/save';
-import { Story } from '../../core/data/story';
+import { loadGamedata, type SaveData } from '../../core/save/save';
 import type { GameContext, Scene } from './scene';
 import { tri, type Ui } from '../render/ui';
 import type { Piece } from '../render/domUi';
@@ -27,12 +23,13 @@ import { RankingScene } from './ranking';
 import { DataScene } from './dataScene';
 import { OptionTab } from './optionTab';
 import { keyHint } from '../input/keyHints';
-import { BacklogView } from './backlog';
-import { backlog } from '../../core/ui/backlog';
+import { drawBacklog } from './backlog';
 import { SandboxScene } from './sandbox';
 import { ReplayListScene } from './replay';
 import { MusicRoomScene } from './musicRoom';
-import { saveOptions } from '../../core/save/options';
+import type { Screens } from '../../core/scenes/host';
+import { CLASS_KEY, CharSelectLogic, LogoLogic, RatingLogic, SLOT_KEY, SlotLogic, TITLE_DATA, TITLE_HELP, TITLE_ITEMS, TITLE_NONE, TITLE_OPTION, TITLE_PAD, TitleLogic, TitleOptionLogic, playTime } from '../../core/scenes/title';
+import { PlayLogic } from '../../core/scenes/play';
 
 export const MENU_IMAGES = ['c', 't', 'f', 'logo', 'h_logo', 'title_bg', 'title_bg2', 'char_slot'];
 export const MENU_CMFS = ['cmf_title', 'cmf_c0', 'cmf_c1', 'cmf_c2'];
@@ -91,13 +88,10 @@ function titleBackground(ctx: GameContext, t: number, state: 8 | 9): void {
   }
 }
 
-/** title menu (not the original's button row): a text column at the left, top to bottom */
+/** title menu (not the original's button row): a text column at the left, top to bottom (core/scenes/title.ts TITLE_ITEMS) */
 const TITLE_MENU = { x: 22, y: 138, w: 132, row: 28 };
-const TITLE_START = -45, TITLE_RANKING = -40, TITLE_REPLAY = -44, TITLE_MUSIC = -46;
-/** a press on the left half that misses the menu: does nothing (else Input takes it for the move stick, x < 231, and
- *  the stick's repeats run the menu cursor up and down) */
-const TITLE_NONE = -47;
-const TITLE_ITEMS: [key: number, label: string][] = [[TITLE_START, '게임시작'], [TITLE_RANKING, '게임순위'], [TITLE_REPLAY, '회상'], [TITLE_MUSIC, '음악감상']];
+/** the three top-right icons: key, x (FUN_00035988's settings / help / info) */
+const TITLE_ICONS: [key: number, x: number][] = [[TITLE_OPTION, 0x157], [TITLE_HELP, 0x187], [TITLE_DATA, 0x1b6]];
 
 /** the menu column's fade-in (ms); timed here, not by a CSS animation: the logo frames draw a varying number of
  *  pieces, which moves the menu's element in the DOM and would restart one */
@@ -133,14 +127,13 @@ export function render(ctx: GameContext, drawUi: () => void, drawZoom?: () => vo
 }
 
 /** State 0x05: company logo on white, 21 frames (FUN_0002c4b4). */
-export class LogoScene implements Scene {
+export class LogoScene extends LogoLogic {
+  declare protected readonly ctx: GameContext;
+
+  constructor(ctx: GameContext) { super(ctx); ctx.input.uiMode = false; ctx.input.zones = []; }
+
   readonly wide = true;
   readonly backdrop = 0xffffff;                                       // the logo sits on white, so does the page
-  private t = 0;
-  constructor(private ctx: GameContext) { ctx.input.uiMode = false; ctx.input.zones = []; }
-  update(presses: number[]): void {
-    if (++this.t >= 21 || presses.length) this.ctx.go(new RatingScene(this.ctx));
-  }
   draw(): void {
     render(this.ctx, () => {
       const u = this.ctx.ui;
@@ -160,16 +153,15 @@ export class LogoScene implements Scene {
 const RATING_BG = 0xfff7ff;
 
 /** State 0x06: rating notice (h_logo lower half), 80 frames (FUN_00035c4c). */
-class RatingScene implements Scene {
+class RatingScene extends RatingLogic {
+  declare protected readonly ctx: GameContext;
+
+  constructor(ctx: GameContext) { super(ctx); }
+
   readonly wide = true;
   /** the notice's own paper colour (h_logo is #FFF7FF, not white): on a wider screen a white page around it showed
    *  the 480 × 320 middle as a pink box */
   readonly backdrop = RATING_BG;
-  private t = 0;
-  constructor(private ctx: GameContext) {}
-  update(presses: number[]): void {
-    if (++this.t >= 80 || presses.length) { this.ctx.audio.playBgm(0); this.ctx.go(new TitleScene(this.ctx, true)); }
-  }
   draw(): void {
     render(this.ctx, () => {
       fillScreen(this.ctx.ui, RATING_BG);
@@ -178,69 +170,43 @@ class RatingScene implements Scene {
   }
 }
 
-const TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43;
-/** pad key -> title icon key, icon x: 옵션 (□/X = '1'), 도움말 (△/Y = '3'), 데이터 (L2 = '*') */
-const TITLE_PAD: [number, number, number][] = [[AVK.K1, TITLE_OPTION, 0x157], [AVK.K3, TITLE_HELP, 0x187], [AVK.STAR, TITLE_DATA, 0x1b6]];
-
-/** the title menu row last chosen, kept while the game runs: coming back from a screen keeps it */
-let titleSel = 0;
-
 /** States 0x08 (110-frame intro) and 0x09 (menu). */
-export class TitleScene implements Scene {
+export class TitleScene extends TitleLogic {
+  declare protected readonly ctx: GameContext;
+
   readonly wide = true;                                               // fullscreen: sky and clouds across the margins
-  private t = 0;
-  private state: 8 | 9;
   private badgeUntil = performance.now() + 3500;   // rating badge for 3.5 s (FUN_00035b80)
-  /** title menu row (TITLE_ITEMS): 0 게임시작, 1 게임순위, 2 회상, 3 음악감상 (the last two not in the original) */
-  private sel = titleSel;
   /** when the menu appeared (state 9), for its fade-in */
   private menuAt = performance.now();
-  constructor(private ctx: GameContext, intro = false) {
-    this.state = intro ? 8 : 9;
-    if (!intro) this.t = 200;
-    ctx.audio.playBgm(0);
-    // touchdata[9]'s 게임시작 / 게임순위 zones became the menu rows; the icons keep theirs
+
+  constructor(ctx: GameContext, intro = false) {
+    super(ctx, intro);
+    // touchdata[9]'s 게임시작 / 게임순위 zones became the menu rows; the icons keep theirs. A press on the left half that
+    // misses the menu does nothing (else Input takes it for the move stick, x < 231, and the stick's repeats run the
+    // menu cursor up and down)
     const { x, y, w, row } = TITLE_MENU;
     ctx.input.uiMode = false; ctx.input.zones = [
       ...TITLE_ITEMS.map(([key], i) => ({ x, y: y + i * row, w, h: row, key })),
-      { x: 0x157, y: 7, w: 32, h: 33, key: TITLE_OPTION }, { x: 0x187, y: 7, w: 32, h: 33, key: TITLE_HELP }, { x: 0x1b6, y: 7, w: 32, h: 33, key: TITLE_DATA },
+      ...TITLE_ICONS.map(([key, ix]) => ({ x: ix, y: 7, w: 32, h: 33, key })),
       { x: -W, y: 0, w: W + 231, h: H, key: TITLE_NONE }];
   }
-  update(presses: number[]): void {
-    this.t++;
-    if (this.state === 8) {
-      if (this.t > 0x6e || presses.length) { this.state = 9; this.t = Math.max(this.t, 0x71); this.menuAt = performance.now(); }   // any key or a menu row
-      return;
-    }
-    const n = TITLE_ITEMS.length;
-    for (const k of presses) {
-      if (k === AVK.UP || k === AVK.LEFT) this.sel = (this.sel + n - 1) % n;
-      else if (k === AVK.DOWN || k === AVK.RIGHT) this.sel = (this.sel + 1) % n;
-    }
-    // OK picks the selected row; a tapped row is picked at once (and becomes the selected one)
-    presses = presses.map((k) => (k === AVK.OK ? TITLE_ITEMS[this.sel][0] : k));
-    const tapped = TITLE_ITEMS.findIndex(([key]) => presses.includes(key));
-    if (tapped >= 0) this.sel = tapped;
-    titleSel = this.sel;
-    // the three top-right icons are touch zones only; a pad reaches them with □ / △ / L2 (TITLE_PAD)
-    presses = presses.map((k) => TITLE_PAD.find(([key]) => key === k)?.[1] ?? k);
-    if (presses.length) frozenTick = this.t;                         // the frame at the confirming tick
-    if (presses.includes(TITLE_DATA)) { this.ctx.go(new DataScene(this.ctx)); return; }
-    if (presses.includes(TITLE_OPTION)) { this.ctx.go(new TitleOptionScene(this.ctx, 'settings')); return; }   // state 0x0C
-    if (presses.includes(TITLE_HELP)) { this.ctx.go(new TitleOptionScene(this.ctx, 'help')); return; }         // state 0x0D
-    if (presses.includes(TITLE_RANKING)) { this.ctx.go(new RankingScene(this.ctx)); return; }
-    if (presses.includes(TITLE_REPLAY)) { this.ctx.go(new ReplayListScene(this.ctx)); return; }
-    if (presses.includes(TITLE_MUSIC)) { this.ctx.go(new MusicRoomScene(this.ctx)); return; }
-    if (presses.includes(TITLE_START)) this.ctx.go(new SlotScene(this.ctx));
+
+  override update(presses: number[]): void {
+    const intro = this.state === 8;
+    super.update(presses);
+    if (intro && this.state === 9) this.menuAt = performance.now();
+    if (!intro && presses.length) frozenTick = this.t;               // the frame at the confirming tick
   }
+
   draw(): void {
     render(this.ctx, () => {
       titleBackground(this.ctx, this.t, this.state);
       if (performance.now() < this.badgeUntil) this.ctx.ui.image('title_bg', 0xf0, 0, 0x66, 0x78, W - 0x66, 0);
       if (this.state === 9) titleButtons(this.ctx.ui, this.sel, Math.min(1, (performance.now() - this.menuAt) / TITLE_MENU_IN));
       const inp = this.ctx.input;
-      if (this.state === 9) for (const [key, , x] of TITLE_PAD) {
-        const k = keyHint(inp, key);
+      if (this.state === 9) for (const [pad, key] of TITLE_PAD) {
+        const x = TITLE_ICONS.find(([k]) => k === key)![1];
+        const k = keyHint(inp, pad);
         if (k) this.ctx.ui.padHint(k.glyph, k.cls, x + 22, 7 + 24);
       }
     });
@@ -254,86 +220,27 @@ export function frozenTitle(ctx: GameContext): void {
   titleBackground(ctx, frozenTick, 9);
 }
 
-/** "%02d:%02d:%02d" play time (text 0x1B28); the web port counts 20 ticks per second. */
-export function playTime(ticks: number): string {
-  const s = Math.floor(ticks / 20);
-  return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((v) => String(v).padStart(2, '0')).join(':');
-}
-
 /** State 0x0A slot select (FUN_00034040 + FUN_00033dcc), C220 coordinates. */
-export class SlotScene implements Scene {
-  readonly wide = true;                                               // over the title backdrop
-  private t = 0;
-  private cur = 0;
-  private slots: (SaveData | null)[] = [];
-  private laps = [0, 0, 0];
-  /** popup 0x5D (convert to hardcore / 3회차) and popup 1 (delete the slot) */
-  private readonly overlays = new OverlayStack();
-  constructor(private ctx: GameContext) {
-    this.refresh();
+export class SlotScene extends SlotLogic {
+  declare protected readonly ctx: GameContext;
+
+  constructor(ctx: GameContext) {
+    super(ctx);
     // touch (C220 + (80,40)): slot rows -> select/start, delete (277,190,97,42), close (275,30,57,57)
     ctx.input.uiMode = false; ctx.input.zones = [
       { x: 357, y: 230, w: 97, h: 42, key: AVK.POUND },
       { x: 357, y: 184, w: 97, h: 42, key: AVK.STAR },
       { x: 355, y: 70, w: 57, h: 57, key: AVK.CLR },
-      ...[0, 1, 2].map((i) => ({ x: 130, y: 72 + i * 66, w: 220, h: 64, key: 0x100 + i })),
+      ...[0, 1, 2].map((i) => ({ x: 130, y: 72 + i * 66, w: 220, h: 64, key: SLOT_KEY + i })),
     ];
   }
-  private refresh(): void {
-    this.slots = Array.from({ length: SLOT_COUNT }, (_, i) => loadSlot(i));
-    this.laps = loadGamedata().lap;
-  }
-  update(presses: number[]): void {
-    this.t++;
+
+  override update(presses: number[]): void {
     this.ctx.input.uiMode = this.overlays.size > 0;                  // taps reach the popup buttons
-    if (this.overlays.update(presses)) return;
-    for (const k of presses) {
-      if (k === AVK.STAR && this.slots[this.cur] && this.laps[this.cur] === 1) { this.askConvert(new Popup(this.ctx, 0x5d)); this.ctx.audio.playSfx(0x1f); return; }
-      if (k === AVK.STAR && this.slots[this.cur] && this.laps[this.cur] === 3) {   // 3회차 (not in the original)
-        this.askConvert(new Popup(this.ctx, 0x5d, 0, () => '3회차를 시작하시겠습니까?|@레벨·아이템·스킬은 그대로이고 이야기는 처음부터 다시 시작합니다.|@몬스터가 더 강해지고(HP ×1.5, 공격 ×1.25) 경험치가 1.5배가 됩니다.'));
-        this.ctx.audio.playSfx(0x1f); return;
-      }
-      if (k >= 0x100 && k < 0x103) { if (this.cur === k - 0x100) this.choose(); else this.cur = k - 0x100; }
-      else if (k === AVK.UP) this.cur = (this.cur + 2) % 3;
-      else if (k === AVK.DOWN) this.cur = (this.cur + 1) % 3;
-      else if (k === AVK.OK) this.choose();
-      else if (k === AVK.POUND && this.slots[this.cur]) {                // popup 1: delete this slot?
-        openPopup(this.overlays, new Popup(this.ctx, 1), () => { deleteSlot(this.cur); this.refresh(); });
-        return;
-      }
-      else if (k === AVK.CLR) this.ctx.go(new TitleScene(this.ctx));
-    }
-  }
-  /** popup 0x5D yes: a cleared slot (lap 1) goes hardcore, a cleared hard slot (lap 3) starts the 3회차 */
-  private askConvert(p: Popup): void {
-    openPopup(this.overlays, p, () => this.convert(this.cur, this.laps[this.cur] === 3 ? 4 : 2));
+    super.update(presses);
   }
 
-  /** FUN_00053510 case 0x36 (hardmode.md §3.2): keep level, items, gold, skills; reset the story */
-  private convert(i: number, lap = 2): void {
-    const s = this.slots[i];
-    if (!s) return;
-    const fresh = Story.fresh(s.cls).toJSON();
-    const old = s.story;
-    // achievement counters / title flags +0x2df4..+0x2ebb, challenges +0x2c64, 차원의 문 clears +0x3100 and the fortune
-    // day +0x3291 are not cleared (hardmode.md §3.2 / §3.3), so nothing already earned pops up or pays again;
-    // the web's quest tracking toggles (qhide*) go with the quests
-    const kept = Object.fromEntries(Object.entries(old?.counters ?? {}).filter(([k]) => !k.startsWith('qhide')));
-    s.story = { ...fresh, book: old?.book, gather: old?.gather, titles: old?.titles, title: old?.title,
-      counters: { ...(fresh.counters ?? {}), ...kept }, challenges: old?.challenges, dimClears: old?.dimClears,
-      fortuneDay: old?.fortuneDay, fortuneHold: old?.fortuneHold };   // event bits, quests, visited maps, keys, chests reset
-    s.buffs = undefined; s.day = 0;                                    // the return zone +0x3104 is kept
-    if (s.inv) { s.inv.items = s.inv.items.filter((it) => it.type !== 0x1a); s.inv.keys = []; }   // key store wiped (FUN_00036180)
-    saveSlot(i, s);
-    setLap(i, lap);
-    this.refresh();
-  }
-
-  private choose(): void {
-    const s = this.slots[this.cur];
-    if (s) void PlayScene.start(this.ctx, this.cur, s);
-    else this.ctx.go(new CharSelectScene(this.ctx, this.cur));
-  }
+  readonly wide = true;                                               // over the title backdrop
   draw(): void {
     render(this.ctx, () => {
       const u = this.ctx.ui, t = this.t;
@@ -381,40 +288,26 @@ export class SlotScene implements Scene {
 }
 
 /** State 0x0B character select (FUN_0002eef8), confirmation popup 0. */
-export class CharSelectScene implements Scene {
-  readonly wide = true;
-  private t = 0;
-  /** popup 0: start with this class? */
-  private readonly overlays = new OverlayStack();
-  constructor(private ctx: GameContext, private slot: number, private cls = 0) {
+export class CharSelectScene extends CharSelectLogic {
+  declare protected readonly ctx: GameContext;
+
+  constructor(ctx: GameContext, slot: number, cls = 0) {
+    super(ctx, slot, cls);
     // touch (C220 + (80,40)): arrows (99,165) / (178,165) 39x23, 3 cards (49,33,223,130), close
     ctx.input.uiMode = false; ctx.input.zones = [
       { x: 179, y: 205, w: 39, h: 23, key: AVK.LEFT },
       { x: 258, y: 205, w: 39, h: 23, key: AVK.RIGHT },
       { x: 355, y: 70, w: 57, h: 57, key: AVK.CLR },
-      ...[0, 1, 2].map((i) => ({ x: 130 + i * 75, y: 73, w: 74, h: 130, key: 0x110 + i })),
+      ...[0, 1, 2].map((i) => ({ x: 130 + i * 75, y: 73, w: 74, h: 130, key: CLASS_KEY + i })),
     ];
   }
-  update(presses: number[]): void {
-    this.t++;
+
+  override update(presses: number[]): void {
     this.ctx.input.uiMode = this.overlays.size > 0;
-    if (this.overlays.update(presses)) return;
-    for (const k of presses) {
-      if (k >= 0x110 && k < 0x113) { if (this.cls === k - 0x110) { this.choose(); return; } this.cls = k - 0x110; }
-      else if (k === AVK.LEFT) this.cls = (this.cls + 2) % 3;
-      else if (k === AVK.RIGHT) this.cls = (this.cls + 1) % 3;
-      else if (k === AVK.OK) { this.choose(); return; }
-      else if (k === AVK.CLR) { this.ctx.go(new SlotScene(this.ctx)); return; }
-    }
+    super.update(presses);
   }
-  private choose(): void {
-    openPopup(this.overlays, new Popup(this.ctx, 0, this.cls), () => {
-      const save = newGame(this.cls as 0 | 1 | 2);
-      setLap(this.slot, 0);
-      saveSlot(this.slot, save);
-      void PlayScene.start(this.ctx, this.slot, save);
-    });
-  }
+
+  readonly wide = true;
   draw(): void {
     render(this.ctx, () => {
       const u = this.ctx.ui, t = this.t, cls = this.cls;
@@ -446,22 +339,23 @@ export class CharSelectScene implements Scene {
   }
 }
 
-/**
- * Title settings (state 0x0C) and help (state 0x0D): the in-game settings / help views of OptionTab
- * in a window over a dark backdrop; −16 (or leaving the screen) returns to the title. The title's
- * sixth setting "게임 데이터 관리" (→ 0x3B) is the info button's data screen here.
- */
-class TitleOptionScene implements Scene {
-  private tab: OptionTab;
-  constructor(private ctx: GameContext, mode: 'settings' | 'help') {
-    this.tab = mode === 'help' ? new OptionTab(ctx).openHelp() : new OptionTab(ctx).openSettings();
+/** Title settings (state 0x0C) and help (state 0x0D): the option tab's views in a window over a dark backdrop. */
+class TitleOptionScene extends TitleOptionLogic {
+  declare protected readonly ctx: GameContext;
+  declare protected tab: OptionTab;
+
+  constructor(ctx: GameContext, mode: 'settings' | 'help') {
+    super(ctx, mode);
     ctx.input.uiMode = true; ctx.input.zones = [];
   }
-  update(presses: number[]): void {
+
+  protected newOptionTab(): OptionTab { return new OptionTab(this.ctx); }
+
+  override update(presses: number[]): void {
     for (const t of this.ctx.input.takeTaps()) { const k = this.ctx.ui13.tapAt(t.x, t.y); if (k) presses = [...presses, ...k]; }
-    this.tab.update(presses);
-    if (!this.tab.busy) this.ctx.go(new TitleScene(this.ctx));
+    super.update(presses);
   }
+
   draw(): void {
     render(this.ctx, () => { this.ctx.ui.alpha = 24; fillScreen(this.ctx.ui, 0x0a0f1a); this.ctx.ui.alpha = 32; }, () => {
       const u = this.ctx.ui13;
@@ -475,198 +369,39 @@ class TitleOptionScene implements Scene {
 }
 
 /** Field play bound to a save slot, with SAVE, a pause popup and the game-over menu (0x1B). */
-/** HUD touch keys: the gate icon (156..188, 2..34) -> community 0x24, SHOP (-7) -> premium shop */
-export const HUD_COMMUNITY = HUD.COMMUNITY, HUD_SHOP = HUD.SHOP, HUD_QUEST = HUD.QUEST;
-
-export class PlayScene implements Scene {
-  private overSel = 0;
-  private overTicks = 0;
-  /** popups over the play (save 8 -> 9 / 0x0F, title 10, notices, the ending 0x5C, the game-over chains) and the
-   *  coupon shop opened from the game over (DAT_003b3cc1); kinds: 'popup', 'pause' (popup 10), 'shop' */
-  private readonly overlays = new OverlayStack();
-  /** game menu 0x1C / tabs (Esc = MENU key -16) */
-  private menu: GameMenu | null = null;
+export class PlayScene extends PlayLogic {
+  declare protected readonly ctx: GameContext;
+  declare readonly field: FieldScene;
+  declare protected menu: GameMenu | null;
+  declare protected shop: ShopScreen | null;
   /** the menu whose blurred backdrop is frozen in the compositor */
   private backdropFor: GameMenu | null = null;
-  /** NPC shop (states 0x16 / 0x15 / 0x2B / 0x2C) */
-  private shop: ShopScreen | null = null;
-  /** the ending popup 0x5C (hardcore unlocked) was opened */
-  private endShown = false;
-  /** 대사 로그 (backlog.ts) over the game */
-  private log: BacklogView | null = null;
-  /** 회상 / 보스 러시 run on top (sandbox.ts): the scene is kept instead of disposed */
-  private suspended = false;
-  suspend(): void { this.suspended = true; }
-  resume(): void { this.suspended = false; this.field.resumeFromSandbox(); }
 
-  private constructor(private ctx: GameContext, private slot: number, readonly field: FieldScene) {
-    backlog.clear();
-    field.autosave = (partial = false) => { saveSlot(slot, field.toSave(partial)); };
-    field.prevSave = () => loadSlot(slot);
-    field.bindSlot(slot);
+  private constructor(ctx: GameContext, slot: number, field: FieldScene) { super(ctx, slot, field); }
+
+  protected newMenu(): GameMenu { return new GameMenu(this.ctx, this.field); }
+  protected newShop(kind: number): ShopScreen { return new ShopScreen(this.ctx, this.field, kind); }
+  protected newCouponShop(): CouponShop { return new CouponShop(this.ctx, this.field); }
+  protected startRush(): void { void SandboxScene.rush(this.ctx, this); }
+
+  override update(presses: number[]): void {
+    // touch (UI mode): taps run the topmost area registered while drawing (menus / popups first, then the field UI)
+    const f = this.field, o = this.overlays, input = this.ctx.input;
+    input.uiMode = !!(this.log || f.ending || o.size || this.menu || this.shop || f.busyTalking || f.dead);
+    input.padField = !input.uiMode;
+    // touch: dialogue / event / popup on the field keeps a confirm button under the right thumb (fieldHud confirmControls)
+    input.confirm = input.device === 'touch' && !this.log && !this.menu && !this.shop && !o.kindOpen('shop') && !o.kindOpen('pause')
+      && !f.ending && !f.warpListOpen && !!(f.busyTalking || o.kindOpen('popup'));
+    for (const t of input.takeTaps()) {
+      const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? this.ctx.hud.tapAt(t.x, t.y);
+      if (keys) presses = [...presses, ...keys];
+    }
+    super.update(presses);
   }
 
   static async start(ctx: GameContext, slot: number, save: SaveData): Promise<void> {
     ctx.go(new LoadingScene(ctx));
     ctx.go(new PlayScene(ctx, slot, await FieldScene.create(ctx, save, loadGamedata().lap[slot] ?? 0)));
-  }
-
-  private ask(p: Popup, opts: OpenOpts = {}): void { this.overlays.open(popupOverlay(p), { kind: 'popup', ...opts }); }
-
-  /** "save?" popup 8, then 9 (saved) or 0x0F (failed) */
-  private askSave(): void {
-    this.ask(new Popup(this.ctx, 8), { on: { yes: () => this.ask(new Popup(this.ctx, saveSlot(this.slot, this.field.toSave()) ? 9 : 0x0f)) } });
-  }
-
-  /** "go to the title?" popup 10 */
-  private askTitle(): void {
-    this.ask(new Popup(this.ctx, 10), { kind: 'pause', on: { yes: () => this.ctx.go(new TitleScene(this.ctx)) } });
-  }
-
-  /** the coupon shop over the game over menu, in a window with its body mounted in the 'tab' slot; CLR closes it */
-  private openOverShop(): void {
-    const shop = new CouponShop(this.ctx, this.field), u = this.ctx.ui13;
-    this.overlays.open({
-      handle: (presses) => (shop.update(presses) === 'close' ? 'cancel' : null),
-      draw: () => {
-        u.pushCenter220();
-        u.view('overShop', 0, 0x1e, 0xdc, 0xb4, win('.v-col.v-fill', { style: 'padding:4px' }, slot('tab')));
-        shop.draw(u);
-        u.pop();
-        if (!shop.overlays.size) u.closeButton();                            // touch: back to the game over menu (CLR)
-        shop.drawPopups();
-      },
-    }, { kind: 'shop' });
-  }
-
-  update(presses: number[]): void {
-    this.step(presses);
-    if (!this.gone) this.field.flushSave();                         // FUN_00020960: a save requested this frame (not after a reload)
-  }
-
-  /** replaced by another scene (a reload, the title): its pending save request is dropped */
-  private gone = false;
-
-  private step(presses: number[]): void {
-    // touch (UI mode): taps run the topmost area registered while drawing (menus / popups first, then the field UI)
-    const f = this.field;
-    const o = this.overlays;
-    this.ctx.input.uiMode = !!(this.log || this.field.ending || o.size || this.menu || this.shop || f.busyTalking || f.dead);
-    this.ctx.input.padField = !this.ctx.input.uiMode;
-    // touch: dialogue / event / popup on the field keeps a confirm button under the right thumb (fieldHud confirmControls)
-    this.ctx.input.confirm = this.ctx.input.device === 'touch' && !this.log && !this.menu && !this.shop && !o.kindOpen('shop') && !o.kindOpen('pause')
-      && !f.ending && !f.warpListOpen && !!(f.busyTalking || o.kindOpen('popup'));
-    for (const t of this.ctx.input.takeTaps()) {
-      const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? this.ctx.hud.tapAt(t.x, t.y);
-      if (keys) presses = [...presses, ...keys];
-    }
-    if (this.field.ending) {                                  // state 0x3D: black, BGM 0, popup 0x5C unless hard
-      if (!this.endShown) {
-        this.endShown = true;
-        this.ctx.audio.playBgm(0);
-        if (this.field.hard) {
-          if (this.field.lap === 2) setLap(this.slot, 3);              // 3회차 (not in the original): the hard ending opens it
-          this.ctx.go(new TitleScene(this.ctx)); return;
-        }
-        this.overlays.clear();
-        this.ask(new Popup(this.ctx, 0x5c), { on: { close: () => { setLap(this.slot, 1); this.ctx.go(new TitleScene(this.ctx)); } } });   // slot save not written
-      }
-      this.overlays.update(presses);
-      return;
-    }
-    if (this.field.dead) {
-      if (this.overTicks === 0) this.ctx.audio.playBgm(18);          // death BGM 0x12 (FUN_0001b06c)
-      this.overTicks++;
-      if (this.overTicks < 16) return;
-      if (this.overlays.update(presses)) return;
-      for (const k of presses) {
-        if (this.overlays.size) break;   // an overlay opened by an earlier key takes the rest
-        if (k === AVK.UP) this.overSel = (this.overSel + 2) % 3;
-        else if (k === AVK.DOWN) this.overSel = (this.overSel + 1) % 3;
-        else if (k === AVK.OK) {
-          if (this.overSel === 0 && f.dim) {                   // 차원의 문 나가기 (0x19E8): result popup, then reload
-            this.ask(f.dimResult(), { on: { close: () => { f.dead = false; f.leaveDimension(); } } });
-          } else if (this.overSel === 0) {                      // 이어하기: popup 0x1B, then reload the last save (none: popup 0x4F)
-            this.ask(new Popup(this.ctx, 0x1b), { on: { yes: () => {
-              const s = loadSlot(this.slot);
-              if (s) void PlayScene.start(this.ctx, this.slot, s);
-              else this.ask(new Popup(this.ctx, 0x4f));
-            } } });
-          } else if (this.overSel === 2) {                      // 타이틀화면으로: popup 10 first
-            this.ask(new Popup(this.ctx, 10), { on: { yes: () => this.ctx.go(new TitleScene(this.ctx)) } });
-          }
-          else this.reviveChoice();
-        }
-      }
-      return;
-    }
-    if (this.log) { if (!this.log.update(presses)) this.log = null; return; }
-    if (this.overlays.update(presses)) return;
-    // 편의 기능: during a dialogue page the pad's □ / △ (keyboard 1 / 2) are LOG / AUTO; L (pad d-pad → on the field)
-    // opens the log anywhere on the field, K toggles auto there too (said on the HUD when no dialogue shows the button)
-    if (f.dialogueShown) presses = presses.map((k) => (k === AVK.K1 ? AVK.LOG : k === AVK.K3 ? AVK.AUTO : k));
-    if (presses.includes(AVK.AUTO) && !this.shop && !this.menu && !f.overlays.size) {
-      this.ctx.options.auto ^= 1; saveOptions(this.ctx.options);
-      if (!f.dialogueShown) f.hud.message(`자동 진행 ${this.ctx.options.auto ? '켬' : '끔'}`);
-    }
-    if (presses.includes(AVK.LOG) && !this.shop && !this.menu && !f.overlays.size) { this.log = new BacklogView(); return; }
-    presses = presses.filter((k) => k !== AVK.LOG && k !== AVK.AUTO && k !== AVK.FAST);
-    if (presses.includes(AVK.SAVE) && !this.field.busyTalking) {
-      // HUD SAVE (misc-systems.md §7.2): popup 8 where saving is allowed, else "저장이 불가능한 지역입니다."
-      if (this.field.canSave) this.askSave();
-      else if (!this.field.inEvent) this.field.hud.message(this.ctx.assets.text[0x1a61] ?? '');   // during an event it fails silently
-      return;
-    }
-    if (this.shop) { if (this.shop.update(presses) === 'close') this.shop = null; return; }
-    if (!this.menu) this.field.closeMenu = false;                    // a return stone from a quick slot: no menu to close
-    if (this.menu) {
-      const r = this.menu.update(presses);
-      if (r === 'close' || this.field.closeMenu) { this.menu = null; this.field.closeMenu = false; }   // entering the dimension or a return stone closes the menu
-      else if (r === 'title') this.askTitle();
-      else if (r === 'save' && this.field.canSave) this.askSave();   // menu save: silent where not allowed
-      else if (r === 'launch') {                                     // 기록실 → 보스 기록: 보스 러시 on a copy of the slot (sandbox.ts)
-        this.menu.takeLaunch();
-        if (this.field.gardenMode !== 0 || this.field.inEvent) { this.ask(new Popup(this.ctx, 0x18, 0, () => '지금은 시작할 수 없습니다.')); return; }
-        this.menu = null;
-        void SandboxScene.rush(this.ctx, this);
-      }
-      return;
-    }
-    if (presses.includes(AVK.CLR) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field); return; }
-    if (presses.includes(AVK.MAP) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field).openTab(5); return; }
-    if (presses.includes(HUD_QUEST) && !this.field.busyTalking) { this.menu = new GameMenu(this.ctx, this.field).openTab(4); return; }
-    for (const [key, screen] of [[HUD_COMMUNITY, 'dimension'], [HUD_SHOP, 'premium']] as const) {
-      if (!presses.includes(key) || this.field.busyTalking) continue;
-      const m = new GameMenu(this.ctx, this.field).openTab(7);
-      if (screen) m.community.open(screen);
-      this.menu = m;
-      return;
-    }
-    this.field.update(presses);
-    if (this.field.reloadRequest) {                                  // the dimension run ended: back to the save made before entering
-      const s = loadSlot(this.slot);
-      if (s) void PlayScene.start(this.ctx, this.slot, s); else this.ctx.go(new TitleScene(this.ctx));
-      return;
-    }
-    if (this.field.shopRequest !== null) { this.shop = new ShopScreen(this.ctx, this.field, this.field.shopRequest); this.field.shopRequest = null; }
-  }
-
-  /** FUN_00044e98 choice 1: a revival scroll (0x1b, 3) revives in place; without one, 4+ coupons show
-   *  popup 0x4E and then revive for 2 coupons (net 0x19 code 1, done locally), else 0x7D opens the coupon shop */
-  private reviveChoice(): void {
-    const f = this.field, inv = f.inv, t = this.ctx.assets.text;
-    if (countOf(inv, 0x1b, 3) > 0) { consume(inv, 0x1b, 3, 1); f.countUse(3); f.revive(); this.overTicks = 0; return; }
-    if (coupons(f) >= 4) {
-      // 0x4E "부활 스크롤을 가지고 있지 않습니다." -> 0x4D: buy one with 2 coupons? (FUN_0005de24 case '0', FUN_00053ca0 0x1a)
-      this.ask(new Popup(this.ctx, 0x4e, 0, (s) => josa(s.replace('%s', t[0xa0c + 3] ?? ''))), { on: { close: () => {
-        this.ask(couponCard(this.ctx, f, 0x4d, 3, 2, f.db.create(0x1b, 3, 0, f.rng).name), { on: { yes: () => {
-          if (coupons(f) < 2) { this.ask(new Popup(this.ctx, 0x6a, 0, () => t[0x508] ?? '')); return; }
-          consume(inv, 0x1b, 0x1b, 2); f.revive(); this.overTicks = 0;   // net 0x19 code 1 (FUN_000752bc), done locally
-        } } });
-      } } });
-      return;
-    }
-    this.ask(new Popup(this.ctx, 0x7d), { on: { close: () => this.openOverShop() } });
   }
 
   draw(): void {
@@ -713,7 +448,7 @@ export class PlayScene implements Scene {
       u.pop();
       u.end();
     }
-    if (this.log) { this.ctx.ui.begin(); this.log.draw(this.ctx.ui, this.ctx.input); this.ctx.ui.end(); }
+    if (this.log) { this.ctx.ui.begin(); drawBacklog(this.ctx.ui, this.log, this.ctx.input); this.ctx.ui.end(); }
     this.drawOverlays();
     this.ctx.compositor.show();
   }
@@ -721,8 +456,20 @@ export class PlayScene implements Scene {
   private drawOverlays(): void {
     if (!this.overlays.size) return;
     this.ctx.ui13.begin();
-    this.overlays.draw(popupPaint(this.ctx));
+    const paint = popupPaint(this.ctx);
+    this.overlays.draw((o) => (o.model instanceof CouponShop ? this.drawOverShop(o.model) : paint(o)));
     this.ctx.ui13.end();
+  }
+
+  /** the game over's coupon shop in a window, its body mounted in the 'tab' slot */
+  private drawOverShop(shop: CouponShop): void {
+    const u = this.ctx.ui13;
+    u.pushCenter220();
+    u.view('overShop', 0, 0x1e, 0xdc, 0xb4, win('.v-col.v-fill', { style: 'padding:4px' }, slot('tab')));
+    shop.draw(u);
+    u.pop();
+    if (!shop.overlays.size) u.closeButton();                            // touch: back to the game over menu (CLR)
+    shop.drawPopups();
   }
 
   debugLine(): string {
@@ -730,6 +477,21 @@ export class PlayScene implements Scene {
   }
 
   dispose(): void { if (!this.suspended) { this.gone = true; this.field.dispose(); } }
+}
+
+/** the core flow's screen changes (core/scenes/host.ts) as this host's scenes */
+export class WebScreens implements Screens {
+  constructor(private ctx: GameContext) {}
+  rating(): void { this.ctx.go(new RatingScene(this.ctx)); }
+  title(intro = false): void { this.ctx.go(new TitleScene(this.ctx, intro)); }
+  slots(): void { this.ctx.go(new SlotScene(this.ctx)); }
+  charSelect(slot: number): void { this.ctx.go(new CharSelectScene(this.ctx, slot)); }
+  play(slot: number, save: SaveData): void { void PlayScene.start(this.ctx, slot, save); }
+  titleOption(mode: 'settings' | 'help'): void { this.ctx.go(new TitleOptionScene(this.ctx, mode)); }
+  ranking(): void { this.ctx.go(new RankingScene(this.ctx)); }
+  replays(): void { this.ctx.go(new ReplayListScene(this.ctx)); }
+  musicRoom(): void { this.ctx.go(new MusicRoomScene(this.ctx)); }
+  data(): void { this.ctx.go(new DataScene(this.ctx)); }
 }
 
 class LoadingScene implements Scene {

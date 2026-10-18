@@ -30,8 +30,12 @@ export class Popup {
   /** the content replaces the body text (popup 0x55 fortune result) */
   hideBody = false;
   private readonly assets: Assets;
+  readonly id: number;
+  readonly cls: number;
+  private readonly format?: (s: string) => string;
   /** format fills sprintf-style fields of the popup text (e.g. popup 0x29 "%s ... %d") */
-  constructor(src: { assets: Assets }, readonly id: number, readonly cls = 0, private format?: (s: string) => string) {
+  constructor(src: { assets: Assets }, id: number, cls = 0, format?: (s: string) => string) {
+    this.id = id; this.cls = cls; this.format = format;
     const a = this.assets = src.assets;
     this.type = a.dd(0x4009d7, id * 6);
     this.w = a.dd(0x4009d7, id * 6 + 3);
@@ -74,7 +78,8 @@ export function openPopup(stack: OverlayStack, p: Popup, yes?: () => void, opts:
 export class QtyPopup {
   qty = 0;
   readonly serial = ++serial;
-  constructor(readonly max: number) {}
+  readonly max: number;
+  constructor(max: number) { this.max = max; }
   handle(presses: number[]): 'ok' | 'cancel' | null {
     for (const k of presses) {
       if (k === AVK.RIGHT) this.qty = (this.qty + 1) % (this.max + 1);

@@ -2,132 +2,56 @@
 // is built from the class's seen events alone (no slot); the rush from a snapshot of the slot being played. It is never
 // saved, gains no exp, starts no other events and leaves no account trace except the records it is for (boss records,
 // the rush best, the replay count). The scene that started it waits and comes back after.
-import { AVK } from '../input/input';
+// The state and keys are core/scenes/sandbox.ts; this draws them.
 import type { GameContext, Scene } from './scene';
 import { FieldScene } from './fieldScene';
-import { eventMap, OPENING } from '../../core/field/fieldGame';
 import type { PlayScene } from './screens';
-import { StoryDb, Story } from '../../core/data/story';
-import { newGame } from '../../core/save/save';
-import { seenEvents } from '../../core/rules/records';
-import { seenAlongRoute } from '../../core/data/storyChart';
-import { Popup, openPopup, popupPaint } from './popup';
-import { OverlayStack } from '../../core/ui/overlays';
-import { countReplay, recordRush } from '../../core/rules/records';
-import { saveOptions } from '../../core/save/options';
-import { rushBosses, ticksText } from '../../core/menu/archive';
+import { type SaveData } from '../../core/save/save';
+import { popupPaint } from './popup';
 import { h } from '../render/view';
-import { BacklogView } from './backlog';
-import { replayLog } from '../../core/ui/backlog';
+import { drawBacklog } from './backlog';
 import { VIEW_H as H, VIEW_W as W } from '../render/field';
 import { fillScreen, render } from './screens';
+import { ticksText } from '../../core/menu/archive';
+import { SandboxLogic } from '../../core/scenes/sandbox';
 import '../styles/convenience.css';
-
-type RushState = 'load' | 'fight' | 'clear' | 'over';
 
 /** the scene a sandbox returns to */
 /** the scene a sandbox returns to; finished = the replayed event ran to its end (played or skipped, not Esc) */
 export interface SandboxHost extends Scene { resume(finished?: boolean): void }
 
-export class SandboxScene implements Scene {
-  private fs: FieldScene | null = null;
-  /** the rush's result popup and "quit the rush?" over the field */
-  private readonly overlays = new OverlayStack();
-  /** 회상: this scene's lines (LOG / pad □) */
-  private log: BacklogView | null = null;
-  private started = false;
-  /** rush: the boss list, the current one, its state and the clock */
-  private stages: { type: number; map: number }[] = [];
-  private stage = 0;
-  private state: RushState = 'load';
-  private ticks = 0;
-  private wait = 0;
-  private beaten = 0;
-  /** left (or failed to load): late async work stops here */
-  private left = false;
+export class SandboxScene extends SandboxLogic {
+  declare protected readonly ctx: GameContext;
+  declare protected fs: FieldScene | null;
 
-  private constructor(private ctx: GameContext, private back: SandboxHost, readonly mode: 'replay' | 'rush') {}
+  private constructor(ctx: GameContext, private back: SandboxHost, mode: 'replay' | 'rush') { super(ctx, mode); }
 
-  /** replay event e as class cls: a new game of that class whose story has every event it has seen but e */
+  /** replay event e as class cls (SandboxLogic.startReplay) over back */
   static async replay(ctx: GameContext, back: SandboxHost, cls: 0 | 1 | 2, e: number): Promise<void> {
     const s = new SandboxScene(ctx, back, 'replay');
-    replayLog.clear();
     ctx.go(s);
-    const save = newGame(cls), story = Story.fresh(cls);
-    for (const x of seenAlongRoute(cls, seenEvents(cls))) if (x !== e) story.set(x);
-    if (e !== OPENING[cls]) story.set(OPENING[cls]);               // else the class's opening would start instead
-    save.story = story.toJSON();
-    const hd = new StoryDb(ctx.assets).headers[e];
-    save.map = eventMap(e, hd.map);
-    const fs = await s.load(save, 0, 'replay');
-    if (!fs) return;
-    // kind 0 scenes start when the room's boss falls (events.md §0.5): it is gone, as in play, not standing beside
-    // the one the scene shows
-    if (hd.kind === 0 && !OPENING.includes(e)) fs.monsters = fs.monsters.filter((m) => !m.isBoss);
-    if (!fs.events.active) fs.events.start(e);                     // the opening event may have started by itself
-    s.fs = fs;
-    s.started = true;
+    await s.startReplay(cls, e);
   }
 
-  /** the sandbox FieldScene, or back to the play scene when it cannot be built */
-  private async load(save: Parameters<typeof FieldScene.create>[1], lap: number, mode: 'replay' | 'rush'): Promise<FieldScene | null> {
-    try { return await FieldScene.create(this.ctx, save, lap, mode); }
-    catch (err) { console.error('sandbox load failed', err); this.leave(); return null; }
-  }
-
-  /** every recorded boss in story order, back to back, in its own room */
+  /** a 보스 러시 (SandboxLogic.startRush) over the play scene, which waits suspended */
   static async rush(ctx: GameContext, back: PlayScene): Promise<void> {
     const s = new SandboxScene(ctx, back, 'rush');
-    s.stages = rushBosses();
     back.suspend();
     ctx.go(s);
-    const src = back.field, save = src.snapshot();
-    save.map = s.stages[0].map; save.x = -1; save.y = -1;
-    if (save.story) save.story.maps = (save.story.maps ?? []).filter((m) => m !== s.stages[0].map);   // a visited boss room keeps its boss away
-    const fs = await s.load(save, src.lap, 'rush');
-    if (!fs) return;
-    fs.refill();
-    s.fs = fs;
-    s.enterStage(0, true);
+    await s.startRush(back.field);
   }
 
-  private enterStage(i: number, loaded = false): void {
-    const fs = this.fs!, st = this.stages[i];
-    this.stage = i;
-    this.state = 'load';
-    const go = async () => {
-      if (!loaded) { fs.story.maps.delete(st.map); await fs.enterMap(st.map); }
-      if (this.left || this.state === 'over') return;
-      if (!fs.bossAlive) { this.next(); return; }                  // the boss did not come back: skip it
-      this.state = 'fight';
-    };
-    void go();
+  protected async newField(save: SaveData, lap: number, mode: 'replay' | 'rush'): Promise<FieldScene> {
+    try { return await FieldScene.create(this.ctx, save, lap, mode); }
+    catch (err) { console.error('sandbox load failed', err); throw err; }
   }
 
-  private next(): void {
-    if (this.stage + 1 < this.stages.length) this.enterStage(this.stage + 1);
-    else this.finishRush(true);
-  }
-
-  private finishRush(all: boolean): void {
-    if (this.state === 'over') return;
-    this.state = 'over';
-    const fs = this.fs!, best = this.beaten > 0 && recordRush(this.ticks, this.beaten, fs.model.cls, Date.now(), all && this.beaten === this.stages.length);
-    const body = `${all ? '보스 러시 완주!' : '보스 러시 종료'}|@보스 ${this.beaten} / ${this.stages.length}마리 · ${ticksText(this.ticks)}${best ? '|@새 기록입니다.' : ''}`;
-    openPopup(this.overlays, new Popup(this.ctx, 0x18, 0, () => body), undefined, { on: { close: () => this.leave() } });
-  }
-
-  /** back to the scene that started it; watched = a replay played to its end (Esc or SKIP do not count for 추억),
-   *  finished = its event ended (played or skipped), so 이어서 보기 may go on */
-  private leave(watched = false, finished = false): void {
-    if (this.left) return;
-    this.left = true;
-    if (this.mode === 'replay' && this.started && watched) countReplay();
+  protected goBack(finished: boolean): void {
     this.ctx.go(this.back);
     this.back.resume(finished);
   }
 
-  update(presses: number[]): void {
+  override update(presses: number[]): void {
     const fs = this.fs, input = this.ctx.input;
     input.uiMode = !!(this.log || this.overlays.size || fs?.busyTalking || fs?.dead);
     input.padField = !input.uiMode;
@@ -136,32 +60,7 @@ export class SandboxScene implements Scene {
       const keys = this.ctx.ui13.tapAt(t.x, t.y) ?? this.ctx.ui.tapAt(t.x, t.y) ?? this.ctx.hud.tapAt(t.x, t.y);
       if (keys) presses = [...presses, ...keys];
     }
-    if (this.overlays.update(presses)) return;
-    if (!fs) { if (presses.includes(AVK.CLR)) this.leave(); return; }
-    if (this.log) { if (!this.log.update(presses)) this.log = null; return; }
-    // the dialogue's LOG / AUTO keys work here too (pad □ / △ while a page shows); a replay logs into its own list
-    if (fs.dialogueShown) presses = presses.map((k) => (k === AVK.K1 ? AVK.LOG : k === AVK.K3 ? AVK.AUTO : k));
-    if (presses.includes(AVK.AUTO)) { this.ctx.options.auto ^= 1; saveOptions(this.ctx.options); }
-    if (presses.includes(AVK.LOG) && this.mode === 'replay' && !fs.popupOpen) { this.log = new BacklogView(replayLog); return; }
-    presses = presses.filter((k) => k !== AVK.LOG && k !== AVK.AUTO && k !== AVK.FAST);
-    if (this.mode === 'replay') {
-      if (presses.includes(AVK.CLR) && !fs.popupOpen) { this.leave(); return; }   // Esc: back at once
-      fs.update(presses);
-      if (this.started && !fs.events.active && !fs.popupOpen) this.leave(!fs.events.skipped, true);
-      return;
-    }
-    if (this.state === 'over') return;
-    if (fs.dead) { this.finishRush(false); return; }
-    if (presses.includes(AVK.CLR) && !fs.busyTalking) {
-      openPopup(this.overlays, new Popup(this.ctx, 0x0e, 0, () => '보스 러시를 그만두시겠습니까?'), () => this.finishRush(false));
-      return;
-    }
-    if (this.state === 'load') return;
-    fs.update(presses.filter((k) => k !== AVK.SAVE && k !== AVK.MAP));
-    if (this.state === 'fight') {
-      this.ticks++;
-      if (!fs.bossAlive) { this.beaten++; this.state = 'clear'; this.wait = 60; }
-    } else if (this.state === 'clear' && --this.wait <= 0) this.next();
+    super.update(presses);
   }
 
   draw(): void {
@@ -175,7 +74,7 @@ export class SandboxScene implements Scene {
       : `보스 러시 ${Math.min(this.stage + 1, this.stages.length)} / ${this.stages.length} · ${ticksText(this.ticks)}${this.state === 'clear' ? ' · 격파!' : ''}`;
     // a replay is all dialogue (the box covers the bottom 89 px): the label goes to the top; the rush keeps it low
     u.view('sandboxBar', (W >> 1) - 90, this.mode === 'replay' ? 4 : H - 48, 180, 14, h('div.sb-bar', null, label));
-    if (this.log) this.log.draw(u, this.ctx.input);
+    if (this.log) drawBacklog(u, this.log, this.ctx.input);
     u.end();
     if (this.overlays.size) { this.ctx.ui13.begin(); this.overlays.draw(popupPaint(this.ctx)); this.ctx.ui13.end(); }
     this.ctx.compositor.show();

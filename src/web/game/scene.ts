@@ -8,6 +8,7 @@ import type { DomUi } from '../render/domUi';
 import type { Sound } from '../audio';
 import type { PowerProfile } from '../power';
 import type { Options } from '../../core/save/options';
+import type { Screens } from '../../core/scenes/host';
 
 export interface GameContext {
   assets: WebAssets;
@@ -29,6 +30,8 @@ export interface GameContext {
   applyOptions(): void;
   /** switch to another scene */
   go(scene: Scene): void;
+  /** the screens the core flow goes to (core/scenes/host.ts), each a scene made here (screens.ts WebScreens) */
+  readonly screens: Screens;
 }
 
 export interface Scene {

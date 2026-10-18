@@ -13,7 +13,7 @@ import { VIEW_H, VIEW_W } from './render/field';
 import { Input } from './input/input';
 import { newGame } from '../core/save/save';
 import type { GameContext, Scene } from './game/scene';
-import { CharSelectScene, LogoScene, MENU_CMFS, MENU_IMAGES, PlayScene, SlotScene, TitleScene } from './game/screens';
+import { CharSelectScene, LogoScene, MENU_CMFS, MENU_IMAGES, PlayScene, SlotScene, TitleScene, WebScreens } from './game/screens';
 import { DataScene } from './game/dataScene';
 import { RankingScene } from './game/ranking';
 import { ReplayListScene } from './game/replay';
@@ -71,8 +71,10 @@ for (const l of [hud, ui, ui13]) l.onKeys = (keys, pointerType) => ctx.input.inj
 const audio = new GameAudio();
 const playBgm = audio.playBgm.bind(audio);
 audio.playBgm = (n) => { addHeard([n]); playBgm(n); };   // 음악감상 lists the tracks ever played
+let screens: WebScreens | undefined;
 const ctx: GameContext = {
   assets, renderer, compositor, ui, ui13, hud, cmfs, audio,
+  get screens() { return screens ??= new WebScreens(ctx); },
   power,
   options,
   applyOptions() {

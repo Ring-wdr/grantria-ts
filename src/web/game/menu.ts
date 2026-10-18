@@ -9,7 +9,7 @@ import { AVK } from '../input/input';
 import { QUICK_KEYS } from '../../core/keys';
 import { expNeed } from '../../core/rules/rules';
 import { titleEffectText } from '../../core/rules/achievements';
-import { rankScore } from './ranking';
+import { rankScore } from '../../core/scenes/ranking';
 import { cellView } from './tabs';
 import type { GameContext } from './scene';
 import { EquipTab, InventoryTab } from './tabs';

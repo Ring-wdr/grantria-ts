@@ -36,7 +36,8 @@ export function itemPrice(a: Assets, it: Item): number {
   if (t === 0x18) return 200;
   return 10;
 }
-export function priceOf(a: Assets, it: Item): number { return it.price ?? (it.price = itemPrice(a, it)); }
+/** stored price, priced on first use; 0 is unpriced too (web items exported to the original file before 0.2.3 came back as 0) */
+export function priceOf(a: Assets, it: Item): number { return it.price || (it.price = itemPrice(a, it)); }
 
 /** shop region r = zone + (map == 0x9B) */
 export function shopRegion(zone: number, map: number): number { return zone + (map === 0x9b ? 1 : 0); }

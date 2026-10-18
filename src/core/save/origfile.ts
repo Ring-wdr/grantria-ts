@@ -82,13 +82,13 @@ function parseItem(b: Uint8Array, o: number): Item | null {
     name: decodeText('euc-kr', raw.subarray(0, end < 0 ? raw.length : end)), uid: dv.getUint32(o, true),
   } as Item;
 }
-function putItem(b: Uint8Array, o: number, it: Item | null | undefined, ticks: number): void {
+function putItem(b: Uint8Array, o: number, it: Item | null | undefined, ticks: number, price: (it: Item) => number): void {
   const dv = new DataView(b.buffer, b.byteOffset);
   b.fill(0, o, o + ITEM);
   if (!it) { b[o + 8] = b[o + 9] = 0xff; b[o + 0x10] = 0xff; b.fill(0xff, o + 0x15, o + 0x1b); for (let k = 0; k < 12; k++) b[o + 0x1b + 2 * k] = 0xff; return; }
   const uid = (it as Item & { uid?: number }).uid ?? (((ticks << 8) | (o & 0xff)) >>> 0);
   dv.setUint32(o, uid >>> 0, true); dv.setUint16(o + 4, it.base & 0xffff, true); dv.setUint16(o + 6, it.icon & 0xffff, true);
-  dv.setUint16(o + 8, ~it.count & 0xffff, true); dv.setUint16(o + 0x0a, (it.price ?? 0) & 0xffff, true); dv.setUint16(o + 0x0c, it.enh & 0xffff, true);
+  dv.setUint16(o + 8, ~it.count & 0xffff, true); dv.setUint16(o + 0x0a, price(it) & 0xffff, true); dv.setUint16(o + 0x0c, it.enh & 0xffff, true);
   b[o + 0x0e] = it.level; b[o + 0x0f] = it.reqLevel; b[o + 0x10] = it.type; b[o + 0x11] = it.sub; b[o + 0x12] = it.grade; b[o + 0x14] = it.aux ?? 0;
   const s = [...(it.sockets ?? []), 0xff, 0xff, 0xff, 0xff, 0xff, 0xff].slice(0, 6);
   b.set(s, o + 0x15);
@@ -147,16 +147,17 @@ export function parseSlot(b: Uint8Array, gd: Partial<OrigAccount> | null, slot: 
 /** items a slot loses on export to the original file (past its 80 slots) */
 export function origOverflow(d: SaveData): number { return Math.max(0, (d.inv?.items.length ?? 0) - 80); }
 
-/** web SaveData -> plaintext slot (over the imported bytes when present), member number and checksum */
-export function buildSlot(d: SaveData & { orig?: SlotOrig }, member: bigint): Uint8Array {
+/** web SaveData -> plaintext slot (over the imported bytes when present), member number and checksum;
+ * price fills +0x0a for items the web never priced (the original sells at the stored price) */
+export function buildSlot(d: SaveData & { orig?: SlotOrig }, member: bigint, price: (it: Item) => number = (it) => it.price ?? 0): Uint8Array {
   const b = d.orig?.raw ? unb64(d.orig.raw) : new Uint8Array(SLOT_SIZE), dv = new DataView(b.buffer);
   const inv = d.inv ?? { items: [], equip: [null, null, null, null, null, null], quick: [], gold: d.gold, bags: 0 };
   const t = d.playTicks || 1;
   // the original buys 2 bags at most (80 slots): more bags (BAG_MAX) export as 2, and items past slot 80 are left out
   const bags = Math.min(2, inv.bags ?? 0), items = inv.items.slice(0, (bags + 3) * 16);
-  for (let i = 0; i < 100; i++) putItem(b, i * ITEM, items[i], t);
-  for (let k = 0; k < 6; k++) putItem(b, 0x23f0 + k * ITEM, inv.equip[k], t);
-  for (let k = 0; k < 17; k++) putItem(b, 0x2618 + k * ITEM, inv.keys ? inv.keys[k] ?? null : d.orig?.questItems?.[k] ?? null, t);   // key store
+  for (let i = 0; i < 100; i++) putItem(b, i * ITEM, items[i], t, price);
+  for (let k = 0; k < 6; k++) putItem(b, 0x23f0 + k * ITEM, inv.equip[k], t, price);
+  for (let k = 0; k < 17; k++) putItem(b, 0x2618 + k * ITEM, inv.keys ? inv.keys[k] ?? null : d.orig?.questItems?.[k] ?? null, t, price);   // key store
   for (let k = 0; k < 6; k++) {
     let q = inv.quick[k] ?? { kind: 0, id: 0, cd: 0, maxCd: 0, itemType: 0, itemSub: 0 };
     if (q.kind === 2 && q.id >= items.length) q = { kind: 0, id: 0, cd: 0, maxCd: 0, itemType: 0, itemSub: 0 };   // its item was left out

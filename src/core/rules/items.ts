@@ -4,6 +4,7 @@
 // quick slots (FUN_000379ac / FUN_000452a0). Counts are stored plainly (the original keeps ~u16).
 import type { Assets } from '../data/assets';
 import { idiv, type EquipTables, type Rng } from './rules';
+import { itemPrice } from './shopRules';
 
 export interface Item {
   type: number;          // 0xff = empty
@@ -19,7 +20,7 @@ export interface Item {
   sockets: number[];     // gem byte = grade*50 + sub, 0xff empty
   options: [number, number][];
   name: string;          // display name with colour code, fixed at creation
-  /** +0x0a price unit, computed at creation (FUN_0003967c); absent in older saves */
+  /** +0x0a price unit, computed at creation (FUN_0003967c); absent (or 0 after an old original export) in older saves */
   price?: number;
   /** 잠금 (not in the original, equipment only): kept out of 버리기 / 분해 / 판매 and the bulk orders; absent = unlocked.
    *  Saved with the item in the slot JSON; the original save.dat export drops it */
@@ -212,6 +213,7 @@ export class ItemDb {
     }
     it.reqLevel = this.itemLevel(type, sub);                                         // +0xf
     it.level = type === 0x19 ? this.itemLevel(sub >> 4, sub & 15) : it.reqLevel;    // +0xe: a recipe takes its product's level
+    it.price = itemPrice(this.a, it);                                                // +0x0a, kept through later enhancement / sockets
     it.icon = this.icon(type, sub);
     it.name = this.makeName(it, rng);
     return it;

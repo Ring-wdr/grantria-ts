@@ -87,3 +87,13 @@ test('more than the original 80 bag slots export as 2 bags, the rest left out', 
   assert.deepEqual([back.inv!.bags, back.inv!.items.length], [2, 80]);
   assert.equal(back.inv!.quick[0].kind, 0);                             // its item was past slot 80
 });
+
+test('items the web never priced export with their price, not 0', () => {
+  const item = (price?: number) => ({ type: 1, sub: 0, grade: 0, base: 29, icon: 11, count: 2, enh: 0, level: 1, reqLevel: 1, aux: 0,
+    sockets: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff], options: [] as [number, number][], name: '|b스태프', ...(price === undefined ? {} : { price }) });
+  const save = { version: 1 as const, cls: 1 as const, level: 1, exp: 0, gold: 0, stats: [1, 1, 1, 1], statPoints: 0, map: 10, x: 0, y: 0,
+    dir: 0 as const, hp: 1, mp: 1, playTicks: 1, savedAt: 0,
+    inv: { items: [item(), item(55)], equip: [item(), null, null, null, null, null], quick: [], gold: 0, bags: 0 } };
+  const back = parseSlot(buildSlot(save as never, 1n, (it) => it.price || 11), null, 0)!;
+  assert.deepEqual([back.inv!.items[0].price, back.inv!.items[1].price, back.inv!.equip[0]!.price], [11, 55, 11]);
+});

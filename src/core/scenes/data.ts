@@ -11,6 +11,8 @@ import { loadOptions, saveOptions } from '../save/options';
 import { SLOT_COUNT, loadSlot, saveSlot, type SaveData } from '../save/save';
 import type { SceneHost } from './host';
 import { decodeText } from '../runtime';
+import type { Assets } from '../data/assets';
+import { priceOf } from '../rules/shopRules';
 import { platform } from '../platform';
 
 const download = (name: string, data: Uint8Array | string, type = 'application/octet-stream') => platform().files.save(name, data, type);
@@ -54,11 +56,12 @@ export async function importOriginal(files: { name: string; bytes: Uint8Array }[
 }
 
 /** web data -> encrypted save.dat / gamedata.dat for member number m (suffix when m != 0) */
-export function exportOriginal(d8: (o: number) => number, m: bigint): { name: string; bytes: Uint8Array }[] {
+export function exportOriginal(a: Assets, m: bigint): { name: string; bytes: Uint8Array }[] {
+  const d8 = (o: number) => a.d8(o);
   const plain = new Uint8Array(SAVE_SIZE), slots = Array.from({ length: SLOT_COUNT }, (_, i) => loadSlot(i));
   slots.forEach((s, i) => {
     let b: Uint8Array;
-    if (s) b = buildSlot(s, m);
+    if (s) b = buildSlot(s, m, (it) => priceOf(a, it));
     else {
       b = new Uint8Array(SLOT_SIZE);
       new DataView(b.buffer).setBigInt64(0x3340, m, true);
@@ -66,8 +69,8 @@ export function exportOriginal(d8: (o: number) => number, m: bigint): { name: st
     }
     plain.set(b, i * SLOT_SIZE);
   });
-  const a = account(), book = a.book ?? slots.find((s) => s?.story?.book)?.story?.book ?? Array.from({ length: 40 }, () => null);
-  const gd = buildGamedata(a, d8, book as never, [0, 1, 2].map((i) => a.day?.[i] ?? slots[i]?.day ?? 0), m);
+  const acc = account(), book = acc.book ?? slots.find((s) => s?.story?.book)?.story?.book ?? Array.from({ length: 40 }, () => null);
+  const gd = buildGamedata(acc, d8, book as never, [0, 1, 2].map((i) => acc.day?.[i] ?? slots[i]?.day ?? 0), m);
   const sfx = m ? `.${m}` : '';
   let optRaw: string | undefined;
   optRaw = platform().storage.get('grantria.option.raw') ?? undefined;
@@ -116,7 +119,7 @@ export class DataLogic {
         const known = account().memberNo ?? '0';
         const input = await platform().prompt('회원번호 (원본 파일 이름의 숫자 접미사, 모르면 0)', known);
         if (input !== null && /^\d+$/.test(input.trim())) {
-          for (const f of exportOriginal((o) => this.ctx.assets.d8(o), BigInt(input.trim()))) await download(f.name, f.bytes);
+          for (const f of exportOriginal(this.ctx.assets, BigInt(input.trim()))) await download(f.name, f.bytes);
           // the original holds 80 bag slots: more bags (BAG_MAX) do not go into its file
           const lost = Array.from({ length: SLOT_COUNT }, (_, k) => loadSlot(k)).reduce((n, d) => n + (d ? origOverflow(d) : 0), 0);
           this.msg = lost ? `원본 세이브 파일을 내려받았습니다. 원본 가방(80칸)을 넘는 아이템 ${lost}개는 빠졌습니다.` : '원본 세이브 파일을 내려받았습니다.';

@@ -7,7 +7,7 @@ import { cfmt } from '../../core/data/skillDetail';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { BAG_COUNT, BAG_MAX, UNLOCK_1B, type Item } from '../../core/rules/items';
-import { Popup, openPopup } from './popup';
+import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { Rng } from '../../core/rules/rules';
 import { loadWarehouse, saveWarehouse } from '../../core/save/save';
@@ -122,7 +122,7 @@ export class CouponShop {
       ], { sel: i === this.sel, cls: 'mc-row', on: () => { if (this.sel === i) return [AVK.OK]; this.sel = i; } }))),
       h('div.v-box.v-note', null, gt(t[0x1bbd] ?? ''))));
   }
-  drawPopups(): void { this.overlays.draw(); }
+  drawPopups(): void { this.overlays.draw(popupPaint(this.ctx)); }
 }
 
 /**
@@ -255,7 +255,7 @@ class PremiumShop {
           sel: b === 1 || this.btn === b, glow: this.btn === b, on: () => [key],
         })))));
   }
-  drawPopups(): void { this.overlays.draw(); }
+  drawPopups(): void { this.overlays.draw(popupPaint(this.ctx)); }
 }
 
 /** State 0x29 (FUN_0002b774 / keys FUN_000442f4): the inventory grid FUN_00058890 over the own bag (mode 0)
@@ -446,7 +446,7 @@ class Storage {
           button(gt(t[0x19ed] ?? ''), { glow: false, on: () => [AVK.POUND] }),                     // 수 정
           button(gt('X'), { glow: false, on: () => [AVK.CLR] }))));
   }
-  drawPopups(): void { this.overlays.draw(); }
+  drawPopups(): void { this.overlays.draw(popupPaint(this.ctx)); }
 }
 
 /** gold pad digit keys (not AVK: the AVK digit codes double as arrows and quick-slot keys) */
@@ -548,5 +548,5 @@ export class CommunityTab {
     })), gt(t[!ok ? 0x1a24 : this.sel === 0 ? 0x1bbd : 0x157 + this.sel] ?? '')));
   }
   drawOverlay(_u: Ui): void { /* none */ }
-  drawPopups(): void { this.screen?.drawPopups(); this.overlays.draw(); }
+  drawPopups(): void { this.screen?.drawPopups(); this.overlays.draw(popupPaint(this.ctx)); }
 }

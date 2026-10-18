@@ -19,7 +19,7 @@ import { QuestTab } from './questTab';
 import { MapTab } from './mapTab';
 import { CommunityTab } from './community';
 import type { Ui } from '../render/ui';
-import { Popup, popupOverlay } from './popup';
+import { Popup, popupOverlay, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { button, cSprite, gt, h, menuList, padBadge, slot, sprite, win, type VChild, type VNode } from '../render/view';
 import { tabHint } from '../input/keyHints';
@@ -309,7 +309,7 @@ export class GameMenu {
   drawOverlay(): void {
     const u = this.ctx.ui13;
     if (this.inTab) this.drawTab(u); else this.drawRing(u);
-    this.overlays.draw();
+    this.overlays.draw(popupPaint(this.ctx));
   }
 
   private drawRing(u: Ui): void {

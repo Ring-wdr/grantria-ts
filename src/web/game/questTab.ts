@@ -3,7 +3,7 @@
 // location string are not drawn; the body (clip 7,57,204,120) is an HTML view clipped by CSS.
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { Popup, openPopup } from './popup';
+import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { untrackKey } from '../../core/rules/quests';
 import type { GameContext } from './scene';
@@ -132,7 +132,7 @@ export class QuestTab {
       this.drawDetail(u, d);
       u.pop();
     }
-    this.overlays.draw();
+    this.overlays.draw(popupPaint(this.ctx));
   }
 
   /**

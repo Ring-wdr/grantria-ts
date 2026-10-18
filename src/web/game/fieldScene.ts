@@ -20,11 +20,12 @@ import { genDarkStock } from '../../core/rules/shopRules';
 import type { Item } from '../../core/rules/items';
 import { BossProxy, EvActor } from '../../core/world/actors';
 import { pickGuide, type Guide } from '../../core/rules/guide';
-import { Dialogue, HoldSkip, drawDialogueButtons } from './dialogue';
+import { Dialogue, HoldSkip } from '../../core/ui/dialogue';
+import { drawDialogue, drawDialogueButtons } from './dialogue';
 import { backlog } from '../../core/ui/backlog';
 import { fxScale, optionFps } from '../../core/save/options';
 import { EventRunner } from './events';
-import { Popup, popupOverlay } from './popup';
+import { Popup, popupOverlay, popupPaint } from './popup';
 import { OverlayStack, type OpenOpts, type Overlay, type Role } from '../../core/ui/overlays';
 import { deepestAbyss, extraPaid, itemKinds, markExtraPaid, records, recordAbyss, recordBoss, recordItem } from '../../core/rules/records';
 import { dropMul, killMul } from '../../core/rules/dev';
@@ -2474,7 +2475,7 @@ export class FieldScene implements Scene {
     if (flashA > 0) { hud.alpha = flashA; hud.fill(0, 0, VIEW_W, VIEW_H, 0xffffff); hud.alpha = 32; }
     if (this.talk) {
       hud.hit(0, 0, VIEW_W, VIEW_H, () => [AVK.OK]);
-      this.talk.d.draw(hud, this.tick);
+      drawDialogue(hud, this.talk.d, this.tick);
       drawDialogueButtons(hud, !!this.ctx.options.auto, this.ctx.input);
     }
     this.drawPopup();
@@ -2513,7 +2514,7 @@ export class FieldScene implements Scene {
   private drawPopup(): void {
     if (!this.overlays.size) return;
     this.ctx.ui13.begin();
-    this.overlays.draw();
+    this.overlays.draw(popupPaint(this.ctx));
     this.ctx.ui13.end();
   }
 

@@ -5,7 +5,7 @@
 // coupons first, as the single decompose does (tabs.ts askCoupon).
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { Popup, openPopup } from './popup';
+import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { coupons } from './community';
 import { josa } from './shop';
@@ -167,5 +167,5 @@ export class BagTools {
         button(gt('취소'), { cls: 'tb-wide', sel: f === 1, on: () => { this.focus = 1; return [AVK.OK]; } })));
   }
 
-  drawPopup(): void { this.overlays.draw(); }
+  drawPopup(): void { this.overlays.draw(popupPaint(this.ctx)); }
 }

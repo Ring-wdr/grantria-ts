@@ -11,7 +11,10 @@ export type Role = 'yes' | 'no' | 'cancel';
 export interface Overlay {
   /** this tick's keys (only the top overlay gets them); returning a role closes it */
   handle(presses: number[]): Role | null | void;
-  draw(): void;
+  /** an overlay made by the host draws itself */
+  draw?(): void;
+  /** an overlay made by the game logic carries what the host draws instead (a Popup, a list's state) */
+  model?: unknown;
 }
 
 export interface Handlers {
@@ -97,9 +100,12 @@ export class OverlayStack {
     return true;
   }
 
-  /** draw bottom to top */
-  draw(): void {
-    for (const e of [...this.stack]) e.o.draw();
+  /** draw bottom to top: an overlay's own draw, else paint (the host's drawing of the overlay's model) */
+  draw(paint: (o: Overlay) => void): void {
+    for (const e of [...this.stack]) {
+      if (e.o.draw) e.o.draw();
+      else paint(e.o);
+    }
   }
 }
 

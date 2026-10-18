@@ -12,7 +12,7 @@ import '../styles/convenience.css';
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { BAG_COUNT, type Item } from '../../core/rules/items';
-import { Popup, openPopup, popupOverlay } from './popup';
+import { Popup, drawPopup, openPopup, popupOverlay, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { flowOverlay, type Step } from '../../core/ui/flow';
 import { quantityFlow, type QuantityEvent } from '../../core/ui/flows/quantityFlow';
@@ -132,7 +132,7 @@ export class ShopScreen {
   private run(id: number, f: () => void): void {
     const p = new Popup(this.ctx, id);
     let n = 0;
-    this.overlays.open({ handle: () => (++n > 0x13 ? 'yes' : null), draw: () => p.draw() }, { on: { yes: f } });
+    this.overlays.open({ handle: () => (++n > 0x13 ? 'yes' : null), draw: () => drawPopup(this.ctx, p) }, { on: { yes: f } });
   }
 
   /** inventory decompose: popup 0x12, no fee, result window, back to the inventory */
@@ -335,7 +335,7 @@ export class ShopScreen {
     const idx = this.idx, u = this.ctx.ui13;
     const message = (id: number) => (): Step<QuantityEvent> => {
       const p = new Popup(this.ctx, id);
-      return { handle: (k) => (p.handle(k) ? { type: 'ok' } : null), draw: () => p.draw() };
+      return { handle: (k) => (p.handle(k) ? { type: 'ok' } : null), draw: () => drawPopup(this.ctx, p) };
     };
     this.overlays.open(flowOverlay(quantityFlow, { held: buy ? Infinity : it.count, stack, tooManyBack: false }, {
       qty: () => ({ handle: (k) => this.qtyKeys(k, it), draw: () => u.view('shopQty', 0, 0, 480, 320, this.qtyView()) }),
@@ -343,7 +343,7 @@ export class ShopScreen {
       tooMany: message(0x58),
       confirm: (): Step<QuantityEvent> => {
         const p = new Popup(this.ctx, buy ? 0x0e : 0x0f, 0, () => josa(buy ? this.buyBody(it) : this.sellBody(it)));
-        return { handle: (k) => { const r = p.handle(k); return r === 'yes' ? { type: 'yes' } : r ? { type: 'no' } : null; }, draw: () => p.draw() };
+        return { handle: (k) => { const r = p.handle(k); return r === 'yes' ? { type: 'yes' } : r ? { type: 'no' } : null; }, draw: () => drawPopup(this.ctx, p) };
       },
     }), { on: { yes: () => (buy ? this.commitBuy(it) : this.commitSell(it, idx)), close: (r) => { if (r !== 'yes') this.qty = 0; } } });
   }
@@ -608,7 +608,7 @@ export class ShopScreen {
     u.closeButton(26);
     if (this.actionPopup) this.actionPopup.draw(u);
     if (this.result) u.view('shopResult', 0, 0, 480, 320, this.resultView());
-    this.overlays.draw();
+    this.overlays.draw(popupPaint(this.ctx));
   }
 
   // ---- view helpers ----

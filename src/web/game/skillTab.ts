@@ -4,7 +4,7 @@
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
-import { Popup, openPopup } from './popup';
+import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { account, traitCheck, traitCommit } from '../../core/rules/account';
 import { effectiveSkillLevel } from '../../core/rules/rules';
@@ -245,5 +245,5 @@ export class SkillTab {
 
   drawOverlay(): void { /* no absolute-coordinate overlays */ }
 
-  drawPopups(): void { this.overlays.draw(); }
+  drawPopups(): void { this.overlays.draw(popupPaint(this.ctx)); }
 }

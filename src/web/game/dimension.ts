@@ -1,7 +1,7 @@
 // 차원의 문 select / entry screen; the dungeon rules and the local floor generator are core/rules/dimension.ts.
 import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
-import { Popup, openPopup } from './popup';
+import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import type { GameContext } from './scene';
 import { consume, countOf } from '../../core/rules/shopRules';
@@ -98,5 +98,5 @@ export class DimensionScreen {
         sel: this.btn === b, cls: 'sm-wide', on: () => { if (this.btn === b) return [AVK.OK]; this.btn = b; },
       }))));
   }
-  drawPopups(): void { this.overlays.draw(); }
+  drawPopups(): void { this.overlays.draw(popupPaint(this.ctx)); }
 }

@@ -8,7 +8,7 @@ import type { FieldScene } from './fieldScene';
 import { AVK } from '../input/input';
 import { QUICK_KEYS, slotPickerKey } from '../../core/keys';
 import { BAG_COUNT, type Item } from '../../core/rules/items';
-import { Popup, QtyPopup, popupOverlay } from './popup';
+import { Popup, QtyPopup, drawPopup, drawQty, popupOverlay, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { flowOverlay, type Step } from '../../core/ui/flow';
 import { quantityFlow, type QuantityEvent } from '../../core/ui/flows/quantityFlow';
@@ -313,7 +313,7 @@ export class InventoryTab {
   /** DROP (FUN_0005e23c case 4): the quantity flow (flows/quantityFlow.ts) over popups 0x0C, 0x0D, 0x58 and 0xB */
   private dropItem(idx: number): void {
     const inv = this.fs.inv, it = inv.items[idx], stack = this.fs.db.stackable(it.type, it.sub) && it.type !== 0x18;
-    const qty = new QtyPopup(this.ctx, it.count);
+    const qty = new QtyPopup(it.count);
     const machine = quantityFlow.provide({ actions: { commit: (_, { n }) => {
       if (!stack) inv.remove(idx);
       else { if (it.count > n) it.count -= n; else inv.remove(idx); inv.remapQuick(); }
@@ -321,12 +321,12 @@ export class InventoryTab {
     } } });
     const popup = (id: number, answer: (r: 'yes' | 'no' | 'ok') => QuantityEvent) => (): Step<QuantityEvent> => {
       const p = new Popup(this.ctx, id);
-      return { handle: (k) => { const r = p.handle(k); return r && answer(r); }, draw: () => p.draw() };
+      return { handle: (k) => { const r = p.handle(k); return r && answer(r); }, draw: () => drawPopup(this.ctx, p) };
     };
     this.overlays.open(flowOverlay(machine, { held: it.count, stack, tooManyBack: true }, {
       qty: () => ({
         handle: (k): QuantityEvent | null => { const r = qty.handle(k); return r === 'cancel' ? { type: 'cancel' } : r === 'ok' ? { type: 'qty', n: qty.qty } : null; },
-        draw: () => qty.draw(),
+        draw: () => drawQty(this.ctx, qty),
       }),
       none: popup(0x0d, () => ({ type: 'ok' })),
       tooMany: popup(0x58, () => ({ type: 'ok' })),
@@ -563,7 +563,7 @@ export class InventoryTab {
   drawPopups(): void {
     if (this.shop) { this.shop.drawOverlay(); return; }
     this.tools?.drawPopup();
-    this.overlays.draw();
+    this.overlays.draw(popupPaint(this.ctx));
   }
 }
 
@@ -717,5 +717,5 @@ export class EquipTab {
     this.action?.draw(u);
   }
 
-  drawPopups(): void { this.overlays.draw(); }
+  drawPopups(): void { this.overlays.draw(popupPaint(this.ctx)); }
 }

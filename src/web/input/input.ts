@@ -5,7 +5,7 @@
 import { gamepadSupported, padKind, padKeysOf, readPad, type PadButton, type PadKind } from './gamepad';
 
 import { AVK } from '../../core/keys';
-import type { InputState, Stick } from '../../core/input';
+import type { InputDevice, InputState, Stick } from '../../core/input';
 import { KEYMAP, RESERVED_KB } from './bindings';
 import { platform } from '../../core/platform';
 export { AVK };
@@ -13,7 +13,7 @@ export { AVK };
 /** Virtual stick state: angle in degrees (0 = right, 90 = down), speed level 0 or 5..8. */
 export type { Stick };
 
-export type InputDevice = 'keyboard' | 'touch' | 'pad';
+export type { InputDevice };
 
 /** gamepad left stick: radial dead zone, then 4 bands -> speed level 5..8 like the touch stick */
 const PAD_DEAD = 0.3;

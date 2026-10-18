@@ -20,7 +20,6 @@ import { BossProxy, EvActor } from '../world/actors';
 import { pickGuide, type Guide } from '../rules/guide';
 import { Dialogue, HoldSkip } from '../ui/dialogue';
 import { backlog } from '../ui/backlog';
-import type { Options } from '../save/options';
 import { EventRunner } from './events';
 import { Popup, popupOverlay } from '../ui/popup';
 import { OverlayStack, type OpenOpts, type Overlay, type Role } from '../ui/overlays';
@@ -34,8 +33,7 @@ import { VIEW_H, VIEW_W } from '../render';
 import type { FieldMap } from '../world/fieldMap';
 import { HudFeed } from './hudFeed';
 import { AVK } from '../keys';
-import type { InputState } from '../input';
-import type { SoundOut } from '../sound';
+import type { Host } from '../host';
 import { platform } from '../platform';
 import { Inventory, ItemDb } from '../rules/items';
 import { groundBox, rollBossDrops, rollDrop, updateGround, type GroundItem } from '../rules/drops';
@@ -51,12 +49,7 @@ import type { SaveData } from '../save/save';
 const A2S = [0, 3, 6, 1, 4, 7, 2, 5, 8];
 
 /** what the field logic needs from its host: game data, options, the tick's input and the sound */
-export interface FieldHost {
-  readonly assets: Assets;
-  readonly options: Options;
-  readonly input: InputState;
-  readonly audio: SoundOut;
-}
+export type FieldHost = Host;
 
 /** actor ids below this are monsters, the rest NPCs (assets-data.md) */
 const FIRST_NPC = 43;

@@ -13,8 +13,12 @@ export interface Stick {
   dy: number;
 }
 
+/** the device used last: on-screen hints and the menu ring follow it */
+export type InputDevice = 'keyboard' | 'touch' | 'pad';
+
 export interface InputState {
   readonly stick: Stick;
+  readonly device: InputDevice;
   isHeld(k: number): boolean;
   /** the direction key to act on this tick, or 0 */
   direction(): number;

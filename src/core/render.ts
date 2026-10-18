@@ -16,6 +16,14 @@ export function equipLook(equip: readonly ({ sub: number } | null | undefined)[]
   return { w: look(0), h: look(1), a: look(2), p: look(3) };
 }
 
+/** scroll position of a scrolling list or text, owned by the game state: keys move y, the renderer clamps it to the
+ *  content (and wheel / touch scrolling write it back) */
+export interface ScrollRef {
+  y: number;
+  /** child index to bring into view when it changes (a key moved the cursor); touch scrolling stays free otherwise */
+  follow?: number;
+}
+
 /** per-sprite tint / fade */
 export interface SpriteFx {
   /** RGB tint mixed in by amount / 32 */

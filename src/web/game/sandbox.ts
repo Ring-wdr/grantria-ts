@@ -15,7 +15,7 @@ import { Popup, openPopup, popupPaint } from './popup';
 import { OverlayStack } from '../../core/ui/overlays';
 import { countReplay, recordRush } from '../../core/rules/records';
 import { saveOptions } from '../../core/save/options';
-import { rushBosses, ticksText } from './archive';
+import { rushBosses, ticksText } from '../../core/menu/archive';
 import { h } from '../render/view';
 import { BacklogView } from './backlog';
 import { replayLog } from '../../core/ui/backlog';

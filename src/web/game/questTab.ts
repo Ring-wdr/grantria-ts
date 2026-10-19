@@ -40,7 +40,7 @@ export class QuestTab extends QuestTabLogic {
   draw(u: Ui): void {
     if (this.detail) return;                       // the detail window replaces the list
     const active = this.fs.story.active, t = this.ctx.assets.text, sdb = this.fs.sdb;
-    const rows = Array.from({ length: 6 }, (_, i) => {
+    const rows = Array.from({ length: Math.max(6, active.length) }, (_, i) => {
       const a = active[i], main = !!a && sdb.mainQuest(a.q);
       return button(a
         ? [main && h('span.qs-tag', null, t[0x28] ?? 'MAIN'), gt(t[0x514 + a.q] ?? '', { cls: 'qs-title', pen: main ? YELLOW : undefined })]

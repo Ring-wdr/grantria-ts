@@ -45,6 +45,13 @@ export class StoryDb {
     return { time: this.s16(o), cmd: this.s16(o + 2), arg: this.s16(o + 4) };
   }
 
+  /** the quest accept (0x13) / complete (0x14) records of an event script */
+  questCmds(e: number): EventRec[] {
+    const [s, end] = this.range(e), out: EventRec[] = [];
+    for (let i = s; i < end; i++) { const r = this.rec(e, i); if (r.cmd === 0x13 || r.cmd === 0x14) out.push(r); }
+    return out;
+  }
+
   /** NPC default lines per story stage (0 = reuse the previous stage) */
   npcLine(id: number, stage: number): number {
     let k = 3 * (id - 43) + stage;

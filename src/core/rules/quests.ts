@@ -4,7 +4,7 @@
 // rewards follow hardmode.md §4.3 (gold level × 100, EXP table .rodata 0x100818 × level).
 import type { Inventory } from './items';
 import type { Rng } from './rules';
-import { NO_ID, QUEST_COUNT, type Story, type StoryDb } from '../data/story';
+import { EVENT_COUNT, NO_ID, QUEST_COUNT, type Story, type StoryDb } from '../data/story';
 
 /** hard-mode quest EXP per level for quests 0x4f..0x97 (.rodata 0x100818); others 300 */
 const HARD_EXP = [400,300,300,300,300,300,300,300,300,300,300,300,300,300,300,400,300,300,300,300,300,300,400,400,400,400,400,400,300,300,400,300,400,400,400,500,500,400,500,400,500,500,400,400,500,600,600,600,600,700,600,600,600,500,400,400,500,500,800,900,300,500,500,900,900,800,700,700,800,800,900,1000,1000];
@@ -31,7 +31,10 @@ function reportsTo(q: number, report: number, npcId: number): boolean {
 }
 
 export class QuestLog {
-  constructor(private db: StoryDb, private story: Story, private host: QuestHost) {}
+  private readonly db: StoryDb;
+  private readonly story: Story;
+  private readonly host: QuestHost;
+  constructor(db: StoryDb, story: Story, host: QuestHost) { this.db = db; this.story = story; this.host = host; }
 
   name(q: number): string { return this.db.a.text[1300 + q] ?? ''; }
 
@@ -52,10 +55,15 @@ export class QuestLog {
     return this.host.inv.items.filter((it) => it && it.type === type && it.sub === sub && it.grade === 0).reduce((n, it) => n + (it!.count || 1), 0);
   }
 
-  /** returns false (with a popup) when the quest cannot be taken */
+  /** repairEventChain: no popups or sounds */
+  private quiet = false;
+
+  /** returns false (with a popup) when the quest cannot be taken. The six-slot cap holds side quests only (the
+   *  original refused main quests too: an event's accept with six side quests taken was lost with the event, and
+   *  the story stopped there), so a main quest can be the seventh. */
   accept(q: number): boolean {
     const { story, db, host } = this;
-    if (story.active.length >= 6) { host.questPopup(0x24, q); return false; }
+    if (story.active.length >= 6 && !db.mainQuest(q)) { host.questPopup(0x24, q); return false; }
     const Q = db.quests[q];
     if (story.qs[q] !== 1 || (Q.prereq !== NO_ID && story.qs[Q.prereq] <= 3)) { host.questPopup(0x1d, q); return false; }
     const a = { q, cnt: 0, pct: 0 };
@@ -70,8 +78,7 @@ export class QuestLog {
       if (Q.acceptItem < 100) host.inv.gain(0x1a, Q.acceptItem, 0, 1, host.rng);
       else host.inv.gain(0x1d, Q.acceptItem - 100, 0, 1, host.rng);
     }
-    host.questPopup(0x1e, q);
-    host.sfx(0x2b);
+    if (!this.quiet) { host.questPopup(0x1e, q); host.sfx(0x2b); }
     story.qs[q] = a.pct < 100 ? 2 : 3;
     host.message((db.a.text[0x3bf] ?? '%s').replace('%s', this.name(q)));   // FUN_0001e6e8(0xc): "%s 시작"
     this.refresh();
@@ -112,7 +119,7 @@ export class QuestLog {
   complete(q: number): void {
     const { story, db, host } = this;
     const ev = host.eventId?.() ?? -1;                               // keys taken by these events before the state check
-    if (ev < 0 && story.qs[q] === 3) {                               // outside events: the reward must fit (FUN_0001c5cc, hard mode passes)
+    if (ev < 0 && !this.quiet && story.qs[q] === 3) {                // outside events: the reward must fit (FUN_0001c5cc, hard mode passes)
       const r = db.rewardOf(db.quests[q]);
       if (r && !(host.hard?.() ?? false) && r.type !== 0x1c && host.inv.items.length >= host.inv.cap && !host.inv.canGain(r.type, r.sub, 0, Math.max(1, r.count))) {
         host.message(db.a.text[0x3cc] ?? '');                        // FUN_0001e6e8(0x19); the quest stays reportable
@@ -134,7 +141,7 @@ export class QuestLog {
         if (it) { if (it.type > 0x0f && (it.count || 1) > c.count) it.count -= c.count; else host.inv.remove(i); }
       }
     }
-    host.questPopup(0x20, q);
+    if (!this.quiet) host.questPopup(0x20, q);
     story.qs[q] = 4;
     const r = db.rewardOf(Q);
     const hard = host.hard?.() ?? false, L = host.level?.() ?? 1;
@@ -148,6 +155,30 @@ export class QuestLog {
     story.active = story.active.filter((a) => a.q !== q);
     host.message((db.a.text[0x3c1] ?? '%s').replace('%s', this.name(q)));   // FUN_0001e6e8(0xe): "%s 종료"
     this.refresh();
+  }
+
+  /** saves stuck before main quests passed the cap: a main quest only events give (giver 0), still "available"
+   *  after an event that takes it ran, is taken now, and completed when an event that completes it ran too; on
+   *  down the chain. Returns the quests taken. */
+  repairEventChain(isDone: (e: number) => boolean): number[] {
+    const { story, db } = this, took: number[] = [];
+    const acc = new Set<number>(), cmp = new Set<number>();
+    for (let e = 0; e < EVENT_COUNT; e++) {
+      if (!isDone(e)) continue;
+      for (const r of db.questCmds(e)) (r.cmd === 0x13 ? acc : cmp).add(r.arg);
+    }
+    this.quiet = true;
+    try {
+      for (let again = true; again;) {
+        again = false;
+        for (let q = 0; q < QUEST_COUNT; q++) {
+          if (!db.mainQuest(q) || db.quests[q].giver !== 0) continue;
+          if (story.qs[q] === 1 && acc.has(q) && !story.active.some((a) => a.q === q) && this.accept(q)) { took.push(q); again = true; }
+          if (story.qs[q] === 3 && cmp.has(q) && took.includes(q)) { this.complete(q); again = true; }
+        }
+      }
+    } finally { this.quiet = false; }
+    return took;
   }
 
   /** FUN_0001c46c (errand completion, abandon): the key whose sub equals the accept item goes */

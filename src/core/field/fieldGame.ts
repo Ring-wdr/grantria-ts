@@ -366,6 +366,8 @@ export class FieldGame {
     if (fresh) await this.enterMap(OPENING_MAP[save.cls]);
     else await this.enterMap(save.map, save.x < 0 ? undefined : save.x, save.y < 0 ? undefined : save.y);
     this.quests.refresh();
+    // saves where an event's main quest accept was refused (six side quests taken) and the story stopped there
+    if (!sandbox) this.quests.repairEventChain((e) => this.story.isDone(e));
     // new game or an unfinished opening: start the class's first event (classes 1/2 set flag 0 first)
     const first = OPENING[save.cls];
     if (!this.story.isDone(first)) {

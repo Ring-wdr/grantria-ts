@@ -42,9 +42,10 @@ export class QuestTabLogic {
       }
       return true;
     }
+    const rows = Math.max(6, active.length);           // a main quest can be the seventh
     for (const k of presses) {
-      if (k === AVK.UP) this.sel = (this.sel + 5) % 6;
-      else if (k === AVK.DOWN) this.sel = (this.sel + 1) % 6;
+      if (k === AVK.UP) this.sel = (this.sel + rows - 1) % rows;
+      else if (k === AVK.DOWN) this.sel = (this.sel + 1) % rows;
       else if (k === AVK.OK) { const a = active[this.sel]; if (a) this.detail = { q: a.q, scroll: { y: 0 }, focus: 0 }; }
       else return false;
     }

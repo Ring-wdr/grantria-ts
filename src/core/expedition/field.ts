@@ -57,7 +57,9 @@ export function moveInput(inp: InputState): { angle: number; amount: number } {
 export class Ground {
   readonly W: number;
   readonly H: number;
-  constructor(readonly zone: Zone) {
+  readonly zone: Zone;
+  constructor(zone: Zone) {
+    this.zone = zone;
     this.W = zone.map.header.width;
     this.H = zone.map.header.height;
   }
@@ -190,6 +192,10 @@ export class FieldEnemy {
   wx = 0;
   wy = 0;
   lungeA = 0;
+  /** attacks made (the boss pounces every third) */
+  attacks = 0;
+  /** this attack is the boss's pounce */
+  pounce = false;
   flashT = 0;
   /** seconds the sprite's current animation has run */
   animT = 0;
@@ -217,6 +223,9 @@ export class FieldEnemy {
   get stunned(): boolean { return this.state === 'stunned'; }
   get killable(): boolean { return this.sp.tier === 'weak' && !this.sp.field.noKill; }
   get radius(): number { return this.sp.field.radius; }
+  /** this attack's windup and lunge (a pounce winds up longer and leaps further) */
+  get windupT(): number { return this.sp.field.windup * (this.pounce ? 1.7 : 1); }
+  get lungeT(): number { return LUNGE_T * (this.sp.tier === 'boss' ? (this.pounce ? 1.8 : 1.3) : 1); }
 
   set(s: EState): void {
     this.state = s;
@@ -263,18 +272,21 @@ export class FieldEnemy {
       case 'chase':
         this.turnTo(toH, 8, dt);
         if (dist > reach * 0.85) speed = f.speed;
-        if (dist < reach && this.t > 0.4 && sim.controls) this.set('windup');
-        if (Math.hypot(this.x - this.homeX, this.y - this.homeY) > 420 || dist > f.detect * 2.4) this.set('return');
+        if (dist < reach * (this.sp.tier === 'boss' ? 2.2 : 1) && this.t > 0.4 && sim.controls) {
+          this.pounce = this.sp.tier === 'boss' && ++this.attacks % 3 === 0;
+          this.set('windup');
+        }
+        if (this.sp.tier !== 'boss' && (Math.hypot(this.x - this.homeX, this.y - this.homeY) > 420 || dist > f.detect * 2.4)) this.set('return');
         break;
       case 'windup':
-        if (this.t < f.windup * 0.7) this.turnTo(toH, 6, dt);
-        if (this.t >= f.windup) { this.lungeA = this.angle; this.set('lunge'); sim.emit({ kind: 'sfx', id: 29 }); }
+        if (this.t < this.windupT * 0.7) this.turnTo(toH, 6, dt);
+        if (this.t >= this.windupT) { this.lungeA = this.angle; this.set('lunge'); sim.emit({ kind: 'sfx', id: this.pounce ? 40 : 29 }); }
         break;
       case 'lunge': {
-        const k = this.t / LUNGE_T, d = 230 * (1 - k * 0.6) * dt;
+        const k = this.t / this.lungeT, d = (this.pounce ? 330 : 230) * (1 - k * 0.6) * dt;
         sim.ground.move(this, Math.cos(this.lungeA) * d, Math.sin(this.lungeA) * d, this.radius * 0.8);
         if (dist < this.radius + HERO_RADIUS + 5 && h.invuln <= 0 && sim.controls) { sim.lungeHits(this); return; }
-        if (this.t >= LUNGE_T) this.set('recover');
+        if (this.t >= this.lungeT) this.set('recover');
         break;
       }
       case 'recover':
@@ -334,7 +346,7 @@ export class FieldEnemy {
     const rec = cmf.anims[animRec(this.sp, base, this.dir, this.lastV)] ?? cmf.anims[0];
     let k: number;
     if (st === 'windup') k = 0;
-    else if (st === 'lunge') k = Math.min(rec.n - 1, 1 + Math.floor((this.t / LUNGE_T) * (rec.n - 1)));
+    else if (st === 'lunge') k = Math.min(rec.n - 1, 1 + Math.floor((this.t / this.lungeT) * (rec.n - 1)));
     else if (st === 'recover') k = rec.n - 1;
     else if (st === 'stunned' || st === 'dead') k = 0;
     else k = Math.floor(this.animT * 10) % rec.n;
@@ -499,7 +511,7 @@ export class FieldSim {
     const h = this.hero;
     const e = this.enemies.find((x) => x.stunned && x.alive && Math.hypot(x.x - h.x, x.y - h.y) < 44);
     if (e) { this.startBattle(e, 'party'); return; }
-    if (this.nearExit()) this.emit({ kind: 'exit' });
+    if (this.nearExit() && this.zone.kind !== 'boss') this.emit({ kind: 'exit' });
   }
 
   nearExit(): boolean {
@@ -511,7 +523,7 @@ export class FieldSim {
   actHint(): string | null {
     const h = this.hero;
     if (this.enemies.some((x) => x.stunned && x.alive && Math.hypot(x.x - h.x, x.y - h.y) < 44)) return '선제 공격';
-    if (this.nearExit()) return this.zone.kind === 'boss' ? '' : '다음 지역으로';
+    if (this.nearExit() && this.zone.kind !== 'boss') return '다음 지역으로';
     return null;
   }
 

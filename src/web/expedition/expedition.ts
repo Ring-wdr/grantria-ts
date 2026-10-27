@@ -124,12 +124,11 @@ export class ExpeditionScene extends ExpeditionLogic {
       hud.end();
       return;
     }
-    if (this.mode === 'over') {
+    if (this.mode === 'over' || this.mode === 'clear') {
       this.ctx.compositor.clear();
       this.ctx.compositor.show();
       u.begin();
-      u.view('ex-over', 0, 0, 480, 320, h('div.v-fill.v-col.ex-screen', null, h('div.ex-title', null, '원정 실패'),
-        h('div.ex-sub', null, '파티가 쓰러졌다. 원정은 여기서 끝난다.'), h('div.ex-item.sel', { on: () => [AVK.OK] }, '타이틀로')));
+      u.view('ex-over', 0, 0, 480, 320, this.resultTree());
       u.end();
       hud.begin(); hud.end();
       return;
@@ -141,6 +140,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     this.drawFieldUi();
     this.drawHud();
     if (this.mode === 'encounter') this.drawBanner();
+    if (this.mode === 'reward') this.drawReward();
     if (this.mode === 'pause') this.drawPause();
     u.end();
     this.drawTouch();
@@ -159,7 +159,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     const { frame, mirror } = e.look(cmf);
     const fx = e.state === 'dead' ? { alpha: Math.max(0, Math.round(32 - e.t * 46)) }
       : e.flashT > 0 ? { tint: [255, 255, 255] as [number, number, number], amount: 22 }
-      : e.state === 'windup' ? { tint: [255, 60, 40] as [number, number, number], amount: Math.round(3 + 6 * Math.min(1, e.t / e.sp.field.windup)) }
+      : e.state === 'windup' ? { tint: [255, 60, 40] as [number, number, number], amount: Math.round(3 + 6 * Math.min(1, e.t / e.windupT)) }
       : e.stunned ? { tint: [255, 230, 90] as [number, number, number], amount: 8 } : undefined;
     return { cmfName: name, cmf, frame, x: Math.round(e.x), y: Math.round(e.y), mirror, shadow: true, fx };
   }
@@ -177,7 +177,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     const f = this.field!, hud = this.ctx.hud, ox = Math.round(f.camX), oy = Math.round(f.camY);
     for (const e of f.enemies) {
       if (e.state !== 'windup' || e.removed) continue;
-      const k = Math.min(1, e.t / e.sp.field.windup), r = e.radius + 28;
+      const k = Math.min(1, e.t / e.windupT), r = e.radius + (e.pounce ? 60 : e.sp.tier === 'boss' ? 40 : 28);
       hud.el('ex-tele', e.x - ox - r, e.y - oy - r * 0.55, 2 * r, 1.1 * r, { key: `tele${e.id}`, vars: { '--k': k.toFixed(3) } });
     }
   }
@@ -218,7 +218,10 @@ export class ExpeditionScene extends ExpeditionLogic {
     const inp = this.ctx.input, f = this.field!;
     const left = f.enemies.filter((e) => e.alive).length;
     this.ctx.ui.view('ex-hud', 0, 0, 480, 320, h('div.v-fill.ex-hud', null,
-      h('div.v-row.ex-zone', null, h('span', null, '원정 · 초원 1'), h('span.ex-dim', null, `적 ${left}`), h('span.ex-dim', null, `Lv.${this.run.party[0].lv}`)),
+      h('div.v-col.ex-status', null,
+        h('div.v-row.ex-zone', null, h('span', null, this.zoneName), this.zone?.kind === 'battle' ? h('span.ex-dim', null, `적 ${left}`) : null, h('span.ex-dim', null, `회복약 ${this.run.potions}`)),
+        this.run.party.map((m) => h('div.v-row.ex-mem', null, h('span.ex-mname', null, `${m.name} Lv.${m.lv}`),
+          h('div.exb-bar.hp', null, h('div.exb-fill', { style: `width:${(100 * m.hp) / m.hpMax}%` })), h('span.ex-dim', null, `${m.hp}`)))),
       inp.device !== 'touch' ? h('div.v-row.ex-keys', null,
         this.hint(FK.LIGHT, '공격'), this.hint(FK.HEAVY, '강공격'), this.hint(FK.DODGE, '회피'), this.hint(FK.PARRY, '패링'), this.hint(AVK.CLR, '메뉴')) : null,
       h('div.v-col.ex-toasts', null, this.toasts.map((t) => h('div.ex-toast', { style: `opacity:${Math.min(1, (2.4 - t.t) * 2)}` }, t.text)))));
@@ -226,6 +229,32 @@ export class ExpeditionScene extends ExpeditionLogic {
 
   protected hint(key: number, label: string): VNode {
     return h('span.v-row.ex-hint', null, padBadge(this.ctx.input, key), h('span', null, label));
+  }
+
+  /** a battle zone left: its reward (a placeholder) and the heal */
+  private drawReward(): void {
+    this.ctx.ui.view('ex-reward', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
+      h('div.v-col.ex-menu.ex-result', null,
+        h('div.ex-menu-title', null, this.reward[0]),
+        this.reward.slice(1).map((l) => h('div.ex-line', null, l)),
+        h('div.v-row.ex-item.sel.ex-go', { on: () => [AVK.OK] }, padBadge(this.ctx.input, AVK.OK), `다음 지역으로 (${this.nextName()})`))));
+  }
+
+  private nextName(): string {
+    const k = this.plan[this.step + 1];
+    return k === 'rest' ? '쉼터' : k === 'boss' ? '깊숙한 곳' : '초원';
+  }
+
+  /** the run's end: cleared or wiped out */
+  private resultTree(): VNode {
+    const r = this.run, clear = this.mode === 'clear';
+    return h('div.v-fill.v-col.ex-screen', null,
+      h('div.ex-title', null, clear ? '1스테이지 돌파!' : '원정 실패'),
+      h('div.ex-sub', null, clear ? '초원의 왕을 쓰러뜨렸다. (이후 스테이지는 준비 중)' : '파티가 쓰러졌다. 원정은 여기서 끝난다.'),
+      h('div.v-col.ex-stats', null,
+        h('div', null, `돌파한 지역 ${r.cleared} / 3`), h('div', null, `쓰러뜨린 적 ${r.kills}`), h('div', null, `패링 ${r.parries}회`), h('div', null, `영입 ${r.recruits}`),
+        r.party.map((m) => h('div.ex-dim', null, `${m.name} Lv.${m.lv}`))),
+      h('div.v-row.ex-item.sel.ex-go', { on: () => [AVK.OK] }, padBadge(this.ctx.input, AVK.OK), '타이틀로'));
   }
 
   private drawBanner(): void {

@@ -1,7 +1,10 @@
 // 원정(가제) (not in the original): a standalone roguelike extra mode, reached from the title's 엑스트라 submenu.
 // It stands apart from main play: no save slot (a run lives in memory only), and nothing here imports the field game,
-// combat, rules or saves (tests/boundary.test.ts). The run: battle zones on t3 with the hero walking 360° and fighting
-// in the field; an encounter becomes a turn battle.
+// combat, rules or saves (tests/boundary.test.ts). The run (stage 1): three battle zones on t3, one after another,
+// with a rest zone between them half the time and always one before the boss room (초원 - 깊숙한곳, m124). The hero
+// walks 360° and fights in the field; an encounter becomes a turn battle. Leaving a battle zone by its exit stone shows
+// the reward (a placeholder until the reward system is decided) and heals 30%; a rest zone heals fully. Beating the
+// boss clears the stage; a party wipe ends the run. Either way it is back to the title: nothing is kept.
 // State and keys; the host draws it (web/expedition/expedition.ts) and steps it every animation frame (frame()).
 // Plain fields, no constructor parameter properties: node's type stripping loads core/ in tests.
 import { AVK } from '../keys';
@@ -12,8 +15,9 @@ import { FieldSim, type Advantage, type FieldEnemy, type Press } from './field';
 import { Battle } from './battle';
 import { Run, recruit } from './run';
 import { Talk } from './talk';
-import { FIELD_SPECIES } from './species';
-import { buildField, zoneSets, type Zone, type ZoneSets } from './zone';
+import { BOSS_SPECIES, FIELD_SPECIES } from './species';
+import { Rng } from './rng';
+import { buildBoss, buildField, zoneSets, type Zone, type ZoneKind, type ZoneSets } from './zone';
 
 /** what the mode needs from its host: the game data, the input, the sound and the way back to the title */
 export interface ExpeditionHost {
@@ -23,7 +27,22 @@ export interface ExpeditionHost {
   readonly screens: { title(): void };
 }
 
-export type Mode = 'loading' | 'field' | 'pause' | 'encounter' | 'battle' | 'over';
+export type Mode = 'loading' | 'field' | 'pause' | 'encounter' | 'battle' | 'reward' | 'over' | 'clear';
+
+/** the zone heal on leaving a battle zone */
+export const EXIT_HEAL = 0.3;
+export const BATTLE_ZONES = 3;
+
+/** a stage-1 plan: battle zones in order, a rest zone between them about half the time, always one before the boss */
+export function stagePlan(seed: number): ZoneKind[] {
+  const rng = new Rng(seed ^ 0x9e3779b9), plan: ZoneKind[] = [];
+  for (let i = 0; i < BATTLE_ZONES; i++) {
+    plan.push('battle');
+    if (i < BATTLE_ZONES - 1 && rng.chance(0.5)) plan.push('rest');
+  }
+  plan.push('rest', 'boss');
+  return plan;
+}
 
 /** the pause menu rows */
 export const PAUSE_ITEMS = ['계속하기', '원정 포기 (타이틀로)'] as const;
@@ -52,22 +71,58 @@ export class ExpeditionLogic {
   flashes: Flash[] = [];
   /** the encounter being opened: its banner shows this long before the battle */
   encounter: { enemies: FieldEnemy[]; advantage: Advantage; t: number } | null = null;
+  /** the zones of this run and the one being played */
+  readonly plan: ZoneKind[];
+  step = 0;
+  /** the reward screen's lines */
+  reward: string[] = [];
 
   constructor(ctx: ExpeditionHost, seed = Date.now() >>> 0) {
     this.ctx = ctx;
     this.seed = seed;
+    this.plan = stagePlan(seed);
     void this.enterZone();
   }
 
-  /** build the next zone and put the hero at its start (the host prepares its drawing in onZone) */
+  /** the number of the battle zone being played (1..), or 0 */
+  get battleNo(): number { return this.plan.slice(0, this.step + 1).filter((k) => k === 'battle').length; }
+
+  /** what the HUD calls the zone */
+  get zoneName(): string {
+    const k = this.plan[this.step];
+    return k === 'battle' ? `초원 ${this.battleNo} / ${BATTLE_ZONES}` : k === 'rest' ? '쉼터' : '초원 - 깊숙한곳';
+  }
+
+  /** build the zone of this step and put the hero at its start (the host prepares its drawing in onZone) */
   protected async enterZone(): Promise<void> {
     this.mode = 'loading';
-    this.sets ??= await zoneSets(this.ctx.assets);
-    const zone = await buildField(this.ctx.assets, this.sets, this.seed, 'battle', { w: 190, h: 160, groups: 14, species: FIELD_SPECIES });
+    const a = this.ctx.assets, kind = this.plan[this.step], seed = (this.seed + this.step * 7919) >>> 0;
+    this.sets ??= await zoneSets(a);
+    const zone = kind === 'boss' ? await buildBoss(a, this.sets, BOSS_SPECIES)
+      : kind === 'rest' ? await buildField(a, this.sets, seed, 'rest', { w: 60, h: 44, groups: 0, species: [] })
+      : await buildField(a, this.sets, seed, 'battle', { w: 190, h: 160, groups: 10 + this.battleNo * 2, species: FIELD_SPECIES });
     await this.onZone(zone);
     this.zone = zone;
-    this.field = new FieldSim(zone, this.seed ^ 0x5bd1e995);
+    this.field = new FieldSim(zone, seed ^ 0x5bd1e995);
     this.mode = 'field';
+    this.toasts = [];
+    if (kind === 'rest') { this.run.heal(1); this.toast('쉼터: 파티가 모두 회복했다'); this.toast('출구의 돌에서 상호작용으로 다음 지역으로'); }
+    else if (kind === 'boss') this.toast('깊은 곳에서 무언가가 노려보고 있다...');
+    else this.toast(`${this.zoneName} · 동쪽 끝의 돌이 출구다`);
+  }
+
+  /** the exit stone: a battle zone gives its reward first, a rest zone goes straight on */
+  private leaveZone(): void {
+    if (this.plan[this.step] === 'battle') {
+      this.run.cleared++;
+      this.run.heal(EXIT_HEAL);
+      this.run.potions++;
+      this.reward = [`${this.zoneName} 돌파!`, `파티 HP ${EXIT_HEAL * 100}% 회복`, '회복약 +1', '보상 선택: 준비 중 (보상 체계는 회의 후 결정)'];
+      this.mode = 'reward';
+      return;
+    }
+    this.step++;
+    void this.enterZone();
   }
 
   /** the host loads what the zone draws with before it shows */
@@ -87,7 +142,8 @@ export class ExpeditionLogic {
     for (const f of this.flashes) f.t += dt;
     this.flashes = this.flashes.filter((f) => f.t < 0.5);
     if (this.mode === 'pause') { this.pauseKeys(keys); return; }
-    if (this.mode === 'over') { if (keys.includes(AVK.OK) || keys.includes(AVK.CLR)) this.ctx.screens.title(); return; }
+    if (this.mode === 'over' || this.mode === 'clear') { if (keys.includes(AVK.OK)) this.ctx.screens.title(); return; }
+    if (this.mode === 'reward') { if (keys.includes(AVK.OK)) { this.step++; void this.enterZone(); } return; }
     if (this.mode === 'battle') { this.battleFrame(dt, presses, now, keys); return; }
     if (!this.field) return;
     if (this.mode === 'encounter') {
@@ -115,6 +171,7 @@ export class ExpeditionLogic {
           this.encounter = { enemies: e.enemies, advantage: e.advantage, t: 0 };
           this.mode = 'encounter';
           break;
+        case 'exit': this.leaveZone(); return;
         default: break;
       }
     }
@@ -176,6 +233,7 @@ export class ExpeditionLogic {
     if (b.phase === 'won') {
       this.run.kills += b.enemies.filter((e) => !e.gone).length;
       this.field!.resume(enc.enemies, []);
+      if (b.isBoss) { this.battle = null; this.encounter = null; this.mode = 'clear'; return; }
     } else {
       const gone = b.enemies.filter((e) => e.gone).map((e) => e.field!);
       this.field!.resume(gone, enc.enemies.filter((e) => !gone.includes(e)));

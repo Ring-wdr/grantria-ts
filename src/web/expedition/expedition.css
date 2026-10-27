@@ -121,3 +121,15 @@
 .ext-needle { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 3px #fff; }
 .ext-res { text-align: center; font-size: 12px; color: #ff8a7a; cursor: pointer; }
 .ext-res.ok { color: #7dff8a; }
+
+/* run flow: field status, reward, result */
+.ex-status { position: absolute; left: 8px; top: 6px; gap: 2px; }
+.ex-status .ex-zone { position: static; }
+.ex-mem { gap: 5px; align-items: center; font-size: 8px; color: #e6efff; text-shadow: 0 0 2px #000, 0 0 2px #000; padding-left: 2px; }
+.ex-mname { width: 74px; white-space: nowrap; }
+.ex-mem .exb-bar { width: 44px; }
+.ex-mem .exb-bar.hp .exb-fill { background: #5fd36a; }
+.ex-result { min-width: 230px; }
+.ex-line { font-size: 10px; color: #d8dde8; padding: 1px 6px; }
+.ex-stats { gap: 2px; align-items: center; font-size: 10px; color: #e6efff; margin: 6px 0; }
+.ex-go { gap: 5px; align-items: center; justify-content: center; }

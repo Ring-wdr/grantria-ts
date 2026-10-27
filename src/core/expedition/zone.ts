@@ -5,14 +5,18 @@
 // in it other than grass must sit in a run that repeats every k (so an edge crossed square gets longer, never doubled),
 // and where the seam steps sideways between rows only grass, or a row that repeats every k there, is sheared. Seams
 // prefer plain grass and land not repeated yet and lean towards a random line, so cliffs, shores, paths and objects
-// keep their neighbours and the open land between them grows. The t3 maps are dense, so a template mostly grows along
-// one axis (the templates here widen to ~180 columns; their height stays). The opened land then gets copies of small
-// islands of the t3 maps (a tree, a rock, a rise with a grass rim) and fresh grass variants. The way through runs from
-// the west end to the exit stone at the east end of the largest walkable region. The boss zone is 초원 - 깊숙한곳 (m124)
-// as it is.
+// keep their neighbours and the open land between them grows. The width grows first; then the height, whose seams may
+// also run along the top or bottom border (repeating the border rows there) where the land is too dense to cross. The
+// t3 maps are dense: all three templates widen to ~180 columns, only m119 also gets taller (~130 rows). In a battle
+// zone the open middle then gets new rises and ponds made tile by tile from the sources' tile meetings (synth.ts,
+// raise below). The opened land then gets copies of small islands of the t3 maps (trees, rocks, ruins, a well, on a
+// walkable grass rim), fresh grass variants, and loses any free-standing object a seam slid something other than
+// grass under. The way through runs from the west end to the exit stone at the east end of the largest walkable
+// region. The boss zone is 초원 - 깊숙한곳 (m124) as it is.
 import type { Assets, Cmf, GameMap, MapObject } from '../data/assets';
 import { bodyBox, buildWalk } from '../world/world';
 import { Rng } from './rng';
+import { buildAdjacency, fill, type Adjacency } from './synth';
 
 export const TILE = 16;
 /** battle zone templates: the big t3 field maps (zone 3, 초원·호수) */
@@ -25,6 +29,8 @@ export const PAIR_SOURCES = [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 1
 export const BOSS_MAP = 124;
 /** warp stone of cmf_oc (35 unlit, 36 lit): the zone exit */
 export const EXIT_OBJ = -35, EXIT_LIT = -36;
+/** t3 tiles of pebbles drawn on grass (2×2 and single decals) */
+const DECALS = [22, 23, 24, 30, 31, 32, 37, 38, 39, 40];
 /** a template grows to at most this many times its size each way */
 const MAX_GROW = 2.2;
 
@@ -47,6 +53,9 @@ export interface Zone {
   spawns: Spawn[];
   /** the template map the zone was grown from (0 for the boss room) */
   template?: number;
+  /** a battle zone's open middle (the bare ground far from everything once grown): its cells, and how many of them
+   *  are now something other than walkable grass (rises, ponds and their edges) */
+  middle?: { cells: number; terrain: number };
 }
 
 /** the zone objects (cmf_o3) and the common ones (cmf_oc) for the walk stamping and the drawing */
@@ -147,8 +156,13 @@ interface Source {
   grass: Set<number>;
   grassList: number[];
   grassWeights: number[];
+  /** grass and the pebble decals drawn on it: what a seam may repeat or shear freely (pairs still checked) */
+  soft: Set<number>;
   /** per source map: the map as a grid and its islands */
   isles: { t: Grid; list: Island[] }[];
+  /** tile meetings for rises (seen 3 times or more) and for ponds (twice or more: shores are rarer) */
+  adj: Adjacency;
+  adjPond: Adjacency;
 }
 
 let sourceCache: { a: Assets; p: Promise<Source> } | null = null;
@@ -157,9 +171,9 @@ async function source(a: Assets, sets: ZoneSets): Promise<Source> {
   if (sourceCache?.a !== a) {
     sourceCache = {
       a, p: Promise.all(PAIR_SOURCES.map((id) => a.map(id))).then((maps) => {
-        const g = grassOf(maps), grass = new Set(g.tiles);
-        const isles = maps.map((m) => { const t = gridOf(m, sets, grass); return { t, list: islandsOf(t, grass) }; }).filter((x) => x.list.length);
-        return { pairs: tilePairs(maps), grass, grassList: g.tiles, grassWeights: g.weights, isles };
+        const g = grassOf(maps), grass = new Set(g.tiles), soft = new Set([...grass, ...DECALS]);
+        const isles = maps.map((m) => { const t = gridOf(m, sets, grass); return { t, list: islandsOf(t, { grass, soft } as Source) }; }).filter((x) => x.list.length);
+        return { pairs: tilePairs(maps), grass, grassList: g.tiles, grassWeights: g.weights, soft, isles, adj: buildAdjacency(maps, grass, 2, 3), adjPond: buildAdjacency(maps, grass, 2, 2) };
       }),
     };
   }
@@ -215,8 +229,8 @@ function covered(g: Grid, ring = 0): Uint8Array {
   return out;
 }
 
-/** the largest sideways step a seam takes between two rows */
-const STEP = 16;
+/** the largest sideways step a seam takes between two rows (a height seam, which may also run along the border, less) */
+const STEP = 16, STEP_ALONG = 10;
 
 /**
  * Repeat one top-to-bottom seam of k-wide strips (row r repeats columns s[r] .. s[r] + k - 1 right after themselves).
@@ -224,9 +238,10 @@ const STEP = 16;
  * (a free one is not: it stays where it is, on grass).
  * h / v: the left-right and top-bottom tile meetings allowed. False when no seam fits.
  */
-function insertSeam(g: Grid, k: number, h: Set<number>, v: Set<number>, grass: Set<number>, rng: Rng): boolean {
+function insertSeam(g: Grid, k: number, h: Set<number>, v: Set<number>, src: Source, rng: Rng, edges = false): boolean {
+  const { grass } = src, step0 = edges ? STEP_ALONG : STEP;
   const { W, H, tiles } = g;
-  const lo = 1, hi = W - k - 1;                                     // the outer columns stay put
+  const lo = edges ? 0 : 1, hi = edges ? W - k : W - k - 1;
   if (hi < lo) return false;
   // per cell: the leftmost and rightmost pinned column of the objects pinned there (lo > hi where none is)
   const spanLo = new Int32Array(W * H).fill(1 << 30), spanHi = new Int32Array(W * H).fill(-(1 << 30));
@@ -246,20 +261,20 @@ function insertSeam(g: Grid, k: number, h: Set<number>, v: Set<number>, grass: S
   const cell = new Float32Array(W * H);
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
     const t = tiles[r][c], w = g.walk[r][c];
-    cell[r * W + c] = (grass.has(t) ? (w ? 0 : 0.4) : 5) + g.copy[r][c] * 1.5 + (blocked(r * W + c) ? 8 : 0) + rng.next() * 0.8 + lean * Math.abs(c - target);
+    cell[r * W + c] = (grass.has(t) ? (w ? 0 : 0.4) : 5) + g.copy[r][c] * 3 + (blocked(r * W + c) ? 8 : 0) + rng.next() * 0.8 + lean * Math.abs(c - target);
   }
   /** a strip in row r at s: no object cut, the repeat meets the strip's start in the sources, and every tile but grass
    *  is in a run that repeats every k (an edge crossed square: the strip lengthens it, never doubles it) */
   const fits = (r: number, s: number): boolean => {
-    const row = tiles[r];
+    const row = tiles[r], edge = edges && (s === lo || s === hi);
     for (let c = s, i = r * W + s; c < s + k; c++, i++) {
-      if (blocked(i) && (spanLo[i] < s || spanHi[i] >= s + k)) return false;
-      if (!grass.has(row[c]) && row[c] !== row[c + k] && row[c] !== row[c - k]) return false;
+      if (!edge && blocked(i) && (spanLo[i] < s || spanHi[i] >= s + k)) return false;
+      if (!edge && !grass.has(row[c]) && row[c] !== row[c + k] && row[c] !== row[c - k]) return false;
     }
     return h.has(pairKey(row[s + k - 1], row[s]));
   };
   const strip = (r: number, s: number): number => {
-    let n = 0;
+    let n = edges && (s === lo || s === hi) ? 3 * k : 0;              // along the border only where nothing else fits
     for (let c = s; c < s + k; c++) n += cell[r * W + c];
     return n;
   };
@@ -282,8 +297,10 @@ function insertSeam(g: Grid, k: number, h: Set<number>, v: Set<number>, grass: S
    *  other; nothing pinned may lie in what moves apart, and what it brings together must fit (see down / up) */
   const step = (r: number, a: number, b: number): boolean => {
     if (a === b) return true;
-    const x0 = Math.min(a, b), x1 = Math.max(a, b);
-    for (const y of [r - 1, r]) if (count(pin, y, x0, x1) || count(pin, y, x0 + k, x1 + k)) return false;
+    const x0 = Math.min(a, b), x1 = Math.max(a, b), border = edges && (x0 === lo || x1 === hi);
+    for (const y of [r - 1, r]) {
+      if (border ? count(pin, y, x0, x1 + k) : count(pin, y, x0, x1) || count(pin, y, x0 + k, x1 + k)) return false;
+    }
     return count(a < b ? down : up, r, x0, x1) === 0;
   };
   let prev = new Float64Array(W).fill(Infinity), cur = new Float64Array(W);
@@ -295,11 +312,15 @@ function insertSeam(g: Grid, k: number, h: Set<number>, v: Set<number>, grass: S
     for (let s = lo; s <= hi; s++) {
       if (!fits(r, s)) continue;
       let best = Infinity, arg = -1;
-      for (let d = -STEP; d <= STEP; d++) {
-        const a = s + d;
-        if (a < lo || a > hi || prev[a] === Infinity) continue;
-        const c = prev[a] + Math.abs(d) * 0.15;
+      const edge = edges && (s === lo || s === hi);
+      for (let a = edge ? lo : Math.max(lo, s - step0); a <= (edge ? hi : Math.min(hi, s + step0)); a++) {
+        if (prev[a] === Infinity) continue;
+        const c = prev[a] + Math.min(3, Math.abs(a - s) * 0.15);
         if (c < best && step(r, a, s)) { best = c; arg = a; }
+      }
+      if (edges && !edge) for (const a of [lo, hi]) {                // in from the edge, where the seam ran along it
+        if (prev[a] === Infinity || Math.abs(a - s) <= step0) continue;
+        if (prev[a] + 3 < best && step(r, a, s)) { best = prev[a] + 3; arg = a; }
       }
       if (arg < 0) continue;
       cur[s] = best + strip(r, s);
@@ -328,7 +349,9 @@ function insertSeam(g: Grid, k: number, h: Set<number>, v: Set<number>, grass: S
   });
   for (const p of g.objs) {                // right of its row's strip: moves with it; in the strip: repeated with it
     const s0 = seam[Math.max(0, Math.min(H - 1, p.pin[1]))];
-    if (p.pin[0] >= s0 + k) objs.push(moved(p));
+    if (edges && s0 === lo) objs.push(moved(p));                    // the border repeated before it: all of it moves
+    else if (edges && s0 === hi) objs.push(p);                      // repeated past the end: nothing moves
+    else if (p.pin[0] >= s0 + k) objs.push(moved(p));
     else if (p.pin[0] >= s0 && !p.free) objs.push(p, moved(p));
     else objs.push(p);
   }
@@ -337,26 +360,22 @@ function insertSeam(g: Grid, k: number, h: Set<number>, v: Set<number>, grass: S
   return true;
 }
 
-/** grow a grid by seams towards tw × th (it stops short on an axis where no more seams fit) */
+/** grow a grid by seams towards tw × th (it stops short on an axis where no more seams fit): the width first, then
+ *  the height, whose seams may run along the top or bottom border where the land is too dense to cross */
 function grow(g0: Grid, tw: number, th: number, src: Source, rng: Rng): Grid {
-  let g = g0;
-  const done = [false, false];
-  for (;;) {
-    const col = g.W < tw && !done[0], row = g.H < th && !done[1];
-    if (!col && !row) return g;
-    const across = col && (!row || (tw - g.W) / tw >= (th - g.H) / th), left = across ? tw - g.W : th - g.H;
-    let ok = false;
-    for (const k of new Set([Math.min([2, 2, 2, 4, 4, 6][rng.int(0, 5)], left), Math.min(2, left)])) {
-      if (across) ok = insertSeam(g, k, src.pairs.h, src.pairs.v, src.grass, rng);
-      else {
-        const t = transpose(g);
-        ok = insertSeam(t, k, src.pairs.v, src.pairs.h, src.grass, rng);
-        if (ok) g = transpose(t);
-      }
-      if (ok) break;
+  const widen = (g: Grid, to: number, h: Set<number>, v: Set<number>, edges: boolean) => {
+    while (g.W < to) {
+      const left = to - g.W;
+      let ok = false;
+      for (const k of new Set([Math.min([2, 4, 4, 6, 6, 8][rng.int(0, 5)], left), Math.min(2, left)])) if ((ok = insertSeam(g, k, h, v, src, rng, edges))) break;
+      if (!ok) return;
     }
-    if (!ok) done[across ? 0 : 1] = true;
-  }
+  };
+  widen(g0, tw, src.pairs.h, src.pairs.v, false);
+  if (g0.H >= th) return g0;
+  const t = transpose(g0);
+  widen(t, th, src.pairs.v, src.pairs.h, true);
+  return transpose(t);
 }
 
 /** a block of a template: its rim is bare walkable grass and every object drawn in it stays inside the rim */
@@ -369,20 +388,29 @@ function bareGrass(g: Grid, grass: Set<number>): Uint8Array {
   return out;
 }
 
-/** the islands of a map worth copying: something on them (a rise, a tree, a rock) and a bare grass rim */
-function islandsOf(t: Grid, grass: Set<number>): Island[] {
-  const { W, H } = t, bare = bareGrass(t, grass), W1 = W + 1;
+/** the islands of a map worth copying: something on them (a rise, a pond, a tree, a rock) and a rim of walkable grass
+ *  (or pebbles) that nothing pinned stands on; an object pinned in it stays inside the rim */
+function islandsOf(t: Grid, src: Source): Island[] {
+  const { W, H } = t, W1 = W + 1, cov = covered(t), pinned = new Uint8Array(W * H);
+  for (const p of t.objs) {
+    if (p.free) continue;
+    for (let r = Math.max(0, p.pin[1]); r <= Math.min(H - 1, p.pin[3]); r++) for (let c = Math.max(0, p.pin[0]); c <= Math.min(W - 1, p.pin[2]); c++) pinned[r * W + c] = 1;
+  }
+  const rim = new Uint8Array(W * H);
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) rim[r * W + c] = t.walk[r][c] && src.soft.has(t.tiles[r][c]) && !pinned[r * W + c] ? 1 : 0;
   const rowP = new Int32Array(W1 * H), colP = new Int32Array((H + 1) * W), feat = new Int32Array(W1 * (H + 1));
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
-    rowP[r * W1 + c + 1] = rowP[r * W1 + c] + bare[r * W + c];
-    colP[c * (H + 1) + r + 1] = colP[c * (H + 1) + r] + bare[r * W + c];
-    feat[(r + 1) * W1 + c + 1] = feat[r * W1 + c + 1] + feat[(r + 1) * W1 + c] - feat[r * W1 + c] + (bare[r * W + c] ? 0 : 1);
+    rowP[r * W1 + c + 1] = rowP[r * W1 + c] + rim[r * W + c];
+    colP[c * (H + 1) + r + 1] = colP[c * (H + 1) + r] + rim[r * W + c];
+    const plain = src.grass.has(t.tiles[r][c]) && t.walk[r][c] && !cov[r * W + c];
+    feat[(r + 1) * W1 + c + 1] = feat[r * W1 + c + 1] + feat[(r + 1) * W1 + c] - feat[r * W1 + c] + (plain ? 0 : 1);
   }
   const rowOk = (r: number, c0: number, c1: number) => rowP[r * W1 + c1 + 1] - rowP[r * W1 + c0] === c1 - c0 + 1;
   const colOk = (c: number, r0: number, r1: number) => colP[c * (H + 1) + r1 + 1] - colP[c * (H + 1) + r0] === r1 - r0 + 1;
-  const boxes = t.objs.map((p) => boxCells(p.box));
+  const boxes = t.objs.filter((p) => !p.free).map((p) => boxCells(p.box));
   const out: Island[] = [];
-  for (let h = 6; h <= 16; h++) for (let w = 6; w <= 18; w++) for (let r = 0; r + h <= H; r++) for (let c = 0; c + w <= W; c++) {
+  // on even cells only (the 2×2 grass grid) and a few hundred at most: plenty to pick from, and quick
+  for (let h = 6; h <= 16 && out.length < 400; h += 2) for (let w = 6; w <= 18 && out.length < 400; w += 2) for (let r = 0; r + h <= H; r += 2) for (let c = 0; c + w <= W; c += 2) {
     const r1 = r + h - 1, c1 = c + w - 1;
     if (!rowOk(r, c, c1) || !rowOk(r1, c, c1) || !colOk(c, r, r1) || !colOk(c1, r, r1)) continue;
     const n = feat[(r1 + 1) * W1 + c1 + 1] - feat[r * W1 + c1 + 1] - feat[(r1 + 1) * W1 + c] + feat[r * W1 + c];
@@ -409,8 +437,12 @@ function scatter(g: Grid, src: Source, rng: Rng): void {
   };
   let open = 0;
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) if (g.copy[r][c] && bare[r * W + c]) open++;
-  for (let tries = Math.round(open / 12), n = 0; tries > 0 && n < open / 260; tries--) {
-    const { t, list } = rng.pick(src.isles), is = rng.pick(list), dc = rng.int(M + 1, W - is.w - M - 1), dr = rng.int(M + 1, H - is.h - M - 1);
+  for (let tries = Math.round(open / 8), n = 0; tries > 0 && n < open / 160; tries--) {
+    const { t, list } = rng.pick(src.isles);
+    let is = rng.pick(list);                                          // the biggest of a few
+    for (let i = 0; i < 3; i++) { const o = rng.pick(list); if (o.w * o.h > is.w * is.h) is = o; }
+    // on the same 2×2 grass grid as where it came from
+    const dc = (rng.int(M + 1, W - is.w - M - 1) & ~1) | (is.c & 1), dr = (rng.int(M + 1, H - is.h - M - 1) & ~1) | (is.r & 1);
     if (dc < 1 || dr < 1 || !free(dc, dr, is.w, is.h)) continue;
     let joins = true;
     for (let i = 0; i < is.w && joins; i++) {
@@ -420,15 +452,19 @@ function scatter(g: Grid, src: Source, rng: Rng): void {
       joins = h.has(pairKey(g.tiles[dr + j][dc - 1], t.tiles[is.r + j][is.c])) && h.has(pairKey(t.tiles[is.r + j][is.c + is.w - 1], g.tiles[dr + j][dc + is.w]));
     }
     if (!joins) continue;
+    // its objects (a free one comes along by its anchor), all of them drawn inside the map
+    const dx = (dc - is.c) * TILE, dy = (dr - is.r) * TILE;
+    const brought = t.objs.filter((p) => {
+      const [a, b] = p.free ? p.pin : boxCells(p.box);
+      return a >= is.c && b >= is.r && a < is.c + is.w && b < is.r + is.h;
+    });
+    if (brought.some((p) => { const [a, b, c, d] = boxCells([p.box[0] + dx, p.box[1] + dy, p.box[2] + dx, p.box[3] + dy]); return a < 0 || b < 0 || c >= W || d >= H; })) continue;
     for (let j = 0; j < is.h; j++) for (let i = 0; i < is.w; i++) {
       g.tiles[dr + j][dc + i] = t.tiles[is.r + j][is.c + i];
       g.walk[dr + j][dc + i] = t.walk[is.r + j][is.c + i];
       g.copy[dr + j][dc + i] = 0;
     }
-    const dx = (dc - is.c) * TILE, dy = (dr - is.r) * TILE;
-    for (const p of t.objs) {
-      const [a, b] = boxCells(p.box);
-      if (a < is.c || b < is.r || a >= is.c + is.w || b >= is.r + is.h) continue;
+    for (const p of brought) {
       g.objs.push({
         layer: p.layer, o: { obj: p.o.obj, x: p.o.x + dx, y: p.o.y + dy },
         box: [p.box[0] + dx, p.box[1] + dy, p.box[2] + dx, p.box[3] + dy], pin: [p.pin[0] + dc - is.c, p.pin[1] + dr - is.r, p.pin[2] + dc - is.c, p.pin[3] + dr - is.r], free: p.free,
@@ -450,6 +486,113 @@ function vary(g: Grid, src: Source, rng: Rng): void {
         && v.has(pairKey(tiles[r - 1][c], t)) && v.has(pairKey(t, tiles[r + 1][c]))) { tiles[r][c] = t; break; }
     }
   }
+}
+
+/** the open middle: bare ground at least this far (Chebyshev) from anything else, so a rim of the old grass stays */
+const MIDDLE_MARGIN = 4;
+
+/**
+ * New land in the open middle (synth.ts): rises and ponds on the bare ground far from everything (MIDDLE_MARGIN). Each
+ * is a random blob of a few rectangles whose inside must come out as an unwalkable grass top (a rise) or open water (a
+ * pond); the cells within RING of it are left to the fill, which finds the edges, cliffs and shores around it from the
+ * sources' tile meetings (weighted towards plain ground, so the ring is the edge and not more land) and meets the old
+ * ground outside. A blob the fill cannot close, or one that would cut the old walkable land apart, is dropped.
+ */
+function raise(g: Grid, src: Source, rng: Rng): { cells: number; terrain: number } {
+  const { W, H } = g, bare = bareGrass(g, src.grass), N = W * H, BIG = 1 << 20;
+  const dist = new Int32Array(N);
+  for (let i = 0; i < N; i++) dist[i] = bare[i] ? BIG : 0;
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {          // Chebyshev distance to the nearest non-bare cell
+    const i = r * W + c;
+    if (r === 0 || c === 0 || r === H - 1 || c === W - 1) dist[i] = Math.min(dist[i], 1);
+    if (r > 0) dist[i] = Math.min(dist[i], dist[i - W] + 1, c > 0 ? dist[i - W - 1] + 1 : BIG, c < W - 1 ? dist[i - W + 1] + 1 : BIG);
+    if (c > 0) dist[i] = Math.min(dist[i], dist[i - 1] + 1);
+  }
+  for (let r = H - 1; r >= 0; r--) for (let c = W - 1; c >= 0; c--) {
+    const i = r * W + c;
+    if (r < H - 1) dist[i] = Math.min(dist[i], dist[i + W] + 1, c > 0 ? dist[i + W - 1] + 1 : BIG, c < W - 1 ? dist[i + W + 1] + 1 : BIG);
+    if (c < W - 1) dist[i] = Math.min(dist[i], dist[i + 1] + 1);
+  }
+  const free = new Uint8Array(N);
+  let open = 0;
+  for (let i = 0; i < N; i++) if (dist[i] >= MIDDLE_MARGIN) { free[i] = 1; open++; }
+  const flat = () => { const w = new Uint8Array(N); for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) w[r * W + c] = g.walk[r][c]; return w; };
+  const ground = (s: number) => (s & 1) === 1 && src.grass.has(s >> 1);
+  let before = largestRegion(flat(), W, H);
+  let ref = 0;                                                       // a cell of the main land away from the middle
+  while (ref < N && !(before[ref] && !free[ref])) ref++;
+  let made = 0;
+  for (let tries = 300, fills = Math.min(18, Math.max(10, Math.round(open / 500))), want = Math.round(open / 350); tries > 0 && fills > 0 && made < want; tries--) {
+    // the blob: a rectangle and one or two more overlapping it
+    const core = new Uint8Array(N), rects: [number, number, number, number][] = [];
+    const w0 = rng.int(6, 16), h0 = rng.int(4, 10);
+    rects.push([0, 0, w0, h0]);
+    for (let j = rng.int(0, 2); j > 0; j--) rects.push([rng.int(-3, w0 - 2), rng.int(-2, h0 - 2), rng.int(3, 8), rng.int(3, 6)]);
+    const x0 = Math.min(...rects.map((q) => q[0])), y0 = Math.min(...rects.map((q) => q[1]));
+    const bw = Math.max(...rects.map((q) => q[0] + q[2])) - x0, bh = Math.max(...rects.map((q) => q[1] + q[3])) - y0;
+    const c0 = rng.int(1, W - bw - 2 * RING - 2) + RING, r0 = rng.int(1, H - bh - 2 * RING - 2) + RING;
+    if (c0 < RING + 1 || r0 < RING + 1) continue;
+    let room = true;
+    for (let r = r0 - RING; r < r0 + bh + RING && room; r++) for (let c = c0 - RING; c < c0 + bw + RING; c++) if (!free[r * W + c]) { room = false; break; }
+    if (!room) continue;
+    for (const [x, y, w, h] of rects) for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) core[(r0 + y - y0 + r) * W + c0 + x - x0 + c] = 1;
+    const mask = new Uint8Array(N), inner = new Uint8Array(N);
+    for (let r = r0 - RING + 1; r < r0 + bh + RING - 1; r++) for (let c = c0 - RING + 1; c < c0 + bw + RING - 1; c++) {
+      const i = r * W + c;
+      let near = false, deep = core[i] === 1;
+      for (let dy = -RING; dy <= RING; dy++) for (let dx = -RING; dx <= RING; dx++) {
+        const j = i + dy * W + dx;
+        if (core[j]) near = true;
+        if (Math.abs(dy) <= 1 && Math.abs(dx) <= 1 && !core[j]) deep = false;
+      }
+      if (near) mask[i] = 1;
+      if (deep) inner[i] = 1;
+    }
+    const pond = rng.chance(POND_SHARE);
+    fills--;
+    const kept: [number, number, number][] = [];
+    for (let i = 0; i < N; i++) if (mask[i]) kept.push([i, g.tiles[(i / W) | 0][i % W], g.walk[(i / W) | 0][i % W]]);
+    const ok = fill(g.tiles, g.walk, W, H, mask, pond ? src.adjPond : src.adj, rng, {
+      allow: (i, st) => !inner[i] || (pond ? st >> 1 === WATER : (st & 1) === 0 && src.grass.has(st >> 1)),
+      weigh: (i, st, n) => (!inner[i] && ground(st) ? n * GROUND_BIAS : n),
+      tries: 2,
+    });
+    if (!ok) continue;
+    // the old walkable land must still hang together; otherwise put the ground back
+    const w = flat(), seen = reachable(w, W, H, ref % W, (ref / W) | 0);
+    let cut = false;
+    for (let i = 0; i < N && !cut; i++) if (before[i] && !mask[i] && !seen[i]) cut = true;
+    if (cut) {
+      for (const [i, t, wk] of kept) { g.tiles[(i / W) | 0][i % W] = t; g.walk[(i / W) | 0][i % W] = wk; }
+      continue;
+    }
+    for (let r = r0 - RING - 2; r < r0 + bh + RING + 2; r++) for (let c = c0 - RING - 2; c < c0 + bw + RING + 2; c++) if (r >= 0 && c >= 0 && r < H && c < W) free[r * W + c] = 0;
+    for (let i = 0; i < N; i++) if (mask[i]) g.copy[(i / W) | 0][i % W] = 0;
+    before = seen;
+    made++;
+  }
+  let terrain = 0;
+  for (let i = 0; i < N; i++) if (dist[i] >= MIDDLE_MARGIN && !(g.walk[(i / W) | 0][i % W] && src.grass.has(g.tiles[(i / W) | 0][i % W]))) terrain++;
+  return { cells: open, terrain };
+}
+
+/** open water (t3), the inside of a pond */
+const WATER = 92;
+/** the share of rises that are ponds instead */
+const POND_SHARE = 0.35;
+/** the room kept around a rise for its edges and cliffs */
+const RING = 4;
+/** plain ground weighted up around a rise, so the ring becomes its edge and not more land */
+const GROUND_BIAS = 20;
+
+/** a free object whose ground the seams changed (a tile other than grass slid under its anchor or body) is left out */
+function settle(g: Grid, sets: ZoneSets, grass: Set<number>): void {
+  g.objs = g.objs.filter((p) => {
+    if (!p.free) return true;
+    const [c0, r0, c1, r1] = objFootprint(sets, p.o, g.tiles, grass);
+    for (let r = Math.max(0, r0); r <= Math.min(g.H - 1, r1); r++) for (let c = Math.max(0, c0); c <= Math.min(g.W - 1, c1); c++) if (!grass.has(g.tiles[r][c])) return false;
+    return true;
+  });
 }
 
 function mapOf(g: Grid, tpl: GameMap): GameMap {
@@ -522,8 +665,10 @@ export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 
   const id = o.template ?? rng.pick(kind === 'rest' ? REST_TEMPLATES : BATTLE_TEMPLATES), tpl = await a.map(id);
   const tw = Math.min(o.w, Math.round(tpl.header.width * MAX_GROW)), th = Math.min(o.h, Math.round(tpl.header.height * MAX_GROW));
   const g = grow(gridOf(tpl, sets, src.grass), tw, th, src, rng);
+  const middle = kind === 'battle' ? raise(g, src, rng) : undefined;
   scatter(g, src, rng);
   vary(g, src, rng);
+  settle(g, sets, src.grass);
   const map = mapOf(g, tpl), W = g.W, H = g.H;
   // the way through: the largest walkable region, entered at its west end, left by the stone at its east end
   const region = largestRegion(zoneWalk(map, sets), W, H);
@@ -551,7 +696,7 @@ export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 
     spawns.push({ x: c * TILE + 8, y: r * TILE + 8, species: rng.pick(o.species) });
     g2++;
   }
-  return { kind, map, walk, start: { x: start[0] * TILE + 8, y: start[1] * TILE + 8 }, exit: { x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 }, spawns, template: id };
+  return { kind, map, walk, start: { x: start[0] * TILE + 8, y: start[1] * TILE + 8 }, exit: { x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 }, spawns, template: id, middle };
 }
 
 /** the boss room: m124 as it is, entered from its south passage, the boss where the original places it */

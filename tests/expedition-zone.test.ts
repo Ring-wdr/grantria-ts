@@ -1,5 +1,6 @@
 // 원정(가제): zones grown from t3 templates keep the original land's local look (every tile meeting and every object's
-// ground occurs in the t3 maps) and stay playable (the exit is reached from the start, groups stand on reached ground).
+// ground occurs in the t3 maps, also in the land made new in the middle) and stay playable (the exit is reached from
+// the start, groups stand on reached ground), and their open middle gets new rises and ponds.
 // Skipped without generated assets (public/assets comes from the player's own APK).
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -85,6 +86,9 @@ test('grown zones: the exit is reached from the start and every group stands on 
     for (const s of z.spawns) assert.ok(seen[cell(s)], `${name}: group at ${s.x},${s.y} on reached ground`);
     if (z.kind === 'battle') {
       assert.ok(W >= 150, `${name}: ${W} columns`);
+      if (z.template === 119) assert.ok(H >= 120, `${name}: ${H} rows`);
+      // the open middle got new land (rises, ponds), not only grass
+      assert.ok(z.middle && z.middle.terrain >= 0.02 * z.middle.cells, `${name}: ${z.middle?.terrain} of ${z.middle?.cells} middle cells raised`);
       assert.ok(z.spawns.length >= 10, `${name}: ${z.spawns.length} groups`);
     }
   }

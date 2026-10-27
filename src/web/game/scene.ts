@@ -46,6 +46,9 @@ export interface Scene {
   /** colour around and under the screen while the scene shows (the logo's white): the page and the cleared
    *  canvas, so no black shows at the frame's edges; black when unset */
   backdrop?: number;
+  /** drawn on every animation frame, not only after a tick (원정's realtime field and its parry windows; no main-play
+   *  scene sets it, so their frames are unchanged) */
+  everyFrame?: boolean;
   /** the scene was replaced (GameContext.go): free its GPU resources */
   dispose?(): void;
 }

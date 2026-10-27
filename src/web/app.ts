@@ -136,12 +136,13 @@ function frame(now: number): void {
     acc -= tickMs;
     stepped = true;
   }
-  if (stepped) {
+  const every = scene.everyFrame === true;                       // only 원정 sets it (Scene.everyFrame)
+  if (stepped || every) {
     const t0 = p ? performance.now() : 0;
     drawScene();
     if (p) p.drawn(performance.now() - t0);
   }
-  power.pacer.next(frame, now, acc, tickMs, ctx.input.padConnected);
+  power.pacer.next(frame, now, acc, tickMs, ctx.input.padConnected || every);
 }
 
 // dev-only test hook: advance ticks without requestAnimationFrame (hidden panes throttle it)

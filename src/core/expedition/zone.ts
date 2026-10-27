@@ -82,7 +82,7 @@ function stamp(map: GameMap, src: GameMap, sc: number, sr: number, w: number, h:
   const W = map.header.width, H = map.header.height;
   for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
     const tr = dr + r, tc = dc + c;
-    if (tr < 0 || tc < 0 || tr >= H || tc >= W) continue;
+    if (tr < 0 || tc < 0 || tr >= H || tc >= W || !src.tiles[sr + r][sc + c]) continue;   // void outside the source map: keep the floor
     map.tiles[tr][tc] = src.tiles[sr + r][sc + c];
     map.walk[tr][tc] = src.walk[sr + r][sc + c] ? 1 : 0;
   }

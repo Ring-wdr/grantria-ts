@@ -12,6 +12,7 @@ import { h, type VNode } from '../render/view';
 import { keyHint } from '../input/keyHints';
 import { setDayShift } from '../render/sprites';
 import type { WorldView } from './worldView';
+import type { Talk } from '../../core/expedition/talk';
 import { HERO_EQUIP } from './heroLook';
 
 const PARTY_AT: [number, number][] = [[392, 196], [430, 246], [352, 252]];
@@ -76,7 +77,7 @@ export class BattleView {
     return { cmfName: name, cmf, frame: rec.frames[k] ?? 0, x, y, mirror: u.side === 'enemy', shadow: true, fx };
   }
 
-  draw(b: Battle, f: FieldSim): void {
+  draw(b: Battle, f: FieldSim, talk: Talk | null = null): void {
     setDayShift(8, 16, 6);
     this.world.render(f.camX, f.camY, []);
     setDayShift(0, 0, 0);
@@ -84,7 +85,7 @@ export class BattleView {
     this.world.overlay(ents);
     this.ctx.compositor.show();
     const u = this.ctx.ui;
-    u.view('ex-battle', 0, 0, 480, 320, this.tree(b));
+    u.view('ex-battle', 0, 0, 480, 320, this.tree(b, talk));
     this.drawFx(b);
   }
 
@@ -111,7 +112,7 @@ export class BattleView {
     return h(`div.exb-bar.${cls}`, null, h('div.exb-fill', { style: `width:${Math.max(0, Math.min(1, v)) * 100}%` }));
   }
 
-  private tree(b: Battle): VNode {
+  private tree(b: Battle, talk: Talk | null): VNode {
     const order = b.order(7);
     const kids: VNode[] = [];
     kids.push(h('div.v-row.exb-order', null, h('span.exb-order-l', null, '순서'),
@@ -144,11 +145,30 @@ export class BattleView {
       const [x, y] = this.pos0(b, p.unit);
       kids.push(h(`div.exb-pop.${p.kind}`, { style: `left:${x - 30}px;top:${y - 50 - p.t * 26}px;opacity:${Math.min(1, (1.1 - p.t) * 3)}` }, p.text));
     }
+    if (talk) kids.push(this.talkTree(talk));
     if (b.phase === 'intro') kids.push(h('div.exb-intro', null, b.line));
-    if (b.phase === 'won') kids.push(h('div.v-col.exb-result', null, h('div.exb-result-t', null, '승리!'), h('div', null, `EXP +${b.exp}`),
+    if (b.phase === 'won') kids.push(h('div.v-col.exb-result', null, h('div.exb-result-t', null, b.exp ? '승리!' : '전투 종료'), b.exp ? h('div', null, `EXP +${b.exp}`) : null,
       b.levelUps.map((l) => h('div.exb-lvup', null, l)), h('div.exb-cont', { on: () => [0x35] }, `${this.glyph([0x35])} 계속`)));
     if (b.phase === 'lost') kids.push(h('div.v-col.exb-result.lost', null, h('div.exb-result-t', null, '전멸...'), h('div.exb-cont', { on: () => [0x35] }, `${this.glyph([0x35])} 계속`)));
     return h('div.v-fill.exb', null, ...kids);
+  }
+
+  /** the negotiation box: a line, a choice, or the chance roll */
+  private talkTree(t: Talk): VNode {
+    const st = t.step, ok = this.glyph([0x35]);
+    if (st.kind === 'roll') {
+      const k = Math.min(1, t.rollT / 1.2), shown = st.chance * 100;
+      return h('div.v-col.ex-talk.roll', null,
+        h('div.ext-who', null, '영입 확률'),
+        st.parts.filter(([, v]) => Math.abs(v) > 0.001).map(([l, v]) => h('div.v-row.ext-part', null, h('span.v-grow', null, l), h(`span${v < 0 ? '.neg' : ''}`, null, `${v >= 0 ? '+' : ''}${Math.round(v * 100)}%`))),
+        h('div.v-row.ext-total', null, h('span.v-grow', null, '합계'), h('span', null, `${Math.round(shown)}%`)),
+        h('div.ext-meter', null, h('div.ext-chance', { style: `width:${shown}%` }), h('div.ext-needle', { style: `left:${k < 1 ? (Math.abs(Math.sin(t.rollT * 9)) * 100) : (st.success ? shown * 0.5 : shown + (100 - shown) * 0.5)}%` })),
+        k >= 1 ? h(`div.ext-res${st.success ? '.ok' : ''}`, { on: () => [0x35] }, `${st.success ? '성공!' : '실패...'}  ${ok}`) : null);
+    }
+    const body: VNode[] = [h('div.ext-who', null, st.who || '…'), h('div.ext-text', null, st.text)];
+    if (st.kind === 'choose') st.options.forEach((o, i) => body.push(h(`div.ex-item.ext-opt${i === t.sel ? '.sel' : ''}`, { on: () => { t.choose(i); } }, o)));
+    else body.push(h('div.ext-next', { on: () => [0x35] }, `${ok} ▶`));
+    return h('div.v-col.ex-talk', null, ...body);
   }
 
   private menuTree(b: Battle): VNode {

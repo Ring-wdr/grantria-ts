@@ -10,7 +10,8 @@ import type { InputState } from '../input';
 import type { SoundOut } from '../sound';
 import { FieldSim, type Advantage, type FieldEnemy, type Press } from './field';
 import { Battle } from './battle';
-import { Run } from './run';
+import { Run, recruit } from './run';
+import { Talk } from './talk';
 import { FIELD_SPECIES } from './species';
 import { buildField, zoneSets, type Zone, type ZoneSets } from './zone';
 
@@ -46,6 +47,7 @@ export class ExpeditionLogic {
   readonly seed: number;
   readonly run = new Run();
   battle: Battle | null = null;
+  talk: Talk | null = null;
   toasts: Toast[] = [];
   flashes: Flash[] = [];
   /** the encounter being opened: its banner shows this long before the battle */
@@ -130,13 +132,37 @@ export class ExpeditionLogic {
   /** the host loads what the battle draws with */
   protected onBattle(_b: Battle): void {}
 
-  /** 대화 was picked (step 5 fills it); for now the talk ends at once */
-  protected onTalk(_talker: Battle['party'][number], enemy: Battle['enemies'][number]): void {
-    this.battle!.endTalk('failed', enemy);
+  /** 대화 was picked: the negotiation opens over the battle */
+  protected onTalk(talker: Battle['party'][number], enemy: Battle['enemies'][number]): void {
+    const run = this.run;
+    this.talk = new Talk(talker, enemy, { potions: () => run.potions, usePotion: () => { run.potions--; }, room: run.party.length < 3, showHints: true });
+  }
+
+  /** the talk is over: a creature that joined fights on the party's side */
+  private endTalk(): void {
+    const t = this.talk!, b = this.battle!, out = t.outcome!;
+    if (out === 'joined') {
+      const m = recruit(t.enemy.species!);
+      m.hp = Math.max(1, Math.round(m.hpMax * Math.max(0.3, t.enemy.hp / t.enemy.hpMax)));
+      this.run.party.push(m);
+      this.run.recruits++;
+      b.addMember(m);
+      b.line = `${m.name}이(가) 동료가 되었다!`;
+    } else if (out === 'left') b.line = `${t.enemy.name}이(가) 달아났다`;
+    else if (out === 'angry') b.line = `${t.enemy.name}이(가) 화가 났다!`;
+    else b.line = '협상 실패';
+    b.endTalk(out, t.enemy);
+    this.talk = null;
   }
 
   protected battleFrame(dt: number, presses: Press[], now: number, keys: number[]): void {
     const b = this.battle!;
+    if (this.talk) {
+      this.talk.rollT += dt;
+      for (const k of keys) this.talk.key(k);
+      if (this.talk.outcome) this.endTalk();
+      return;
+    }
     b.frame(dt, presses, now);
     if (b.phase === 'won' && b.t > 0.6 && keys.includes(AVK.OK)) this.endBattle();
     else if (b.phase === 'fled' && b.t > 0.8) this.endBattle();

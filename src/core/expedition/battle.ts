@@ -9,7 +9,7 @@ import { AVK } from '../keys';
 import type { Advantage, Press } from './field';
 import type { FieldEnemy } from './field';
 import type { Member, Run } from './run';
-import { POTION_HEAL } from './run';
+import { PARTY_MAX, POTION_HEAL } from './run';
 import { SPECIES, type Move, type Species } from './species';
 
 export const PARRY_MS = 95, DODGE_MS = 160;
@@ -230,7 +230,7 @@ export class Battle {
     this.exp = this.enemies.filter((e) => !e.gone).reduce((s, e) => s + (e.sp?.stats.exp ?? 0), 0);
     this.sync();
     this.levelUps = this.run.award(this.exp);
-    this.line = `승리! EXP +${this.exp}`;
+    this.line = this.exp ? `승리! EXP +${this.exp}` : '적이 남지 않았다';
   }
 
   /** the party's HP back into the run */
@@ -267,6 +267,7 @@ export class Battle {
       const locked = this.liveEnemies.every((e) => e.sp?.talk === 'locked');
       if (locked) return this.liveEnemies[0]?.sp?.talkReason ?? '말이 통하지 않는다';
       if (this.actor?.species !== null) return '검사만 대화할 수 있다';
+      if (this.run.party.length >= PARTY_MAX) return '파티가 가득 찼다';
     }
     return null;
   }
@@ -491,6 +492,13 @@ export class Battle {
     else if (menu === 'target') this.targetSel = i;
     else this.subSel = i;
     this.menuKey(AVK.OK);
+  }
+
+  /** a creature that joined fights on the party's side from now */
+  addMember(m: Member): BUnit {
+    const u = fromMember(m);
+    this.party.push(u);
+    return u;
   }
 
   /** the talk ended (negotiation): the enemy may have joined or left; the turn passes */

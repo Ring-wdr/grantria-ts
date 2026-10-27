@@ -117,7 +117,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     }
     if (this.mode === 'battle' && this.battle) {
       u.begin();
-      this.battleView.draw(this.battle, this.field);
+      this.battleView.draw(this.battle, this.field, this.talk);
       u.end();
       hud.begin();
       this.drawTouch();

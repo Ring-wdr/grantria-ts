@@ -79,11 +79,13 @@
 .exb-member.down { opacity: 0.45; }
 .exb-mname { width: 92px; white-space: nowrap; }
 .exb-hpn { width: 50px; font-size: 8px; color: #b8c2d8; }
-.exb-menu { position: absolute; left: 172px; bottom: 8px; width: 136px; min-width: 0; padding: 5px; gap: 1px; pointer-events: auto; }
-.exb-menu .ex-item { padding: 2px 8px; font-size: 10px; }
-.exb-why, .exb-cost { float: right; color: #8090a8; font-size: 8px; margin-left: 8px; }
-.exb-desc { font-size: 8px; color: #8fa0bc; }
-.exb-sub { font-size: 9px; color: #9aa6bd; padding: 2px 4px; }
+.exb-menu { position: absolute; right: 6px; bottom: 8px; width: 104px; min-width: 0; padding: 4px; gap: 2px; box-sizing: border-box; pointer-events: auto; }
+.exb-menu .ex-item { padding: 0 8px; height: 22px; line-height: 22px; font-size: 11px; white-space: nowrap; overflow: hidden; }
+.exb-menu .ex-item.v-row { align-items: center; gap: 4px; }
+.exb-cost { color: #8090a8; font-size: 8px; }
+.exb-menu .exb-back { color: #9aa6bd; font-size: 10px; border-top: 1px solid #2a3850; border-radius: 0; }
+.exb-prompt { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); max-width: 300px; padding: 2px 10px; color: #e6efff; font-size: 9px;
+  text-align: center; background: rgba(8, 14, 26, 0.78); border: 1px solid #3a4a66; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .exb-pop { position: absolute; width: 60px; text-align: center; font-size: 13px; font-weight: bold; color: #fff; text-shadow: 0 0 2px #000, 0 0 3px #000; }
 .exb-pop.heal { color: #7dff8a; }
 .exb-pop.parry { color: #9ff3ff; font-size: 12px; }

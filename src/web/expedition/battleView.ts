@@ -9,13 +9,15 @@ import { animRec } from '../../core/expedition/species';
 import type { FieldSim } from '../../core/expedition/field';
 import type { GameContext } from '../game/scene';
 import { h, type VNode } from '../render/view';
+import { AVK } from '../../core/keys';
 import { keyHint } from '../input/keyHints';
 import { setDayShift } from '../render/sprites';
 import type { WorldView } from './worldView';
 import type { Talk } from '../../core/expedition/talk';
 import { HERO_EQUIP } from './heroLook';
 
-const PARTY_AT: [number, number][] = [[392, 196], [430, 246], [352, 252]];
+// the party stands left of the command column docked at the right edge (x ≥ 360)
+const PARTY_AT: [number, number][] = [[300, 196], [334, 246], [266, 252]];
 const ENEMY_AT: [number, number][] = [[104, 196], [62, 246], [146, 252]];
 
 export class BattleView {
@@ -138,7 +140,7 @@ export class BattleView {
       b.party.map((p) => h(`div.v-row.exb-member${b.actor === p ? '.turn' : ''}${p.hp <= 0 ? '.down' : ''}`, null,
         h('span.exb-mname', null, `${p.name} Lv.${p.member?.lv ?? p.lv}`),
         this.bar('hp', p.hp / p.hpMax), h('span.exb-hpn', null, `${p.hp}/${p.hpMax}`)))));
-    if (b.phase === 'command') kids.push(this.menuTree(b));
+    if (b.phase === 'command') { kids.push(this.menuTree(b)); const p = this.prompt(b); if (p) kids.push(h('div.exb-prompt', null, p)); }
     if (b.phase === 'enemy') kids.push(...this.defenseTree(b));
     for (const p of b.popups) {
       if (p.unit.gone && p.kind !== 'info') continue;
@@ -171,21 +173,31 @@ export class BattleView {
     return h('div.v-col.ex-talk', null, ...body);
   }
 
+  /** the guidance under the turn line: what to pick, the skill under the cursor, why a command is off */
+  private prompt(b: Battle): string | null {
+    if (b.menu === 'target') return b.pending?.kind === 'talk' ? '누구와 대화할까?' : '대상을 고르세요';
+    if (b.menu === 'item') return `회복약 ×${b.run.potions} — 누구에게?`;
+    if (b.menu === 'skill') { const s = b.skills()[b.subSel]; return s ? `${s.name} · ${s.desc}` : null; }
+    return b.blocked(COMMANDS[b.sel]);
+  }
+
+  /** the command column at the right edge; the skill / item lists open in the same place */
   private menuTree(b: Battle): VNode {
     const rows: VNode[] = [];
     if (b.menu === 'main' || b.menu === 'target') {
       COMMANDS.forEach((c, i) => {
         const why = b.blocked(c);
-        rows.push(h(`div.ex-item${i === b.sel ? '.sel' : ''}${why ? '.off' : ''}`, { on: () => { b.tap('main', i); } }, c, why ? h('span.exb-why', null, why) : null));
+        rows.push(h(`div.ex-item${i === b.sel ? '.sel' : ''}${why ? '.off' : ''}`, { on: () => { b.tap('main', i); } }, c));
       });
     } else if (b.menu === 'skill') {
-      b.skills().forEach((s, i) => rows.push(h(`div.ex-item${i === b.subSel ? '.sel' : ''}${b.ap < s.ap ? '.off' : ''}`, { on: () => { b.tap('skill', i); } },
-        `${s.name}`, h('span.exb-cost', null, `AP ${s.ap}`), h('div.exb-desc', null, s.desc))));
+      b.skills().forEach((s, i) => rows.push(h(`div.v-row.ex-item${i === b.subSel ? '.sel' : ''}${b.ap < s.ap ? '.off' : ''}`, { on: () => { b.tap('skill', i); } },
+        h('span.v-grow', null, s.name), h('span.exb-cost', null, `AP ${s.ap}`))));
     } else if (b.menu === 'item') {
-      rows.push(h('div.exb-sub', null, `회복약 ×${b.run.potions} — 누구에게?`));
-      b.liveParty.forEach((p, i) => rows.push(h(`div.ex-item${i === b.subSel ? '.sel' : ''}`, { on: () => { b.tap('item', i); } }, `${p.name} ${p.hp}/${p.hpMax}`)));
+      b.liveParty.forEach((p, i) => rows.push(h(`div.v-row.ex-item${i === b.subSel ? '.sel' : ''}`, { on: () => { b.tap('item', i); } },
+        h('span.v-grow', null, p.name), h('span.exb-cost', null, `${p.hp}/${p.hpMax}`))));
     }
-    if (b.menu === 'target') rows.push(h('div.exb-sub', null, b.pending?.kind === 'talk' ? '누구와 대화할까?' : '대상을 고르세요'));
+    // touch has no cancel key: a back row under a sub-list or the target pick
+    if (b.menu !== 'main' && this.ctx.input.device === 'touch') rows.push(h('div.ex-item.exb-back', { on: () => { b.menuKey(AVK.CLR); } }, '◀ 뒤로'));
     return h('div.v-col.ex-menu.exb-menu', null, ...rows);
   }
 

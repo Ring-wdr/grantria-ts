@@ -103,7 +103,7 @@ export class ExpeditionLogic {
       : await buildField(a, this.sets, seed, 'battle', { w: 190, h: 160, groups: 10 + this.battleNo * 2, species: FIELD_SPECIES });
     await this.onZone(zone);
     this.zone = zone;
-    this.field = new FieldSim(zone, seed ^ 0x5bd1e995);
+    this.field = new FieldSim(zone, seed ^ 0x5bd1e995, kind === 'battle' ? this.battleNo - 1 : 0);
     this.mode = 'field';
     this.toasts = [];
     if (kind === 'rest') { this.run.heal(1); this.toast('쉼터: 파티가 모두 회복했다'); this.toast('출구의 돌에서 상호작용으로 다음 지역으로'); }
@@ -161,7 +161,7 @@ export class ExpeditionLogic {
         case 'parry': this.flashes.push({ kind: 'parry', x: e.x, y: e.y, t: 0 }); this.toast('패링!'); break;
         case 'break': this.flashes.push({ kind: 'break', x: e.enemy.x, y: e.enemy.y - 20, t: 0 }); this.toast(`${e.enemy.sp.name} 브레이크! 다가가서 선제 공격`); break;
         case 'kill': {
-          const gain = Math.round(e.enemy.sp.stats.exp * 0.5);
+          const gain = Math.round(e.enemy.stats.exp * 0.5);
           this.run.kills++;
           this.toast(`${e.enemy.sp.name} 처치 · EXP +${gain}`);
           for (const l of this.run.award(gain)) this.toast(l);

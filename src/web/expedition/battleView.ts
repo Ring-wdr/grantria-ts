@@ -78,7 +78,7 @@ export class BattleView {
   }
 
   draw(b: Battle, f: FieldSim, talk: Talk | null = null): void {
-    setDayShift(8, 16, 6);
+    setDayShift(14, 30, 12);                                     // subtracted from the colour: about 45% darker
     this.world.render(f.camX, f.camY, []);
     setDayShift(0, 0, 0);
     const ents = b.units.map((u) => this.sprite(b, u)).filter((d): d is Drawable => !!d).sort((p, q) => p.y - q.y);

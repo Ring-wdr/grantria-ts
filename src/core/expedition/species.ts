@@ -43,6 +43,13 @@ export interface Species {
   desc: string;
 }
 
+/** a creature's stats in a deeper battle zone: power 0 in the first, +1 per zone after (bosses are tuned as they are) */
+export function zoneStats(s: Species['stats'], power: number): Species['stats'] {
+  if (power <= 0) return s;
+  return { hp: Math.round(s.hp * (1 + 0.3 * power)), atk: Math.round(s.atk * (1 + 0.2 * power)), def: s.def + power,
+    spd: s.spd + power, exp: Math.round(s.exp * (1 + 0.4 * power)), lv: s.lv + 2 * power };
+}
+
 export const SPECIES: Species[] = [
   {
     name: '가시덩굴', cmf: 12, fourDir: false, anim: { idle: 0, move: 2, attack: 4 }, tier: 'weak', personality: 'timid',

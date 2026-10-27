@@ -10,7 +10,7 @@
 import { AVK } from '../keys';
 import type { InputState } from '../input';
 import { TILE, type Zone } from './zone';
-import { SPECIES, animRec, type Species } from './species';
+import { SPECIES, animRec, zoneStats, type Species } from './species';
 
 /** sprite directions as the original numbers them: left, right, up, down */
 export type Dir = 0 | 1 | 2 | 3;
@@ -205,6 +205,9 @@ export class FieldEnemy {
   private rest: number;
   private readonly sim: FieldSim;
 
+  /** the species' stats at this zone's power */
+  readonly stats: Species['stats'];
+
   constructor(species: number, x: number, y: number, sim: FieldSim) {
     this.species = species;
     this.sim = sim;
@@ -213,7 +216,8 @@ export class FieldEnemy {
     this.y = this.homeY = y;
     this.angle = sim.rng() * Math.PI * 2;
     this.dir = dirOf(this.angle, 3);
-    this.hp = this.hpMax = this.sp.stats.hp;
+    this.stats = zoneStats(this.sp.stats, sim.power);
+    this.hp = this.hpMax = this.stats.hp;
     this.brkMax = this.sp.field.breakMax;
     this.rest = 1 + sim.rng() * 2;
     this.pickWander();
@@ -382,8 +386,12 @@ export class FieldSim {
   readonly zone: Zone;
   private seed: number;
 
-  constructor(zone: Zone, seed = 1) {
+  /** how much stronger this zone's creatures are (zoneStats) */
+  readonly power: number;
+
+  constructor(zone: Zone, seed = 1, power = 0) {
     this.zone = zone;
+    this.power = power;
     this.seed = seed >>> 0 || 1;
     this.ground = new Ground(zone);
     this.hero = new Hero(zone.start.x, zone.start.y);

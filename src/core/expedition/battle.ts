@@ -118,7 +118,7 @@ function fromMember(m: Member): BUnit {
 }
 
 function fromEnemy(e: FieldEnemy): BUnit {
-  const sp = e.sp, s = sp.stats;
+  const sp = e.sp, s = e.stats ?? sp.stats;                       // zone-scaled (tests pass bare enemies)
   return { id: ids++, side: 'enemy', name: sp.name, species: e.species, sp, member: null, field: e, lv: s.lv,
     hp: Math.max(1, Math.round((s.hp * e.hp) / e.hpMax)), hpMax: s.hp, atk: s.atk, def: s.def, spd: s.spd, ct: 0,
     brk: 0, brkMax: sp.field.breakMax, broken: false, rapport: 0, mood: 0, talks: 0, gone: false };
@@ -227,7 +227,7 @@ export class Battle {
   private win(): void {
     this.phase = 'won';
     this.t = 0;
-    this.exp = this.enemies.filter((e) => !e.gone).reduce((s, e) => s + (e.sp?.stats.exp ?? 0), 0);
+    this.exp = this.enemies.filter((e) => !e.gone).reduce((s, e) => s + ((e.field?.stats ?? e.sp?.stats)?.exp ?? 0), 0);
     this.sync();
     this.levelUps = this.run.award(this.exp);
     this.line = this.exp ? `승리! EXP +${this.exp}` : '적이 남지 않았다';

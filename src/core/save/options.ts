@@ -10,9 +10,10 @@ export interface Options {
   speed: number;
   minimap: number;
   effects: number;
-  /** not in option.dat: on a touch-first screen, scale the stage to fill the screen and draw the field into
-   *  the side margins (app.ts fit()) instead of whole-number scaling with black bars. On until the player sets it
-   *  (fullscreenSet): a phone or tablet starts in fullscreen */
+  /** not in option.dat: scale the stage to fill the screen and draw the field into the side margins (app.ts fit())
+   *  instead of whole-number scaling with black bars; on a desktop the window goes OS fullscreen too (F11 /
+   *  Alt+Enter). Until the player sets it (fullscreenSet) it follows the screen: a phone or tablet starts in
+   *  fullscreen, a desktop does not */
   fullscreen: number;
   fullscreenSet: number;
   /** not in option.dat (편의 설정, game/convenience.ts): music / sound effect volume 0..10 (10 = the original gains) */

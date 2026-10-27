@@ -64,6 +64,8 @@ export class Input implements InputState {
 
   /** key settings (game/keyMap.ts): the next raw key or pad button goes here instead of the game */
   capture: ((c: { kb: string } | { pad: PadButton } | { cancel: true }) => void) | null = null;
+  /** F11 / Alt+Enter (app.ts): toggles the 풀스크린 option */
+  onFullscreenKey: (() => void) | null = null;
   private canvas: HTMLCanvasElement;
   private surface: HTMLElement;
   private viewW: number;
@@ -71,6 +73,12 @@ export class Input implements InputState {
   constructor(canvas: HTMLCanvasElement, viewW: number, viewH: number) {
     this.canvas = canvas; this.viewW = viewW; this.viewH = viewH;
     addEventListener('keydown', (e) => {
+      // F11 / Alt+Enter: 풀스크린 on / off, never a game key (Alt+Enter is not 확인, F11 cannot be bound)
+      if (e.code === 'F11' || (e.altKey && (e.code === 'Enter' || e.code === 'NumpadEnter'))) {
+        e.preventDefault();
+        if (!e.repeat) this.onFullscreenKey?.();
+        return;
+      }
       if (this.capture && !e.repeat) {
         e.preventDefault();
         const c = this.capture;

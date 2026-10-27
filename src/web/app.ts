@@ -21,7 +21,7 @@ import { MusicRoomScene } from './game/musicRoom';
 import { SandboxScene } from './game/sandbox';
 import { AVK } from '../core/keys';
 import { beginDomFrame, endDomFrame, installBlink, padScroll } from './render/domUi';
-import { loadOptions, optionFps } from '../core/save/options';
+import { loadOptions, optionFps, saveOptions } from '../core/save/options';
 import { loadBindings } from './input/bindings';
 import { platform } from '../core/platform';
 import { dev } from '../core/rules/dev';
@@ -33,6 +33,8 @@ import { exportPerf, perf, perfRecordCount, setPerfSource, startPerf, stopPerf, 
 let tickMs = 50;
 /** the refresh-rate cap last sent to the host (null: not yet) */
 let refreshCap: boolean | null = null;
+/** the OS fullscreen last asked of the host or reported by it (null: not yet) */
+let osFullscreen: boolean | null = null;
 
 loadBindings();                                                  // key / pad bindings from the platform store
 const stage = document.getElementById('stage')!;
@@ -82,6 +84,7 @@ const ctx: GameContext = {
     if (refreshCap !== power.refreshCap) platform().refreshCap(refreshCap = power.refreshCap);
     tickMs = 1000 / optionFps(this.options);
     document.documentElement.style.setProperty('--tick', `${tickMs}ms`);
+    applyFullscreen();
     fit();
   },
   input: new Input(canvas, VIEW_W, VIEW_H),
@@ -199,10 +202,10 @@ canvas.addEventListener('pointermove', (e) => {
   *  keep the pixels even; below 2x (a phone in landscape) the stage is fitted to the screen instead.
   *  On a touch-first screen wider than 3:2 the frame spans the window and the field controls move into the
   *  side margins (Input.edge), so the stick and the buttons sit under the thumbs at the screen edges.
-  *  Fullscreen (option, touch-first only): always fitted, and the field is drawn into the side margins too
-  *  (compositor.pad); the menus and popups stay in the 480x320 middle. */
+  *  Fullscreen (option): always fitted, and the field is drawn into the side margins too (compositor.pad); the
+  *  menus and popups stay in the 480x320 middle. On a desktop it also puts the window in OS fullscreen. */
 function fit(): void {
-  const touch = platform().touchFirst(), full = touch && ctx.options.fullscreen === 1;
+  const touch = platform().touchFirst(), full = ctx.options.fullscreen === 1;
   const reserve = debug.offsetParent ? 32 : 0;                   // the debug line above the stage, when shown
   const fitS = Math.min(innerWidth / VIEW_W, (innerHeight - reserve) / VIEW_H);
   const s = !full && Math.floor(fitS) >= 2 ? Math.floor(fitS) : fitS;
@@ -225,9 +228,29 @@ function fit(): void {
   stage.parentElement!.style.width = `${Math.min(innerWidth, (VIEW_W + 2 * margin) * s)}px`;
   stage.parentElement!.style.height = `${VIEW_H * s}px`;
 }
-platform().onTouchFirstChange(fit);
+platform().onTouchFirstChange(() => { applyFullscreen(); fit(); });
 addEventListener('resize', fit);
 fit();
+
+/** 풀스크린 on a desktop is OS fullscreen too; a touch-first screen is already full (Android) or keeps the page as
+ *  it is (a phone browser), the option there is the layout only */
+function applyFullscreen(): void {
+  const fs = platform().fullscreen, on = !platform().touchFirst() && ctx.options.fullscreen === 1;
+  if (fs && on !== osFullscreen) fs.set(osFullscreen = on);
+}
+/** the player's choice from now on (not the touch-first default), kept at once */
+function setFullscreen(on: boolean): void {
+  ctx.options.fullscreen = on ? 1 : 0;
+  ctx.options.fullscreenSet = 1;
+  saveOptions(ctx.options);
+  ctx.applyOptions();
+}
+// left or entered outside the game (browser Esc, the window manager): the option follows
+platform().fullscreen?.onChange((on) => {
+  osFullscreen = on;
+  if (!platform().touchFirst() && on !== (ctx.options.fullscreen === 1)) setFullscreen(on);
+});
+ctx.input.onFullscreenKey = () => setFullscreen(ctx.options.fullscreen !== 1);
 
 const quickMap = new URLSearchParams(location.search).get('map');
 if (quickMap !== null) {

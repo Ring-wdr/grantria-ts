@@ -40,6 +40,14 @@ export interface HostLifecycle {
   setBackHandler(handler: () => boolean): void;
 }
 
+/** OS fullscreen of the game window (desktop window, browser page). */
+export interface FullscreenPort {
+  /** enter or leave; a refusal (a browser before the first key or click) is retried by the host or dropped */
+  set(on: boolean): void;
+  /** the window entered or left fullscreen, whoever did it (the game, browser Esc, the window manager) */
+  onChange(listener: (on: boolean) => void): void;
+}
+
 export interface Platform {
   readonly name: string;
   storage: KeyValueStore;
@@ -61,6 +69,8 @@ export interface Platform {
   touchFirst(): boolean;
   /** touchFirst() changed (browser device emulation, a tablet docked to a keyboard) */
   onTouchFirstChange(listener: () => void): void;
+  /** OS fullscreen, null where the host has none (Android: the app always fills the screen; headless) */
+  fullscreen: FullscreenPort | null;
 }
 
 /** In-memory store (headless runs, or a host whose storage is blocked). */
@@ -89,6 +99,7 @@ const headless: Platform = {
   lifecycle: { onPause: () => {}, setBackHandler: () => {} },
   touchFirst: () => false,
   onTouchFirstChange: () => {},
+  fullscreen: null,
 };
 
 let current: Platform = headless;

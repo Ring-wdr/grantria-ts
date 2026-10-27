@@ -4,13 +4,15 @@
 // - vibration: native plugin (Android vibrator) plus the webview's pad rumble
 // - background: the 'host-pause' event (window minimised, Android onPause / onResume) and page visibility
 // - back key (Android): Tauri's 'back-button' event; when the game does not use it, a native question, then exit
+// - fullscreen (desktop): the window's own fullscreen
 // Rendering, audio and input stay the webview's: Tauri runs the same web app in the OS webview.
 import { exit, onBackButtonPress } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ask, open, save } from '@tauri-apps/plugin-dialog';
 import { readFile, writeFile } from '@tauri-apps/plugin-fs';
-import type { FilePort, KeyValueStore, Platform } from '../core/platform';
+import type { FilePort, FullscreenPort, KeyValueStore, Platform } from '../core/platform';
 import { PageLifecycle, padRumble, promptDialog, webAssetSource } from '../web/platform';
 
 /** Every save read into memory at boot; writes update memory at once and go to the files in order, one
@@ -71,6 +73,29 @@ const tauriFiles: FilePort = {
   },
 };
 
+/** The desktop window in fullscreen (a webview's own Fullscreen API only fills the window). Changes are read from
+ *  the window's resizes; the ones while the game's own request is in flight are skipped, the state is read after it. */
+function windowFullscreen(): FullscreenPort {
+  const win = getCurrentWindow();
+  const listeners: ((on: boolean) => void)[] = [];
+  let state: boolean | null = null, busy = 0;
+  const read = async () => {
+    if (busy) return;
+    const on = await win.isFullscreen().catch(() => state);
+    if (on === null || on === state) return;
+    state = on;
+    for (const l of listeners) l(on);
+  };
+  void win.onResized(() => void read()).catch(() => {});
+  return {
+    set(on) {
+      busy++;
+      win.setFullscreen(on).catch((e) => console.error('fullscreen:', e)).finally(() => { busy--; void read(); });
+    },
+    onChange: (listener) => { listeners.push(listener); },
+  };
+}
+
 export async function createTauriPlatform(): Promise<Platform> {
   const [storage, touchFirst] = await Promise.all([appDataStore(), invoke<boolean>('touch_first')]);
   const lifecycle = new PageLifecycle();
@@ -100,5 +125,6 @@ export async function createTauriPlatform(): Promise<Platform> {
     lifecycle,
     touchFirst: () => touchFirst,            // fixed by the build target (Rust cfg(mobile))
     onTouchFirstChange: () => {},
+    fullscreen: touchFirst ? null : windowFullscreen(),   // Android: the activity is always fullscreen (MainActivity.kt)
   };
 }

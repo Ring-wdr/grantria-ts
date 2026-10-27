@@ -53,11 +53,11 @@ export abstract class OptionTabLogic {
 
   get busy(): boolean { return this.setting || this.help >= 0 || this.book >= 0 || this.records >= 0; }
 
-  /** extra settings rows after the five options: 편의 설정, 풀스크린 on a touch-first screen, 키 설정 unless the player
-   *  is on touch, 개발자 모드 once unlocked */
+  /** extra settings rows after the five options: 편의 설정, 풀스크린 on a touch-first screen or a host with OS
+   *  fullscreen (desktop), 키 설정 unless the player is on touch, 개발자 모드 once unlocked */
   protected get extraRows(): ('conv' | 'full' | 'keys' | 'dev')[] {
     const r: ('conv' | 'full' | 'keys' | 'dev')[] = ['conv'];
-    if (platform().touchFirst()) r.push('full');
+    if (platform().touchFirst() || platform().fullscreen) r.push('full');
     if (this.ctx.input.device !== 'touch') r.push('keys');
     if (dev().unlocked) r.push('dev');
     return r;

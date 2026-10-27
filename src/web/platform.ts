@@ -1,7 +1,7 @@
 // Browser platform: localStorage, file input / download, fetch from the Vite base, navigator.vibrate.
 // The webview pieces other hosts reuse (asset fetch, pad rumble, page lifecycle, the HTML prompt) are exported
 // from here; a host imports them from this file only, not from the rest of src/web.
-import { MemoryStore, type AssetSource, type FilePort, type HostLifecycle, type KeyValueStore, type Platform } from '../core/platform';
+import { MemoryStore, type AssetSource, type FilePort, type FullscreenPort, type HostLifecycle, type KeyValueStore, type Platform } from '../core/platform';
 import { promptDialog } from './render/promptDialog';
 
 export { promptDialog };
@@ -99,6 +99,42 @@ export class PageLifecycle implements HostLifecycle {
   }
 }
 
+/** The page in browser fullscreen (Fullscreen API), null where the browser has none (iPhone). Entering needs a key
+ *  press or a click first: a refused request (the saved option at boot) is made again on the next one. Esc stays the
+ *  game's cancel key where the browser allows it (Keyboard Lock, Chromium: hold Esc to leave fullscreen). */
+export function webFullscreen(): FullscreenPort | null {
+  const el = document.documentElement;
+  if (!document.fullscreenEnabled || !el.requestFullscreen) return null;
+  let want = false, waiting = false;
+  const lockEsc = () => {
+    const kb = (navigator as Navigator & { keyboard?: { lock?: (codes: string[]) => Promise<void> } }).keyboard;
+    kb?.lock?.(['Escape']).catch(() => {});
+  };
+  const events = ['keydown', 'mousedown', 'touchend'] as const;
+  const retry = (e: Event) => {
+    if (e instanceof KeyboardEvent && e.code === 'Escape') return;   // Esc does not count as a user activation
+    for (const t of events) removeEventListener(t, retry, true);
+    waiting = false;
+    if (want && !document.fullscreenElement) enter();
+  };
+  const enter = () => {
+    el.requestFullscreen({ navigationUI: 'hide' }).then(lockEsc, () => {
+      if (waiting) return;
+      waiting = true;
+      for (const t of events) addEventListener(t, retry, true);
+    });
+  };
+  return {
+    set(on) {
+      want = on;
+      if (on === !!document.fullscreenElement) return;
+      if (on) enter();
+      else document.exitFullscreen().catch(() => {});
+    },
+    onChange: (listener) => document.addEventListener('fullscreenchange', () => listener(!!document.fullscreenElement)),
+  };
+}
+
 export function createWebPlatform(): Platform {
   const coarse = matchMedia('(pointer: coarse)');
   return {
@@ -114,5 +150,6 @@ export function createWebPlatform(): Platform {
     lifecycle: new PageLifecycle(),                     // a browser has no back key of its own to take over
     touchFirst: () => coarse.matches,
     onTouchFirstChange: (listener) => coarse.addEventListener('change', listener),
+    fullscreen: webFullscreen(),
   };
 }

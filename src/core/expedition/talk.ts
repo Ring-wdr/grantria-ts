@@ -1,7 +1,9 @@
 // 원정(가제): negotiation (대화), after the 3D prototype's: the creature asks two questions whose answers move its mood
 // by its temperament, may ask for something, and then the chance is rolled: a base by temperament, the mood, every
 // parry made against it in this battle, the HP it has lost, being broken, the level gap. A good roll and it joins the
-// party for the run. The lines are this mode's own.
+// party for the run. With the party full the talk then asks which member to let go for it; letting none go, or one of
+// its kind already walking with the party, it parts on good terms and the party gains EXP instead (outcome 'bonded').
+// The lines are this mode's own.
 import { AVK } from '../keys';
 import type { BUnit } from './battle';
 import type { Personality } from './species';
@@ -22,6 +24,8 @@ interface Temper {
   dislike: string[];
   angry: string;
   join: string;
+  /** won over, but the party cannot take it: it parts on good terms */
+  bond: string;
   refuse: string;
 }
 
@@ -37,6 +41,7 @@ export const TEMPERS: Record<Personality, Temper> = {
     dislike: ['히익, 무서워...', '그런 말은 싫어...'],
     angry: '저리 가! 가시로 찔러 버릴 거야!',
     join: '...따라가도 돼? 햇볕 드는 곳이면 좋겠어.',
+    bond: '...자리가 없구나. 그래도 응원할게. 이거, 햇볕 냄새 나는 잎이야.',
     refuse: '역시 아직은 무서워. 미안해...',
   },
   childish: {
@@ -50,6 +55,7 @@ export const TEMPERS: Record<Personality, Temper> = {
     dislike: ['우웅, 재미없어.', '머리가 빙글빙글해...'],
     angry: '흥! 너랑은 안 놀아! 물벼락이다!',
     join: '정했다! 너희랑 같이 놀러 갈래!',
+    bond: '에이, 꽉 찼네~ 그럼 이거 줄게! 다음에 또 놀자!',
     refuse: '오늘은 그냥 물장구 칠래~ 안녕!',
   },
   proud: {
@@ -63,6 +69,7 @@ export const TEMPERS: Record<Personality, Temper> = {
     dislike: ['감히 이 몸을!', '무례하구나.'],
     angry: '말은 끝이다. 갈기갈기 찢어 주마!',
     join: '좋다. 특별히 함께 걸어 주지.',
+    bond: '동행할 자리가 없다니 아쉽군. 이 몸의 기운을 나눠 주마.',
     refuse: '아직 이 몸이 따를 그릇이 아니다.',
   },
   curious: {
@@ -76,6 +83,7 @@ export const TEMPERS: Record<Personality, Temper> = {
     dislike: ['그건 대답이 아니잖아.', '속 보이는 말은 싫어.'],
     angry: '시시해! 물속으로 끌고 갈 테야!',
     join: '너희를 따라가면 모르는 노래를 잔뜩 듣겠지? 갈래!',
+    bond: '함께 갈 수는 없겠네. 대신 내가 아는 노래 하나 알려 줄게.',
     refuse: '조금 더 지켜볼래.',
   },
   honorable: {
@@ -89,6 +97,7 @@ export const TEMPERS: Record<Personality, Temper> = {
     dislike: ['가볍구나.', '그런 말로는 움직이지 않는다.'],
     angry: '말은 필요 없다. 발톱으로 답하라!',
     join: '그대의 등을 지켜 주지. 함께 가자.',
+    bond: '그대 곁엔 이미 든든한 이가 있군. 이 싸움의 경험을 가져가라.',
     refuse: '아직 그대를 인정할 수 없다.',
   },
 };
@@ -127,7 +136,7 @@ export type TalkStep =
   | { kind: 'choose'; who: string; text: string; options: string[]; tones: (Tone | null)[] }
   | { kind: 'roll'; parts: [string, number][]; chance: number; success: boolean };
 
-export type TalkOutcome = 'joined' | 'failed' | 'angry' | 'left';
+export type TalkOutcome = 'joined' | 'bonded' | 'failed' | 'angry' | 'left';
 
 /** a talk in a battle: steps shown one at a time; the owner applies the outcome when it is done */
 export class Talk {
@@ -142,8 +151,12 @@ export class Talk {
   private questions: number[];
   private pendingDemand: Demand | null = null;
   private readonly rnd: () => number;
-  /** what the run can give (potions) and party room */
-  private readonly ctx: { potions: () => number; usePotion: () => void; room: boolean; showHints: boolean };
+  /** what the run can give (potions); whether a won-over creature can join ('kin': one of its kind is along; 'full':
+   *  only by letting one of `release` go, the members that may leave) */
+  private readonly ctx: { potions: () => number; usePotion: () => void; block: 'kin' | 'full' | null; release: { name: string; lv: number }[]; showHints: boolean };
+  /** the member let go for this creature (an index into ctx.release), when it joined that way */
+  released: number | null = null;
+  private pendingRelease = false;
   /** the roll was shown */
   rolled = false;
   /** seconds since the roll step appeared (its animation) */
@@ -161,6 +174,9 @@ export class Talk {
     this.questions = ids.slice(0, 2);
     this.step = { kind: 'say', who: enemy.name, text: enemy.broken ? pick(this.temper.greetBroken) : pick(this.temper.greet) };
     if (enemy.talks === 1 && ctx.showHints) this.queue.push({ kind: 'say', who: '', text: `성격: 「${this.temper.name}」 — ${this.temper.desc}` });
+    if (ctx.block && ctx.showHints) this.queue.push({ kind: 'say', who: '', text: ctx.block === 'kin'
+      ? '같은 종족이 이미 동료다. 마음을 얻으면 대신 경험치를 받는다.'
+      : '파티가 가득 찼다. 마음을 얻으면 동료 하나와 작별하고 맞이하거나, 대신 경험치를 받는다.' });
     this.queue.push(this.question(this.questions[0]));
   }
 
@@ -193,6 +209,7 @@ export class Talk {
     const st = this.step as Extract<TalkStep, { kind: 'choose' }>;
     this.sel = 0;
     const tone = st.tones[i];
+    if (this.pendingRelease) { this.settleRelease(i); return; }
     if (this.pendingDemand) { this.settleDemand(i === 0); return; }
     const delta = this.temper.likes[tone!];
     this.enemy.mood += delta;
@@ -221,6 +238,21 @@ export class Talk {
       return;
     }
     this.queue.push(this.roll());
+  }
+
+  /** the party is full: let member i go for it, or none (the last option) and take the EXP */
+  private settleRelease(i: number): void {
+    this.pendingRelease = false;
+    const who = this.ctx.release[i];
+    if (who !== undefined) {
+      this.released = i;
+      this.queue = [{ kind: 'say', who: '', text: `${who.name}이(가) 파티를 떠났다.` }, { kind: 'say', who: this.enemy.name, text: this.temper.join }];
+      this.outcomeAfter = 'joined';
+    } else {
+      this.queue = [{ kind: 'say', who: this.enemy.name, text: this.temper.bond }];
+      this.outcomeAfter = 'bonded';
+    }
+    this.advance();
   }
 
   private demandOk = false;
@@ -264,7 +296,12 @@ export class Talk {
     const st = this.step;
     if (st.kind === 'roll' && !this.rolled) {
       this.rolled = true;
-      if (st.success) { this.queue = [{ kind: 'say', who: this.enemy.name, text: this.temper.join }]; this.outcomeAfter = 'joined'; }
+      if (st.success && !this.ctx.block) { this.queue = [{ kind: 'say', who: this.enemy.name, text: this.temper.join }]; this.outcomeAfter = 'joined'; }
+      else if (st.success && this.ctx.block === 'full' && this.ctx.release.length) {
+        this.pendingRelease = true;
+        this.queue = [{ kind: 'choose', who: '', text: `${this.enemy.name}이(가) 동료가 되려 한다. 파티가 가득 찼다 — 누구와 작별할까?`,
+          options: [...this.ctx.release.map((m) => `${m.name} Lv.${m.lv}와(과) 작별한다`), '아무도 보내지 않는다 (대신 경험치)'], tones: [...this.ctx.release.map(() => null), null] }];
+      } else if (st.success) { this.queue = [{ kind: 'say', who: this.enemy.name, text: this.temper.bond }]; this.outcomeAfter = 'bonded'; }
       else {
         const left = this.enemy.sp!.personality === 'timid' && this.enemy.mood < 0 && this.rnd() < 0.4;
         this.queue = [{ kind: 'say', who: this.enemy.name, text: left ? '히익—! (도망쳤다)' : this.temper.refuse }];

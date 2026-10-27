@@ -12,8 +12,8 @@ import type { Assets } from '../data/assets';
 import type { InputState } from '../input';
 import type { SoundOut } from '../sound';
 import { FieldSim, type Advantage, type FieldEnemy, type Press } from './field';
-import { Battle } from './battle';
-import { REWARDS, Run, recruit, type Reward } from './run';
+import { Battle, talkExp } from './battle';
+import { REWARDS, Run, recruit, type Member, type Reward } from './run';
 import { Talk } from './talk';
 import { BOSS_SPECIES, FIELD_SPECIES } from './species';
 import { Rng } from './rng';
@@ -67,6 +67,8 @@ export class ExpeditionLogic {
   readonly run = new Run();
   battle: Battle | null = null;
   talk: Talk | null = null;
+  /** the members a full party may let go for a talked-over creature (the talk names them in this order) */
+  private releasable: Member[] = [];
   toasts: Toast[] = [];
   flashes: Flash[] = [];
   /** the encounter being opened: its banner shows this long before the battle */
@@ -198,20 +200,25 @@ export class ExpeditionLogic {
   /** 대화 was picked: the negotiation opens over the battle */
   protected onTalk(talker: Battle['party'][number], enemy: Battle['enemies'][number]): void {
     const run = this.run;
-    this.talk = new Talk(talker, enemy, { potions: () => run.potions, usePotion: () => { run.potions--; }, room: run.party.length < 3, showHints: true });
+    this.releasable = run.party.filter((m) => m.species !== null);
+    this.talk = new Talk(talker, enemy, { potions: () => run.potions, usePotion: () => { run.potions--; }, block: this.battle!.recruitBlock(enemy),
+      release: this.releasable.map((m) => ({ name: m.name, lv: m.lv })), showHints: true });
   }
 
   /** the talk is over: a creature that joined fights on the party's side */
   private endTalk(): void {
     const t = this.talk!, b = this.battle!, out = t.outcome!;
     if (out === 'joined') {
+      const gone = t.released !== null ? this.releasable[t.released] : null;
+      if (gone) b.release(gone);
       const m = recruit(t.enemy.species!);
       m.hp = Math.max(1, Math.round(m.hpMax * Math.max(0.3, t.enemy.hp / t.enemy.hpMax)));
       this.run.party.push(m);
       this.run.recruits++;
       b.addMember(m);
       b.line = `${m.name}이(가) 동료가 되었다!`;
-    } else if (out === 'left') b.line = `${t.enemy.name}이(가) 달아났다`;
+    } else if (out === 'bonded') b.line = `${t.enemy.name}의 마음을 얻었다! 승리하면 EXP +${talkExp(t.enemy)}`;
+    else if (out === 'left') b.line = `${t.enemy.name}이(가) 달아났다`;
     else if (out === 'angry') b.line = `${t.enemy.name}이(가) 화가 났다!`;
     else b.line = '협상 실패';
     b.endTalk(out, t.enemy);

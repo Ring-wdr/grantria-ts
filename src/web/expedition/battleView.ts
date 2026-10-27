@@ -5,7 +5,7 @@
 // (the species' field shot frame) reaches the target on each hit's time.
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
-import { AP_MAX, BK, COMMANDS, DODGE_MS, PARRY_MS, type Battle, type BUnit } from '../../core/expedition/battle';
+import { ALL_OUT, AP_MAX, BK, DODGE_MS, PARRY_MS, type Battle, type BUnit } from '../../core/expedition/battle';
 import { animRec } from '../../core/expedition/species';
 import type { FieldSim } from '../../core/expedition/field';
 import type { GameContext } from '../game/scene';
@@ -26,13 +26,19 @@ const SHOT_MS = 380;
 export class BattleView {
   constructor(private readonly ctx: GameContext, private readonly world: WorldView, private readonly cmfs: Map<string, Cmf>) {}
 
+  /** the unit is playing the party action (총공격: every standing member) */
+  private acting(b: Battle, u: BUnit): boolean {
+    const a = b.act;
+    return !!a && a.kind !== 'item' && (a.actor === u || (a.kind === 'allout' && u.side === 'party' && u.hp > 0));
+  }
+
   /** where a unit stands (screen px), stepping toward its target while it acts */
   private pos(b: Battle, u: BUnit): [number, number] {
     const list = u.side === 'party' ? b.party : b.enemies, i = list.indexOf(u);
     let [x, y] = (u.side === 'party' ? PARTY_AT : ENEMY_AT)[i] ?? [240, 200];
     const a = b.act;
-    if (a && a.actor === u && a.kind !== 'item') {
-      const k = Math.sin(Math.min(1, a.t / a.dur) * Math.PI), [tx, ty] = this.pos0(b, a.targets[0]);
+    if (a && this.acting(b, u)) {
+      const k = Math.sin(Math.min(1, a.t / a.dur) * Math.PI), [tx, ty] = this.pos0(b, a.targets[a.kind === 'allout' ? Math.max(0, i) % a.targets.length : 0]);
       x += (tx + (u.side === 'party' ? 40 : -40) - x) * k * 0.8;
       y += (ty - y) * k * 0.8;
     }
@@ -60,8 +66,8 @@ export class BattleView {
     if (u.species === null) {
       const t = this.ctx.assets.tables, acts = t.playerActions[0], mult = t.actionMult[0], a = b.act;
       let frame = 6 + (Math.floor(b.t * 8) % 6);
-      if (a && a.actor === u && a.kind !== 'item') {
-        const ai = a.kind === 'skill' ? a.skill!.act : a.kind === 'counter' ? 2 : 0, rec = acts[ai];
+      if (a && this.acting(b, u)) {
+        const ai = a.kind === 'skill' ? a.skill!.act : a.kind === 'counter' || a.kind === 'allout' ? 2 : 0, rec = acts[ai];
         const k = Math.min(rec.n - 1, Math.floor((a.t / a.dur) * rec.n));
         frame = rec.frame[k] + (mult[ai] ?? 0);
       } else if (down) frame = 6;
@@ -75,7 +81,7 @@ export class BattleView {
       rec = cmf.anims[animRec(sp, sp.anim.attack, 0, 3)] ?? rec;
       k = b.now < ea.strikeAt ? 0 : Math.floor((b.now - ea.strikeAt) / 60);
       k = Math.min(rec.n - 1, k);
-    } else if (b.act && b.act.actor === u) {
+    } else if (b.act && this.acting(b, u)) {
       rec = cmf.anims[animRec(sp, sp.anim.attack, 0, 3)] ?? rec;
       k = Math.min(rec.n - 1, Math.floor((b.act.t / b.act.dur) * rec.n));
     } else k %= rec.n;
@@ -204,16 +210,19 @@ export class BattleView {
     if (b.menu === 'target') return b.pending?.kind === 'talk' ? '누구와 대화할까?' : '대상을 고르세요';
     if (b.menu === 'item') return `회복약 ×${b.run.potions} — 누구에게?`;
     if (b.menu === 'skill') { const s = b.skills()[b.subSel]; return s ? `${s.name} · ${s.desc}` : null; }
-    return b.blocked(COMMANDS[b.sel]);
+    const c = b.commands()[b.sel];
+    if (c === ALL_OUT) return '적이 모두 브레이크! 파티 전원이 모든 적을 친다 (이후 적은 일어난다)';
+    if (c === '대화' && b.allBroken && !b.blocked(c)) return '적이 모두 무릎을 꿇었다. 검사가 말을 건다';
+    return c ? b.blocked(c) : null;
   }
 
   /** the command column at the right edge; the skill / item lists open in the same place */
   private menuTree(b: Battle): VNode {
     const rows: VNode[] = [];
     if (b.menu === 'main' || b.menu === 'target') {
-      COMMANDS.forEach((c, i) => {
+      b.commands().forEach((c, i) => {
         const why = b.blocked(c);
-        rows.push(h(`div.ex-item${i === b.sel ? '.sel' : ''}${why ? '.off' : ''}`, { on: () => { b.tap('main', i); } }, c));
+        rows.push(h(`div.ex-item${i === b.sel ? '.sel' : ''}${why ? '.off' : ''}${c === ALL_OUT ? '.allout' : ''}`, { on: () => { b.tap('main', i); } }, c));
       });
     } else if (b.menu === 'skill') {
       b.skills().forEach((s, i) => rows.push(h(`div.v-row.ex-item${i === b.subSel ? '.sel' : ''}${b.ap < s.ap ? '.off' : ''}`, { on: () => { b.tap('skill', i); } },

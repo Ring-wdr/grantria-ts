@@ -71,6 +71,13 @@ export const HERO_SKILLS: Skill[] = [
   { name: '파쇄격', ap: 4, power: 1.2, brk: 70, all: false, act: 7, fx: [0, 5], desc: '브레이크 게이지를 크게 깎는다' },
 ];
 export const BEAST_SKILL: Skill = { name: '돌진', ap: 2, power: 1.6, brk: 20, all: false, act: 0, fx: [0, 5], desc: '힘껏 부딪친다' };
+/** a recruited creature's own skill by species index (SPECIES), offered before 돌진 */
+export const RECRUIT_SKILLS: Record<number, Skill> = {
+  0: { name: '휘감기', ap: 2, power: 0.8, brk: 45, all: false, act: 0, fx: [0, 5], desc: '덩굴로 묶어 브레이크 게이지를 크게 깎는다' },
+  1: { name: '사냥 본능', ap: 3, power: 2.2, brk: 18, all: false, act: 0, fx: [0, 5], desc: '급소를 노려 한 명에게 큰 피해' },
+  2: { name: '물결 노래', ap: 3, power: 0.8, brk: 12, all: true, act: 0, fx: [0, 5], desc: '노래의 물결로 적 전원을 친다' },
+  3: { name: '물보라 세례', ap: 2, power: 0.6, brk: 16, all: true, act: 0, fx: [0, 5], desc: '물방울을 흩뿌려 적 전원의 브레이크를 깎는다' },
+};
 
 export const COMMANDS = ['공격', '스킬', '아이템', '대화', '도주'] as const;
 export type Command = (typeof COMMANDS)[number];
@@ -257,7 +264,8 @@ export class Battle {
   // --- the party's turn ------------------------------------------------------------------------------------------
 
   /** skills of the acting unit */
-  skills(u: BUnit | null = this.actor): Skill[] { return !u ? [] : u.species === null ? HERO_SKILLS : [BEAST_SKILL]; }
+  skills(u: BUnit | null = this.actor): Skill[] { return !u ? [] : u.species === null ? HERO_SKILLS
+    : RECRUIT_SKILLS[u.species] ? [RECRUIT_SKILLS[u.species], BEAST_SKILL] : [BEAST_SKILL]; }
 
   /** why a command cannot be used now, or null */
   blocked(c: Command): string | null {

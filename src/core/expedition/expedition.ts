@@ -3,7 +3,7 @@
 // combat, rules or saves (tests/boundary.test.ts). The run (stage 1): three battle zones on t3, one after another,
 // with a rest zone between them half the time and always one before the boss room (초원 - 깊숙한곳, m124). The hero
 // walks 360° and fights in the field; an encounter becomes a turn battle. Leaving a battle zone by its exit stone shows
-// the reward (a placeholder until the reward system is decided) and heals 30%; a rest zone heals fully. Beating the
+// a provisional reward (one of three, until the reward system is decided) and heals 30%; a rest zone heals fully. Beating the
 // boss clears the stage; a party wipe ends the run. Either way it is back to the title: nothing is kept.
 // State and keys; the host draws it (web/expedition/expedition.ts) and steps it every animation frame (frame()).
 // Plain fields, no constructor parameter properties: node's type stripping loads core/ in tests.
@@ -13,7 +13,7 @@ import type { InputState } from '../input';
 import type { SoundOut } from '../sound';
 import { FieldSim, type Advantage, type FieldEnemy, type Press } from './field';
 import { Battle } from './battle';
-import { Run, recruit } from './run';
+import { REWARDS, Run, recruit, type Reward } from './run';
 import { Talk } from './talk';
 import { BOSS_SPECIES, FIELD_SPECIES } from './species';
 import { Rng } from './rng';
@@ -76,6 +76,9 @@ export class ExpeditionLogic {
   step = 0;
   /** the reward screen's lines */
   reward: string[] = [];
+  /** 임시 보상: the three offered and the cursor */
+  rewardChoices: Reward[] = [];
+  rewardSel = 0;
 
   constructor(ctx: ExpeditionHost, seed = Date.now() >>> 0) {
     this.ctx = ctx;
@@ -117,7 +120,10 @@ export class ExpeditionLogic {
       this.run.cleared++;
       this.run.heal(EXIT_HEAL);
       this.run.potions++;
-      this.reward = [`${this.zoneName} 돌파!`, `파티 HP ${EXIT_HEAL * 100}% 회복`, '회복약 +1', '보상 선택: 준비 중 (보상 체계는 회의 후 결정)'];
+      this.reward = [`${this.zoneName} 돌파!`, `파티 HP ${EXIT_HEAL * 100}% 회복`, '회복약 +1'];
+      const rng = new Rng((this.seed ^ (this.step * 0x27d4eb2d)) >>> 0), pool = [...REWARDS];
+      this.rewardChoices = [0, 1, 2].map(() => pool.splice(Math.floor(rng.next() * pool.length), 1)[0]);
+      this.rewardSel = 0;
       this.mode = 'reward';
       return;
     }
@@ -143,7 +149,7 @@ export class ExpeditionLogic {
     this.flashes = this.flashes.filter((f) => f.t < 0.5);
     if (this.mode === 'pause') { this.pauseKeys(keys); return; }
     if (this.mode === 'over' || this.mode === 'clear') { if (keys.includes(AVK.OK)) this.ctx.screens.title(); return; }
-    if (this.mode === 'reward') { if (keys.includes(AVK.OK)) { this.step++; void this.enterZone(); } return; }
+    if (this.mode === 'reward') { this.rewardKeys(keys); return; }
     if (this.mode === 'battle') { this.battleFrame(dt, presses, now, keys); return; }
     if (!this.field) return;
     if (this.mode === 'encounter') {
@@ -257,5 +263,23 @@ export class ExpeditionLogic {
   }
 
   /** a pause row was tapped */
+  private rewardKeys(keys: number[]): void {
+    const n = this.rewardChoices.length;
+    for (const k of keys) {
+      if (k === AVK.UP) this.rewardSel = (this.rewardSel + n - 1) % n;
+      else if (k === AVK.DOWN) this.rewardSel = (this.rewardSel + 1) % n;
+      else if (k === AVK.OK) { this.pickReward(this.rewardSel); return; }
+    }
+  }
+
+  /** take one of the offered rewards and go on */
+  pickReward(i: number): void {
+    const r = this.rewardChoices[i];
+    if (!r || this.mode !== 'reward') return;
+    r.apply(this.run);
+    this.step++;
+    void this.enterZone().then(() => this.toast(`${r.name}: ${r.desc}`));
+  }
+
   pickPause(i: number): void { this.pauseSel = i; this.pauseKeys([AVK.OK]); }
 }

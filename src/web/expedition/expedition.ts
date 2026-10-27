@@ -231,13 +231,16 @@ export class ExpeditionScene extends ExpeditionLogic {
     return h('span.v-row.ex-hint', null, padBadge(this.ctx.input, key), h('span', null, label));
   }
 
-  /** a battle zone left: its reward (a placeholder) and the heal */
+  /** a battle zone left: the heal and the provisional reward, one of three (then on to the next zone) */
   private drawReward(): void {
     this.ctx.ui.view('ex-reward', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
       h('div.v-col.ex-menu.ex-result', null,
         h('div.ex-menu-title', null, this.reward[0]),
         this.reward.slice(1).map((l) => h('div.ex-line', null, l)),
-        h('div.v-row.ex-item.sel.ex-go', { on: () => [AVK.OK] }, padBadge(this.ctx.input, AVK.OK), `다음 지역으로 (${this.nextName()})`))));
+        h('div.ex-line.ex-dim', null, `보상 하나를 고른다 (임시 보상) → ${this.nextName()}`),
+        this.rewardChoices.map((r, i) => h(`div.v-col.ex-item.ex-reward${i === this.rewardSel ? '.sel' : ''}`, { on: () => { this.pickReward(i); } },
+          h('span.ex-reward-name', null, r.name), h('span.ex-reward-desc', null, r.desc))),
+        h('div.v-row.ex-go', null, padBadge(this.ctx.input, AVK.OK), '고르기'))));
   }
 
   private nextName(): string {

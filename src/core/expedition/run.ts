@@ -51,6 +51,17 @@ export function gainExp(m: Member, n: number): number {
   return up;
 }
 
+/** 임시 보상 (provisional until the reward system is decided in a meeting): one of three after a battle zone */
+export interface Reward { name: string; desc: string; apply(run: Run): void }
+export const REWARDS: Reward[] = [
+  { name: '체력 단련', desc: '파티 전원의 최대 HP +15%', apply: (r) => { for (const m of r.party) { const d = Math.round(m.hpMax * 0.15); m.hpMax += d; m.hp += d; } } },
+  { name: '날 세우기', desc: '파티 전원의 공격 +3', apply: (r) => { for (const m of r.party) m.atk += 3; } },
+  { name: '단단한 껍질', desc: '파티 전원의 방어 +2', apply: (r) => { for (const m of r.party) m.def += 2; } },
+  { name: '바람의 발', desc: '파티 전원의 속도 +2 (턴이 빨리 온다)', apply: (r) => { for (const m of r.party) m.spd += 2; } },
+  { name: '약초 꾸러미', desc: '회복약 +2', apply: (r) => { r.potions += 2; } },
+  { name: '깊은 휴식', desc: '파티 전원 HP 완전 회복', apply: (r) => { r.heal(1); } },
+];
+
 export class Run {
   party: Member[] = [newHero()];
   potions = 3;

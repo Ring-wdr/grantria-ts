@@ -133,3 +133,6 @@
 .ex-line { font-size: 10px; color: #d8dde8; padding: 1px 6px; }
 .ex-stats { gap: 2px; align-items: center; font-size: 10px; color: #e6efff; margin: 6px 0; }
 .ex-go { gap: 5px; align-items: center; justify-content: center; }
+.ex-reward { gap: 1px; padding: 3px 8px; }
+.ex-reward-name { font-size: 10px; color: #ffe9a8; }
+.ex-reward-desc { font-size: 8px; color: #b8c2d8; }

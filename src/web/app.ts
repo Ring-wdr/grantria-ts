@@ -198,17 +198,16 @@ canvas.addEventListener('pointermove', (e) => {
   canvas.style.cursor = button ? 'pointer' : '';
 });
 
-/** scale of the whole stage (canvas and UI layers together, so CSS blend modes reach the field): whole numbers
-  *  keep the pixels even; below 2x (a phone in landscape) the stage is fitted to the screen instead.
+/** scale of the whole stage (canvas and UI layers together, so CSS blend modes reach the field): fitted to the
+  *  window at any size, not stepped to whole numbers.
   *  On a touch-first screen wider than 3:2 the frame spans the window and the field controls move into the
   *  side margins (Input.edge), so the stick and the buttons sit under the thumbs at the screen edges.
-  *  Fullscreen (option): always fitted, and the field is drawn into the side margins too (compositor.pad); the
-  *  menus and popups stay in the 480x320 middle. On a desktop it also puts the window in OS fullscreen. */
+  *  Fullscreen (option): the field is drawn into the side margins too (compositor.pad); the menus and popups
+  *  stay in the 480x320 middle. On a desktop it also puts the window in OS fullscreen. */
 function fit(): void {
   const touch = platform().touchFirst(), full = ctx.options.fullscreen === 1;
   const reserve = debug.offsetParent ? 32 : 0;                   // the debug line above the stage, when shown
-  const fitS = Math.min(innerWidth / VIEW_W, (innerHeight - reserve) / VIEW_H);
-  const s = !full && Math.floor(fitS) >= 2 ? Math.floor(fitS) : fitS;
+  const s = Math.min(innerWidth / VIEW_W, (innerHeight - reserve) / VIEW_H);
   const side = Math.max(0, Math.floor((innerWidth / s - VIEW_W) / 2));
   const edge = touch && side >= 16 ? side : 0;
   const pad = full ? Math.max(0, Math.ceil((innerWidth / s - VIEW_W) / 2)) : 0;

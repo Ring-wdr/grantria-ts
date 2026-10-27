@@ -10,8 +10,7 @@ export interface Options {
   speed: number;
   minimap: number;
   effects: number;
-  /** not in option.dat: scale the stage to fill the screen and draw the field into the side margins (app.ts fit())
-   *  instead of whole-number scaling with black bars; on a desktop the window goes OS fullscreen too (F11 /
+  /** not in option.dat: draw the field into the side margins (app.ts fit()) instead of black bars; on a desktop the window goes OS fullscreen too (F11 /
    *  Alt+Enter). Until the player sets it (fullscreenSet) it follows the screen: a phone or tablet starts in
    *  fullscreen, a desktop does not */
   fullscreen: number;

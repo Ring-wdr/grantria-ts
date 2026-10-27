@@ -27,6 +27,7 @@ import { drawBacklog } from './backlog';
 import { SandboxScene } from './sandbox';
 import { ReplayListScene } from './replay';
 import { MusicRoomScene } from './musicRoom';
+import { ExpeditionScene } from '../expedition/expedition';
 import type { Screens } from '../../core/scenes/host';
 import { CLASS_KEY, CharSelectLogic, LogoLogic, RatingLogic, SLOT_KEY, SlotLogic, TITLE_DATA, TITLE_EXTRA, TITLE_EXTRA_ITEMS, TITLE_ITEMS, TITLE_NONE, TITLE_PAD, TitleLogic, TitleOptionLogic, playTime } from '../../core/scenes/title';
 import { PlayLogic } from '../../core/scenes/play';
@@ -501,6 +502,7 @@ export class WebScreens implements Screens {
   replays(): void { this.ctx.go(new ReplayListScene(this.ctx)); }
   musicRoom(): void { this.ctx.go(new MusicRoomScene(this.ctx)); }
   data(): void { this.ctx.go(new DataScene(this.ctx)); }
+  expedition(): void { this.ctx.go(new ExpeditionScene(this.ctx)); }
 }
 
 class LoadingScene implements Scene {

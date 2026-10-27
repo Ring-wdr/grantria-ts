@@ -3,7 +3,7 @@
 // any front end. tsconfig.core.json checks the same without the DOM types.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -65,5 +65,22 @@ test('only web/power.ts imports web/legacy and reads powerSave', () => {
 test('tauri uses only core, the shared web entry points and @tauri-apps', () => {
   const ok = (s: string) => s.startsWith('@tauri-apps/') || s.startsWith('../core/') || s === '../web/platform' || s === '../web/app' || s.startsWith('./');
   const bad = files(join(root, 'tauri')).flatMap((f) => imports(f).filter((s) => !ok(s)).map((s) => `${relative(root, f)}: ${s}`));
+  assert.deepEqual(bad, []);
+});
+
+// 원정(가제): the standalone extra mode stays apart from main play. Its two folders reach none of the field game, combat,
+// rules or saves (only the skeleton: data loaders, render drawables, input, sound, the web renderer), and main play
+// reaches it only through the title's screen change (WebScreens in web/game/screens.ts)
+test('expedition stays apart from main play', () => {
+  const core = join(root, 'core', 'expedition'), web = join(root, 'web', 'expedition');
+  const inside = (f: string) => f.startsWith(core) || f.startsWith(web);
+  const target = (f: string, s: string) => relative(root, resolve(dirname(f), s)).replaceAll('\\', '/');   // src-relative
+  const banned = (f: string, s: string) => s.startsWith('.') && /^core\/(field|combat|rules)\/|^core\/save\/save$/.test(target(f, s));
+  const wiring = [join(root, 'web', 'game', 'screens.ts')];
+  const bad = [
+    ...[...files(core), ...files(web)].flatMap((f) => imports(f).filter((s) => banned(f, s)).map((s) => `${relative(root, f)}: ${s}`)),
+    ...files(root).filter((f) => !inside(f) && !wiring.includes(f)).flatMap((f) =>
+      imports(f).filter((s) => s.startsWith('.') && /^(core|web)\/expedition\//.test(target(f, s))).map((s) => `${relative(root, f)}: ${s}`)),
+  ];
   assert.deepEqual(bad, []);
 });

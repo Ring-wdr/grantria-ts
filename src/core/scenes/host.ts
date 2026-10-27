@@ -25,6 +25,8 @@ export interface Screens {
   replays(): void;
   musicRoom(): void;
   data(): void;
+  /** 원정(가제): the standalone extra mode (core/expedition), apart from main play */
+  expedition(): void;
 }
 
 export interface SceneHost extends Host {

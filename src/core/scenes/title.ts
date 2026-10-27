@@ -33,13 +33,15 @@ export class RatingLogic {
 /** title menu keys (the host's touch rows and icons send them too): the rows, the 엑스트라 submenu's rows, the
  *  top-right info icon, and a press on the left half that misses the menu (does nothing) */
 export const TITLE_START = -45, TITLE_RANKING = -40, TITLE_REPLAY = -44, TITLE_MUSIC = -46, TITLE_EXTRA = -48;
+export const TITLE_EXPEDITION = -49;
 export const TITLE_DATA = -41, TITLE_OPTION = -42, TITLE_HELP = -43, TITLE_NONE = -47;
 /** title menu (not the original's button row): a column of rows, top to bottom. Settings / help were the original's
  *  top-right icons; 게임순위 goes last, as the least used */
 export const TITLE_ITEMS: [key: number, label: string][] = [[TITLE_START, '게임시작'], [TITLE_EXTRA, '엑스트라'],
   [TITLE_OPTION, '환경설정'], [TITLE_HELP, '도움말'], [TITLE_RANKING, '게임순위']];
-/** the 엑스트라 row's submenu (not in the original): 회상 and 음악감상 */
-export const TITLE_EXTRA_ITEMS: [key: number, label: string][] = [[TITLE_REPLAY, '회상'], [TITLE_MUSIC, '음악감상']];
+/** the 엑스트라 row's submenu (not in the original): 회상, 음악감상 and the standalone 원정 mode */
+export const TITLE_EXTRA_ITEMS: [key: number, label: string][] = [[TITLE_REPLAY, '회상'], [TITLE_MUSIC, '음악감상'],
+  [TITLE_EXPEDITION, '원정(가제)']];
 /** pad key -> title key: 옵션 (□/X = '1'), 도움말 (△/Y = '3'), 데이터 (L2 = '*') */
 export const TITLE_PAD: [pad: number, key: number][] = [[AVK.K1, TITLE_OPTION], [AVK.K3, TITLE_HELP], [AVK.STAR, TITLE_DATA]];
 
@@ -77,6 +79,7 @@ export class TitleLogic {
     else if (key === TITLE_RANKING) this.ctx.screens.ranking();
     else if (key === TITLE_REPLAY) this.ctx.screens.replays();
     else if (key === TITLE_MUSIC) this.ctx.screens.musicRoom();
+    else if (key === TITLE_EXPEDITION) this.ctx.screens.expedition();
     else if (key === TITLE_START) this.ctx.screens.slots();
   }
   /** moves the cursors; returns the screen key picked, if any */

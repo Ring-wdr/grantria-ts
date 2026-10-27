@@ -17,7 +17,7 @@ import { bodyBox } from '../../core/world/world';
 import { ADVANTAGE_LABEL, ExpeditionLogic, PAUSE_ITEMS } from '../../core/expedition/expedition';
 import { FK, type FieldEnemy, type Press } from '../../core/expedition/field';
 import { SPECIES } from '../../core/expedition/species';
-import type { Zone } from '../../core/expedition/zone';
+import { EXIT_MARKER, type Zone } from '../../core/expedition/zone';
 import { WorldView } from './worldView';
 import { BattleView } from './battleView';
 import { HERO_EQUIP } from './heroLook';
@@ -168,6 +168,15 @@ export class ExpeditionScene extends ExpeditionLogic {
     const f = this.field!, ents: Drawable[] = [];
     for (const e of f.enemies) { const d = this.enemyDrawable(e); if (d) ents.push(d); }
     ents.push(this.heroDrawable());
+    for (const s of f.shots) {
+      const name = `cmf_c${s.owner.sp.cmf}`, { frame, mirror } = s.look();
+      ents.push({ cmfName: name, cmf: this.cmfs.get(name)!, frame, x: Math.round(s.x), y: Math.round(s.y - s.shot.lift), mirror, depth: s.y,
+        fx: s.reflected ? { tint: [120, 200, 255], amount: 14 } : undefined });
+    }
+    if (f.zone.kind !== 'boss' && this.sets) {                        // the exit stone's blue light (20 fps loop)
+      const x = f.zone.exit;
+      ents.push({ cmfName: 'cmf_oc', cmf: this.sets.oc, frame: EXIT_MARKER + (Math.floor(f.time * 20) % 8), x: x.x + 26, y: x.y + 6, depth: x.y + 30 });
+    }
     this.view.render(f.camX, f.camY, ents);
     this.ctx.compositor.show();
   }

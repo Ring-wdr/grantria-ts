@@ -12,7 +12,7 @@
 // raise below). The opened land then gets copies of small islands of the t3 maps (trees, rocks, ruins, a well, on a
 // walkable grass rim), fresh grass variants, and loses any free-standing object a seam slid something other than
 // grass under. The way through runs from the west end to the exit stone at the east end of the largest walkable
-// region. The boss zone is 초원 - 깊숙한곳 (m124) as it is.
+// region, each end where the rest of the region reaches it most directly; the zone's only warp stone is the exit. The boss zone is 초원 - 깊숙한곳 (m124) as it is.
 import type { Assets, Cmf, GameMap, MapObject } from '../data/assets';
 import { bodyBox, buildWalk } from '../world/world';
 import { Rng } from './rng';
@@ -29,6 +29,9 @@ export const PAIR_SOURCES = [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 1
 export const BOSS_MAP = 124;
 /** warp stone of cmf_oc (35 unlit, 36 lit): the zone exit */
 export const EXIT_OBJ = -35, EXIT_LIT = -36;
+/** the blue light over the exit: cmf_oc frames 128..135, the 8-frame portal marker loop the original shows at the t3
+ *  field maps' exits (portal marker kind 2) */
+export const EXIT_MARKER = 128;
 /** t3 tiles of pebbles drawn on grass (2×2 and single decals) */
 const DECALS = [22, 23, 24, 30, 31, 32, 37, 38, 39, 40];
 /** a template grows to at most this many times its size each way */
@@ -206,7 +209,8 @@ function gridOf(m: GameMap, sets: ZoneSets, grass: Set<number>): Grid {
     W, H, tiles,
     walk: Array.from({ length: H }, (_, r) => Array.from({ length: W }, (_, c) => (m.walk[r]?.[c] ? 1 : 0))),
     copy: Array.from({ length: H }, () => new Array<number>(W).fill(0)),
-    objs: LAYERS.flatMap((layer) => m[layer].map((o) => placed(sets, layer, o, tiles, grass))),
+    // the warp stones of the t3 clearings are left out: a zone shows only its own exit stone
+    objs: LAYERS.flatMap((layer) => m[layer].filter((o) => o.obj !== EXIT_OBJ && o.obj !== EXIT_LIT).map((o) => placed(sets, layer, o, tiles, grass))),
   };
 }
 
@@ -642,6 +646,31 @@ function openBlock(seen: Uint8Array, W: number, H: number, c: number, r: number,
   return true;
 }
 
+/** an end of the way through is looked for in this many columns from the region's west / east edge (an eighth of a narrower zone) */
+const END_SPAN = 24;
+
+/** how roundabout the walk from the probe cells to (c, r) is: the mean of steps over Manhattan distance (1 = straight) */
+export function detour(seen: Uint8Array, W: number, H: number, c: number, r: number, probe: number[]): number {
+  const d = new Int32Array(W * H).fill(-1), q = new Int32Array(W * H);
+  let head = 0, tail = 0;
+  d[r * W + c] = 0; q[tail++] = r * W + c;
+  while (head < tail) {
+    const i = q[head++], x = i % W;
+    for (const j of [x + 1 < W ? i + 1 : -1, x > 0 ? i - 1 : -1, i + W < W * H ? i + W : -1, i - W]) {
+      if (j < 0 || !seen[j] || d[j] >= 0) continue;
+      d[j] = d[i] + 1;
+      q[tail++] = j;
+    }
+  }
+  let sum = 0, n = 0;
+  for (const i of probe) {
+    const m = Math.abs((i % W) - c) + Math.abs(((i / W) | 0) - r);
+    if (m < 8 || d[i] < 0) continue;
+    sum += d[i] / m; n++;
+  }
+  return n ? sum / n : 1;
+}
+
 /** a cell whose whole 3×3 block is open and reached */
 function openCell(seen: Uint8Array, W: number, H: number, c: number, r: number): boolean {
   return openBlock(seen, W, H, c, r);
@@ -670,20 +699,33 @@ export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 
   vary(g, src, rng);
   settle(g, sets, src.grass);
   const map = mapOf(g, tpl), W = g.W, H = g.H;
-  // the way through: the largest walkable region, entered at its west end, left by the stone at its east end
+  // the way through: the largest walkable region, entered at its west end, left by the stone at its east end; of the
+  // open cells near each end, the one the rest of the region reaches most directly (not one behind a long cliff line
+  // or down a corridor, which only one route leads to)
   const region = largestRegion(zoneWalk(map, sets), W, H);
+  const probe: number[] = [];
+  for (let i = 0; i < W * H; i++) if (region[i]) probe.push(i);
+  for (let i = probe.length - 1; i > 0; i--) { const j = rng.int(0, i); [probe[i], probe[j]] = [probe[j], probe[i]]; }
+  probe.length = Math.min(probe.length, 400);
   const ends = (east: boolean): [number, number] => {
     const cells: [number, number][] = [];
     for (let c = east ? W - 1 : 0; east ? c >= 0 : c < W; c += east ? -1 : 1) {
       for (let r = 0; r < H; r++) {
         if (east ? openBlock(region, W, H, c, r, 1, 1, 4, 3) : openBlock(region, W, H, c, r, 2, 2)) cells.push([c, r]);
       }
-      if (cells.length && Math.abs(cells[0][0] - c) >= 3) break;
+      if (cells.length && Math.abs(cells[0][0] - c) >= Math.min(END_SPAN, Math.round(W / 8))) break;
     }
-    return cells.length ? rng.pick(cells) : [W >> 1, H >> 1];
+    if (!cells.length) return [W >> 1, H >> 1];
+    for (let i = cells.length - 1; i > 0; i--) { const j = rng.int(0, i); [cells[i], cells[j]] = [cells[j], cells[i]]; }
+    let best = cells[0], bestS = Infinity;
+    for (const cell of cells.slice(0, 40)) {
+      const s = detour(region, W, H, cell[0], cell[1], probe) + Math.abs(cell[0] - cells[0][0]) * 0.004;
+      if (s < bestS) { bestS = s; best = cell; }
+    }
+    return best;
   };
   const start = ends(false), exit = ends(true);
-  map.objLow.push({ obj: EXIT_OBJ, x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 });
+  map.objLow.push({ obj: EXIT_LIT, x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 });
   const walk = zoneWalk(map, sets);
   const seen = reachable(walk, W, H, start[0], start[1]);
   // enemy groups: open reached cells away from the start and from each other

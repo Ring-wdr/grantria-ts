@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import type { Assets, Cmf, GameMap, MapObject } from '../src/core/data/assets.ts';
 import { bodyBox } from '../src/core/world/world.ts';
 import {
-  BATTLE_TEMPLATES, EXIT_OBJ, PAIR_SOURCES, REST_TEMPLATES, TILE, boxCells, buildField, grassOf, objCmf, reachable, zoneSets,
+  BATTLE_TEMPLATES, EXIT_LIT, EXIT_OBJ, PAIR_SOURCES, REST_TEMPLATES, TILE, boxCells, buildField, detour, grassOf, objCmf, reachable, zoneSets,
   type Zone, type ZoneSets,
 } from '../src/core/expedition/zone.ts';
 
@@ -68,7 +68,7 @@ test('grown zones: every tile meeting and every object on its ground occurs in t
       }
     }
     for (const L of LAYERS) for (const o of m[L]) {
-      if (o.obj === EXIT_OBJ) continue;
+      if (o.obj === EXIT_LIT) continue;
       assert.ok(grounds.has(objKey(sets, m, o, grass)), `${name}: object ${o.obj} at ${o.x},${o.y} on ground no t3 map has it on`);
     }
   }
@@ -83,6 +83,13 @@ test('grown zones: the exit is reached from the start and every group stands on 
     assert.ok(seen[cell(z.start)], `${name}: the start is walkable`);
     assert.ok(seen[cell(z.exit)], `${name}: the exit is reached`);
     assert.ok(z.exit.x - z.start.x > W * TILE / 2, `${name}: the exit lies east of the start`);
+    // the exit stands in the open land, not behind a long cliff line only one route leads round
+    const probe: number[] = [];
+    for (let i = 0; i < W * H; i += 7) if (seen[i]) probe.push(i);
+    const d = detour(seen, W, H, Math.floor(z.exit.x / TILE), Math.floor(z.exit.y / TILE), probe);
+    assert.ok(d < 1.7, `${name}: the way to the exit is roundabout (${d.toFixed(2)})`);
+    const stones = LAYERS.flatMap((L) => z.map[L]).filter((o) => o.obj === EXIT_OBJ || o.obj === EXIT_LIT);
+    assert.equal(stones.length, 1, `${name}: one warp stone, the exit`);
     for (const s of z.spawns) assert.ok(seen[cell(s)], `${name}: group at ${s.x},${s.y} on reached ground`);
     if (z.kind === 'battle') {
       assert.ok(W >= 150, `${name}: ${W} columns`);

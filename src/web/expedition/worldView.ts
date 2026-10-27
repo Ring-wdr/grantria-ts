@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import type { Cmf, MapObject } from '../../core/data/assets';
 import { VIEW_H, VIEW_W, type Drawable, type Equip } from '../../core/render';
 import { actorDepth, depthSort, objDepth, type DepthItem } from '../../core/world/world';
-import { objCmf, TILE, type Zone, type ZoneSets } from '../../core/expedition/zone';
+import { EXIT_MARKER, objCmf, TILE, type Zone, type ZoneSets } from '../../core/expedition/zone';
 import type { GameContext } from '../game/scene';
 import { DEFAULT_EQUIP, type SpriteLayer } from '../render/sprites';
 
@@ -70,6 +70,7 @@ export class WorldView {
       });
       this.grid.set(L, g);
     }
+    for (let i = 0; i < 8; i++) names.push(...this.V.frameImages('cmf_oc', sets.oc, EXIT_MARKER + i, m.header.zone, DEFAULT_EQUIP));
     for (const s of sprites) names.push(...this.V.allImages(s.name, s.cmf, m.header.zone, s.equip ?? DEFAULT_EQUIP));
     await this.V.preload(names);
     this.zone = zone;

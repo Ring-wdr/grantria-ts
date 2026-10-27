@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import { AVK } from '../src/core/keys.ts';
 import { stagePlan } from '../src/core/expedition/expedition.ts';
 import { Battle, DODGE_MS, PARRY_MS } from '../src/core/expedition/battle.ts';
-import type { FieldEnemy } from '../src/core/expedition/field.ts';
+import { FK, FieldEnemy, FieldSim } from '../src/core/expedition/field.ts';
+import type { InputState } from '../src/core/input.ts';
+import type { Zone } from '../src/core/expedition/zone.ts';
 import { Run, expToNext, gainExp, newHero } from '../src/core/expedition/run.ts';
 import { SPECIES } from '../src/core/expedition/species.ts';
 import { Talk } from '../src/core/expedition/talk.ts';
@@ -82,4 +84,35 @@ test('run: EXP levels the party up', () => {
   assert.equal(gainExp(m, expToNext(1) + expToNext(2)), 2);
   assert.equal(m.lv, 3);
   assert.ok(m.hpMax > 120 && m.atk > 14);
+});
+
+/** a shooter's shot fired at a hero on open ground: what happened by the time it is gone */
+function shotAt(defend: 'parry' | 'dodge' | null): { events: string[]; shooter: FieldEnemy } {
+  const W = 40, H = 20;
+  const zone = { kind: 'battle', map: { header: { width: W, height: H } }, walk: new Uint8Array(W * H).fill(1), start: { x: 100, y: 160 }, exit: { x: 600, y: 160 }, spawns: [] } as unknown as Zone;
+  const sim = new FieldSim(zone, 1);
+  const shooter = new FieldEnemy(2, 260, 160, sim);
+  sim.enemies.push(shooter);
+  shooter.angle = Math.PI;
+  sim.fire(shooter, SPECIES[2].field.shot!);
+  const idle = { isHeld: () => false, stick: { active: false, level: 0, angle: 0, dx: 0, dy: 0 } } as unknown as InputState;
+  const events: string[] = [];
+  let pressed = false;
+  for (let i = 0; i < 300 && sim.shots.length; i++) {
+    const near = Math.abs(sim.shots[0].x - sim.hero.x) < 22 && !sim.shots[0].reflected;
+    if (near && !pressed && defend === 'dodge') { sim.hero.invuln = 0.4; pressed = true; }
+    sim.step(1 / 60, idle, near && !pressed && defend === 'parry' ? ((pressed = true), [{ key: FK.PARRY, t: 0 }]) : []);
+    events.push(...sim.takeEvents().map((e) => e.kind));
+  }
+  return { events, shooter };
+}
+
+test('field shots: parried back into the shooter, dodged through, or a battle when they land', () => {
+  const p = shotAt('parry');
+  assert.ok(p.events.includes('parry'));
+  assert.ok(!p.events.includes('battle'));
+  assert.ok(p.shooter.brk > 0, 'the parried shot breaks its shooter');
+  const d = shotAt('dodge');
+  assert.ok(!d.events.includes('battle') && !d.events.includes('parry'));
+  assert.ok(shotAt(null).events.includes('battle'));
 });

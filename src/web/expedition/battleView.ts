@@ -1,7 +1,8 @@
 // 원정(가제): the turn battle, drawn side-on: the encounter spot as the background, darkened (the field at its camera
 // with a night shift), the party on the right facing left, the enemies on the left mirrored to face right (the
 // original side frames), then the DOM: order bar, enemy gauges, party panel, AP, the command menu, the closing rings
-// of an enemy's hits and the damage popups.
+// of an enemy's hits and the damage popups. A shot move (Move.shot) is fired from where the enemy stands: its projectile
+// (the species' field shot frame) reaches the target on each hit's time.
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { AP_MAX, BK, COMMANDS, DODGE_MS, PARRY_MS, type Battle, type BUnit } from '../../core/expedition/battle';
@@ -19,6 +20,8 @@ import { HERO_EQUIP } from './heroLook';
 // the party stands left of the command column docked at the right edge (x ≥ 360)
 const PARTY_AT: [number, number][] = [[300, 196], [334, 246], [266, 252]];
 const ENEMY_AT: [number, number][] = [[104, 196], [62, 246], [146, 252]];
+/** a shot flies this long to its hit (ms) */
+const SHOT_MS = 380;
 
 export class BattleView {
   constructor(private readonly ctx: GameContext, private readonly world: WorldView, private readonly cmfs: Map<string, Cmf>) {}
@@ -34,7 +37,7 @@ export class BattleView {
       y += (ty - y) * k * 0.8;
     }
     const ea = b.enemyAct;
-    if (ea && ea.actor === u && b.now >= ea.strikeAt - 200) {
+    if (ea && ea.actor === u && !ea.move.shot && b.now >= ea.strikeAt - 200) {
       const [tx, ty] = this.pos0(b, ea.target), end = ea.hits[ea.hits.length - 1].t + 250;
       const k = b.now >= end ? Math.max(0, 1 - (b.now - end) / 300) : Math.min(1, (b.now - ea.strikeAt + 200) / 200);
       x += (tx - 40 - x) * k * 0.85;
@@ -84,11 +87,34 @@ export class BattleView {
     this.world.render(f.camX, f.camY, []);
     setDayShift(0, 0, 0);
     const ents = b.units.map((u) => this.sprite(b, u)).filter((d): d is Drawable => !!d).sort((p, q) => p.y - q.y);
-    this.world.overlay(ents);
+    this.world.overlay([...ents, ...this.shots(b)]);
     this.ctx.compositor.show();
     const u = this.ctx.ui;
     u.view('ex-battle', 0, 0, 480, 320, this.tree(b, talk));
     this.drawFx(b);
+  }
+
+  /** a shot move's projectiles: each leaves the shooter SHOT_MS before its hit and reaches the target on it; parried it
+   *  flies back, dodged it flies on past */
+  private shots(b: Battle): Drawable[] {
+    const ea = b.enemyAct, sp = ea?.actor.sp, shot = sp?.field.shot;
+    if (!ea || !ea.move.shot || !sp || !shot) return [];
+    const name = `cmf_c${sp.cmf}`, cmf = this.cmfs.get(name);
+    if (!cmf) return [];
+    const [ax, ay] = this.pos0(b, ea.actor), [tx, ty] = this.pos0(b, ea.target), out: Drawable[] = [];
+    const sx = ax + 22, sy = ay - shot.lift, ex = tx, ey = ty - shot.lift;
+    for (const hit of ea.hits) {
+      const k = (b.now - (hit.t - SHOT_MS)) / SHOT_MS;
+      if (k < 0) continue;
+      let x: number, y: number, back = false;
+      if (k <= 1) { x = sx + (ex - sx) * k; y = sy + (ey - sy) * k; }
+      else if (hit.result === 'parry' && k <= 2) { back = true; x = ex + (sx - ex) * (k - 1); y = ey + (sy - ey) * (k - 1); }
+      else if (hit.result === 'dodge' && k <= 1.5) { x = ex + (ex - sx) * (k - 1); y = ey + (ey - sy) * (k - 1); }
+      else continue;
+      out.push({ cmfName: name, cmf, frame: shot.side, x: Math.round(x), y: Math.round(y), mirror: !back,
+        fx: back ? { tint: [120, 200, 255], amount: 14 } : undefined });
+    }
+    return out;
   }
 
   /** effect sprites on the struck and the parry rings */

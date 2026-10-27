@@ -6,11 +6,13 @@
 // turned toward the nearest enemy in a cone when they start; hits fill an enemy's break gauge (decaying when left
 // alone) and kill only the weak tier. A dodge has i-frames. A parry held up as an enemy's lunge lands breaks it hard
 // and makes it flinch; a lunge that lands starts a fair battle, or an ambush when it came from behind; touching a
-// broken (stunned) enemy starts a battle with the party first.
+// broken (stunned) enemy starts a battle with the party first. A ranged creature (Species.field.shot) keeps its distance
+// and fires its own projectile instead: parried, the shot flies back and breaks what it meets like a parried lunge; a
+// dodge's i-frames let it pass; a shot that lands starts the battle like a lunge.
 import { AVK } from '../keys';
 import type { InputState } from '../input';
 import { TILE, type Zone } from './zone';
-import { SPECIES, animRec, zoneStats, type Species } from './species';
+import { SPECIES, animRec, zoneStats, type Shot, type Species } from './species';
 
 /** sprite directions as the original numbers them: left, right, up, down */
 export type Dir = 0 | 1 | 2 | 3;
@@ -70,6 +72,16 @@ export class Ground {
     return c >= 0 && r >= 0 && c < this.W && r < this.H && this.zone.walk[r * this.W + c] === 1;
   }
 
+  /** nothing blocks the straight line between two points (sampled every 6 px) */
+  clear(x0: number, y0: number, x1: number, y1: number): boolean {
+    const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 6);
+    for (let i = 1; i < n; i++) {
+      const k = i / n;
+      if (!this.open(Math.floor((x0 + (x1 - x0) * k) / TILE), Math.floor((y0 + (y1 - y0) * k) / TILE))) return false;
+    }
+    return true;
+  }
+
   /** a circle at (x, y) touches no blocked cell */
   fits(x: number, y: number, rad: number): boolean {
     const c0 = Math.floor((x - rad) / TILE), c1 = Math.floor((x + rad) / TILE);
@@ -121,6 +133,8 @@ const DODGE_T = 0.42, DODGE_IFRAMES = 0.34, DODGE_SPEED = 270;
 export const PARRY_UP = 0.22, PARRY_LOCK = 0.35;
 /** the lunge of an enemy, seconds */
 const LUNGE_T = 0.34;
+/** a shooter holds its attack pose this long after the shot leaves */
+const SHOOT_T = 0.3;
 
 export type HeroState = 'move' | 'light' | 'heavy' | 'dodge' | 'parry';
 
@@ -196,6 +210,8 @@ export class FieldEnemy {
   attacks = 0;
   /** this attack is the boss's pounce */
   pounce = false;
+  /** this attack is a shot (Species.field.shot) */
+  shooting = false;
   flashT = 0;
   /** seconds the sprite's current animation has run */
   animT = 0;
@@ -229,7 +245,7 @@ export class FieldEnemy {
   get radius(): number { return this.sp.field.radius; }
   /** this attack's windup and lunge (a pounce winds up longer and leaps further) */
   get windupT(): number { return this.sp.field.windup * (this.pounce ? 1.7 : 1); }
-  get lungeT(): number { return LUNGE_T * (this.sp.tier === 'boss' ? (this.pounce ? 1.8 : 1.3) : 1); }
+  get lungeT(): number { return this.shooting ? SHOOT_T : LUNGE_T * (this.sp.tier === 'boss' ? (this.pounce ? 1.8 : 1.3) : 1); }
 
   set(s: EState): void {
     this.state = s;
@@ -273,20 +289,30 @@ export class FieldEnemy {
         this.turnTo(toH, 10, dt);
         if (this.t > 0.45) this.set('chase');
         break;
-      case 'chase':
+      case 'chase': {
         this.turnTo(toH, 8, dt);
-        if (dist > reach * 0.85) speed = f.speed;
-        if (dist < reach * (this.sp.tier === 'boss' ? 2.2 : 1) && this.t > 0.4 && sim.controls) {
+        // a shooter stops where it has a clear line inside its range and fires; up close it lunges like the rest
+        const aim = !!f.shot && dist > reach * 1.2 && dist < f.shot.range * 0.85 && sim.ground.clear(this.x, this.y, h.x, h.y);
+        if (dist > reach * 0.85 && !aim) speed = f.speed;
+        if ((aim || dist < reach * (this.sp.tier === 'boss' ? 2.2 : 1)) && this.t > 0.4 && sim.controls) {
           this.pounce = this.sp.tier === 'boss' && ++this.attacks % 3 === 0;
+          this.shooting = aim;
           this.set('windup');
         }
         if (this.sp.tier !== 'boss' && (Math.hypot(this.x - this.homeX, this.y - this.homeY) > 420 || dist > f.detect * 2.4)) this.set('return');
         break;
+      }
       case 'windup':
         if (this.t < this.windupT * 0.7) this.turnTo(toH, 6, dt);
-        if (this.t >= this.windupT) { this.lungeA = this.angle; this.set('lunge'); sim.emit({ kind: 'sfx', id: this.pounce ? 40 : 29 }); }
+        if (this.t >= this.windupT) {
+          this.lungeA = this.angle;
+          this.set('lunge');
+          if (this.shooting && f.shot && sim.controls) sim.fire(this, f.shot);
+          sim.emit({ kind: 'sfx', id: this.pounce ? 40 : 29 });
+        }
         break;
       case 'lunge': {
+        if (this.shooting) { if (this.t >= this.lungeT) this.set('recover'); break; }
         const k = this.t / this.lungeT, d = (this.pounce ? 330 : 230) * (1 - k * 0.6) * dt;
         sim.ground.move(this, Math.cos(this.lungeA) * d, Math.sin(this.lungeA) * d, this.radius * 0.8);
         if (dist < this.radius + HERO_RADIUS + 5 && h.invuln <= 0 && sim.controls) { sim.lungeHits(this); return; }
@@ -294,7 +320,7 @@ export class FieldEnemy {
         break;
       }
       case 'recover':
-        if (this.t > 1.0) this.set('chase');
+        if (this.t > (this.shooting ? 1.3 : 1.0)) this.set('chase');
         break;
       case 'flinch':
         if (this.t > 0.45) this.set('chase');
@@ -358,6 +384,32 @@ export class FieldEnemy {
   }
 }
 
+/** a ranged creature's projectile flying along the ground (drawn Shot.lift px over it) */
+export class FieldShot {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  /** px it may still fly */
+  left: number;
+  /** parried back toward its shooter */
+  reflected = false;
+  gone = false;
+  readonly owner: FieldEnemy;
+  readonly shot: Shot;
+  constructor(owner: FieldEnemy, shot: Shot, x: number, y: number, angle: number) {
+    this.owner = owner; this.shot = shot;
+    this.x = x; this.y = y;
+    this.vx = Math.cos(angle) * shot.speed; this.vy = Math.sin(angle) * shot.speed;
+    this.left = shot.range;
+  }
+
+  /** the frame flying this way (the side frame faces left) */
+  look(): { frame: number; mirror: boolean } {
+    return Math.abs(this.vx) >= Math.abs(this.vy) ? { frame: this.shot.side, mirror: this.vx > 0 } : { frame: this.shot.vert, mirror: false };
+  }
+}
+
 export type Advantage = 'party' | 'none' | 'enemy';
 
 export type FieldEvent =
@@ -375,6 +427,7 @@ export class FieldSim {
   readonly ground: Ground;
   readonly hero: Hero;
   readonly enemies: FieldEnemy[] = [];
+  shots: FieldShot[] = [];
   /** camera top-left (map px) for a 480 × 320 view */
   camX = 0;
   camY = 0;
@@ -476,6 +529,8 @@ export class FieldSim {
         break;
     }
     for (const e of this.enemies) e.update(dt);
+    for (const s of this.shots) this.fly(s, dt);
+    this.shots = this.shots.filter((s) => !s.gone);
     // walking into a broken enemy: the party strikes first (swinging at it instead can still finish a weak one)
     if (this.controls && h.state === 'move' && h.moving) for (const e of this.enemies) {
       if (e.stunned && e.alive && Math.hypot(e.x - h.x, e.y - h.y) < e.radius + HERO_RADIUS + 4) { this.startBattle(e, 'party'); break; }
@@ -522,9 +577,10 @@ export class FieldSim {
     if (this.nearExit() && this.zone.kind !== 'boss') this.emit({ kind: 'exit' });
   }
 
+  /** on or next to the exit stone (a 64 × 48 slab anchored at its top-left) */
   nearExit(): boolean {
     const h = this.hero, x = this.zone.exit;
-    return Math.hypot(x.x - h.x, x.y - h.y) < 34;
+    return Math.hypot(x.x + 32 - h.x, x.y + 24 - h.y) < 40;
   }
 
   /** what 상호작용 would do here, for the prompt */
@@ -561,18 +617,60 @@ export class FieldSim {
     if (any) this.emit({ kind: 'sfx', id: sw.heavy ? 21 : 20 });
   }
 
+  /** a shooter's shot leaves it toward where it faces */
+  fire(e: FieldEnemy, shot: Shot): void {
+    const a = e.angle;
+    this.shots.push(new FieldShot(e, shot, e.x + Math.cos(a) * (e.radius + 4), e.y + Math.sin(a) * (e.radius + 4), a));
+  }
+
+  /** a shot flies on in steps of at most 4 px: a wall stops it; it meets the hero (parried back, dodged through, or a
+   *  battle), or once parried, any creature it meets (broken like by a parried lunge) */
+  private fly(s: FieldShot, dt: number): void {
+    const h = this.hero, sp = Math.hypot(s.vx, s.vy), d = sp * dt, n = Math.max(1, Math.ceil(d / 4));
+    for (let i = 0; i < n && !s.gone; i++) {
+      s.x += (s.vx * dt) / n; s.y += (s.vy * dt) / n; s.left -= d / n;
+      if (s.left <= 0 || !this.ground.open(Math.floor(s.x / TILE), Math.floor(s.y / TILE))) { s.gone = true; break; }
+      if (s.reflected) {
+        const e = this.enemies.find((x) => x.alive && Math.hypot(x.x - s.x, x.y - s.y) < x.radius + 5);
+        if (e) { s.gone = true; this.staggered(e, 0.6); this.emit({ kind: 'hit', x: e.x, y: e.y - 14, heavy: true }); this.emit({ kind: 'sfx', id: 21 }); }
+        continue;
+      }
+      if (!this.controls || Math.hypot(h.x - s.x, h.y - s.y) >= HERO_RADIUS + 6) continue;
+      if (h.parrying) {
+        h.parried = true;
+        h.invuln = Math.max(h.invuln, 0.3);
+        const o = s.owner, back = o.alive ? Math.atan2(o.y - s.y, o.x - s.x) : Math.atan2(-s.vy, -s.vx), k = sp * 1.5;
+        s.reflected = true; s.vx = Math.cos(back) * k; s.vy = Math.sin(back) * k; s.left = s.shot.range * 1.6;
+        this.emit({ kind: 'parry', x: s.x, y: s.y - s.shot.lift });
+        this.emit({ kind: 'sfx', id: 39 });
+        break;
+      }
+      if (h.invuln > 0) continue;                                     // a dodge (or the grace after a battle) lets it by
+      s.gone = true;
+      if (!s.owner.alive) break;
+      const from = Math.atan2(-s.vy, -s.vx);
+      this.startBattle(s.owner, Math.abs(wrap(from - h.angle)) > Math.PI * 0.62 ? 'enemy' : 'none');
+    }
+  }
+
+  /** a parried attack's break on an enemy: k of its gauge, stunned when full, a flinch otherwise */
+  private staggered(e: FieldEnemy, k: number): void {
+    e.lastHit = this.time;
+    if (e.stunned) return;
+    e.brk = Math.min(e.brkMax, e.brk + e.brkMax * k);
+    if (e.brk >= e.brkMax) { e.set('stunned'); this.emit({ kind: 'break', enemy: e }); }
+    else e.set('flinch');
+  }
+
   /** an enemy's lunge reached the hero: parried, or a battle */
   lungeHits(e: FieldEnemy): void {
     const h = this.hero;
     if (h.parrying) {
       h.parried = true;
       h.invuln = 0.5;
-      e.lastHit = this.time;
-      e.brk = Math.min(e.brkMax, e.brk + e.brkMax * 0.6);
       this.emit({ kind: 'parry', x: (e.x + h.x) / 2, y: (e.y + h.y) / 2 - 14 });
       this.emit({ kind: 'sfx', id: 39 });
-      if (e.brk >= e.brkMax) { e.set('stunned'); this.emit({ kind: 'break', enemy: e }); }
-      else e.set('flinch');
+      this.staggered(e, 0.6);
       const a = Math.atan2(e.y - h.y, e.x - h.x);
       this.ground.move(e, Math.cos(a) * 16, Math.sin(a) * 16, e.radius * 0.8);
       return;
@@ -585,6 +683,7 @@ export class FieldSim {
   startBattle(e: FieldEnemy, advantage: Advantage): void {
     if (!this.controls) return;
     this.controls = false;
+    this.shots = [];
     const group = [e];
     if (e.sp.tier !== 'boss') {
       for (const o of this.enemies) {

@@ -9,6 +9,8 @@ import type { Assets } from '../data/assets';
 import type { InputState } from '../input';
 import type { SoundOut } from '../sound';
 import { FieldSim, type Advantage, type FieldEnemy, type Press } from './field';
+import { Battle } from './battle';
+import { Run } from './run';
 import { FIELD_SPECIES } from './species';
 import { buildField, zoneSets, type Zone, type ZoneSets } from './zone';
 
@@ -20,7 +22,7 @@ export interface ExpeditionHost {
   readonly screens: { title(): void };
 }
 
-export type Mode = 'loading' | 'field' | 'pause' | 'encounter';
+export type Mode = 'loading' | 'field' | 'pause' | 'encounter' | 'battle' | 'over';
 
 /** the pause menu rows */
 export const PAUSE_ITEMS = ['계속하기', '원정 포기 (타이틀로)'] as const;
@@ -42,7 +44,8 @@ export class ExpeditionLogic {
   pauseSel = 0;
   /** run seed: every zone is built from it and its number */
   readonly seed: number;
-  exp = 0;
+  readonly run = new Run();
+  battle: Battle | null = null;
   toasts: Toast[] = [];
   flashes: Flash[] = [];
   /** the encounter being opened: its banner shows this long before the battle */
@@ -74,7 +77,7 @@ export class ExpeditionLogic {
   toast(text: string): void { this.toasts.push({ text, t: 0 }); if (this.toasts.length > 3) this.toasts.shift(); }
 
   /** one animation frame: dt seconds, the presses since the last one */
-  frame(dt: number, presses: Press[]): void {
+  frame(dt: number, presses: Press[], now: number): void {
     dt = Math.min(dt, 0.05);
     const keys = presses.map((p) => p.key);
     for (const t of this.toasts) t.t += dt;
@@ -82,6 +85,8 @@ export class ExpeditionLogic {
     for (const f of this.flashes) f.t += dt;
     this.flashes = this.flashes.filter((f) => f.t < 0.5);
     if (this.mode === 'pause') { this.pauseKeys(keys); return; }
+    if (this.mode === 'over') { if (keys.includes(AVK.OK) || keys.includes(AVK.CLR)) this.ctx.screens.title(); return; }
+    if (this.mode === 'battle') { this.battleFrame(dt, presses, now, keys); return; }
     if (!this.field) return;
     if (this.mode === 'encounter') {
       this.field.step(dt, this.ctx.input, []);
@@ -99,8 +104,9 @@ export class ExpeditionLogic {
         case 'break': this.flashes.push({ kind: 'break', x: e.enemy.x, y: e.enemy.y - 20, t: 0 }); this.toast(`${e.enemy.sp.name} 브레이크! 다가가서 선제 공격`); break;
         case 'kill': {
           const gain = Math.round(e.enemy.sp.stats.exp * 0.5);
-          this.exp += gain;
+          this.run.kills++;
           this.toast(`${e.enemy.sp.name} 처치 · EXP +${gain}`);
+          for (const l of this.run.award(gain)) this.toast(l);
           break;
         }
         case 'battle':
@@ -112,13 +118,44 @@ export class ExpeditionLogic {
     }
   }
 
-  /** the turn battle (step 4); for now the group is beaten at once */
+  /** the encounter banner is over: the turn battle */
   protected beginBattle(): void {
     const enc = this.encounter!;
-    const gain = enc.enemies.reduce((s, e) => s + e.sp.stats.exp, 0);
-    this.exp += gain;
-    this.field!.resume(enc.enemies, []);
-    this.toast(`승리 · EXP +${gain}`);
+    this.battle = new Battle(this.run, enc.enemies, enc.advantage);
+    this.battle.onTalk = (talker, enemy) => this.onTalk(talker, enemy);
+    this.mode = 'battle';
+    this.onBattle(this.battle);
+  }
+
+  /** the host loads what the battle draws with */
+  protected onBattle(_b: Battle): void {}
+
+  /** 대화 was picked (step 5 fills it); for now the talk ends at once */
+  protected onTalk(_talker: Battle['party'][number], enemy: Battle['enemies'][number]): void {
+    this.battle!.endTalk('failed', enemy);
+  }
+
+  protected battleFrame(dt: number, presses: Press[], now: number, keys: number[]): void {
+    const b = this.battle!;
+    b.frame(dt, presses, now);
+    if (b.phase === 'won' && b.t > 0.6 && keys.includes(AVK.OK)) this.endBattle();
+    else if (b.phase === 'fled' && b.t > 0.8) this.endBattle();
+    else if (b.phase === 'lost' && b.t > 1.2 && keys.includes(AVK.OK)) { this.mode = 'over'; this.battle = null; }
+  }
+
+  /** back to the field: the beaten, recruited and departed are gone; after fleeing the group leaves the hero be */
+  protected endBattle(): void {
+    const b = this.battle!, enc = this.encounter!;
+    b.sync();
+    if (b.phase === 'won') {
+      this.run.kills += b.enemies.filter((e) => !e.gone).length;
+      this.field!.resume(enc.enemies, []);
+    } else {
+      const gone = b.enemies.filter((e) => e.gone).map((e) => e.field!);
+      this.field!.resume(gone, enc.enemies.filter((e) => !gone.includes(e)));
+    }
+    for (const m of this.run.party) if (m.hp <= 0) m.hp = 1;      // the fallen get up with 1 HP after a win or an escape
+    this.battle = null;
     this.encounter = null;
     this.mode = 'field';
   }

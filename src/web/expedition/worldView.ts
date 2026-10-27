@@ -17,6 +17,8 @@ type Layer = 'objBg' | 'objLow' | 'objMid' | 'objTop';
 
 export class WorldView {
   private readonly V: SpriteLayer;
+  /** a second pass over the world (battle units over a darkened field) */
+  private readonly V2: SpriteLayer;
   private readonly cam = new THREE.OrthographicCamera(0, VIEW_W, 0, VIEW_H, -1, 1);
   private zone: Zone | null = null;
   private sets: ZoneSets | null = null;
@@ -26,6 +28,29 @@ export class WorldView {
 
   constructor(private readonly ctx: GameContext) {
     this.V = ctx.compositor.newLayer(ctx.assets);
+    this.V2 = ctx.compositor.newLayer(ctx.assets);
+  }
+
+  /** load sprites drawn by overlay() */
+  async preloadSprites(sprites: { name: string; cmf: Cmf; equip?: Equip }[], extra: string[] = []): Promise<void> {
+    const z = this.zone?.map.header.zone ?? 3, names: (string | null)[] = [...extra];
+    for (const s of sprites) names.push(...this.V2.allImages(s.name, s.cmf, z, s.equip ?? DEFAULT_EQUIP));
+    await Promise.all([this.V2.preload(names), this.V.preload(names)]);
+  }
+
+  /** draw sprites (screen coordinates) over what render() left in the target, in the order given */
+  overlay(ents: Drawable[]): void {
+    const V = this.V2, pad = this.ctx.compositor.pad, z = this.zone?.map.header.zone ?? 3;
+    V.clear();
+    for (const e of ents) {
+      if (e.shadow) { V.fx = null; V.quad('shadow', 120, 0, 36, 20, e.x - 18, e.y - 10, 0, 0, 1, 14); }
+      V.fx = e.fx ?? null;
+      if (e.cmf) V.frame(e.cmfName, e.cmf, e.frame, e.x, e.y, z, e.equip ?? DEFAULT_EQUIP, e.mirror, e.hideClips, e.scale);
+      V.fx = null;
+    }
+    this.cam.left = -pad; this.cam.right = VIEW_W + pad; this.cam.top = 0; this.cam.bottom = VIEW_H;
+    this.cam.updateProjectionMatrix();
+    this.ctx.compositor.draw(V, this.cam, VIEW_W + 2 * pad, VIEW_H, undefined, false);
   }
 
   /** index a zone and load everything it draws, plus the given sprites */
@@ -115,5 +140,5 @@ export class WorldView {
     this.ctx.compositor.draw(V, this.cam, VIEW_W + 2 * pad, VIEW_H);
   }
 
-  dispose(): void { this.V.dispose(); }
+  dispose(): void { this.V.dispose(); this.V2.dispose(); }
 }

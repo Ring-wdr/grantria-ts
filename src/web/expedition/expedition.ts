@@ -12,17 +12,18 @@ import { KEYMAP } from '../input/bindings';
 import { keyHint } from '../input/keyHints';
 import { ctrlAt } from '../input/touchLayout';
 import type { Cmf } from '../../core/data/assets';
-import type { Drawable, Equip } from '../../core/render';
+import type { Drawable } from '../../core/render';
 import { bodyBox } from '../../core/world/world';
 import { ADVANTAGE_LABEL, ExpeditionLogic, PAUSE_ITEMS } from '../../core/expedition/expedition';
 import { FK, type FieldEnemy, type Press } from '../../core/expedition/field';
 import { SPECIES } from '../../core/expedition/species';
 import type { Zone } from '../../core/expedition/zone';
 import { WorldView } from './worldView';
+import { BattleView } from './battleView';
+import { HERO_EQUIP } from './heroLook';
+import type { Battle } from '../../core/expedition/battle';
 import './expedition.css';
 
-/** the hero's look: 검사 (c0) in a set of the starting gear */
-export const HERO_EQUIP: Equip = { w: 3, h: 3, a: 3, p: 3 };
 
 /** the mode's touch buttons (virtual px, right side; edge 1 moves them out with Input.edge) */
 const TOUCH: { key: number; label: string; x: number; y: number; r: number }[] = [
@@ -38,6 +39,7 @@ export class ExpeditionScene extends ExpeditionLogic {
   /** drawn on every animation frame, not only after a tick (app.ts) */
   readonly everyFrame = true;
   protected readonly view: WorldView;
+  private readonly battleView: BattleView;
   protected cmfs = new Map<string, Cmf>();
   private pending: Press[] = [];
   private stamps: { key: number | null; t: number }[] = [];
@@ -48,6 +50,7 @@ export class ExpeditionScene extends ExpeditionLogic {
   constructor(ctx: GameContext) {
     super(ctx);
     this.view = new WorldView(ctx);
+    this.battleView = new BattleView(ctx, this.view, this.cmfs);
     ctx.input.uiMode = false; ctx.input.padField = false; ctx.input.confirm = false;
     ctx.input.zones = [
       ...TOUCH.map((b) => ({ x: b.x - b.r - 4, y: b.y - b.r - 4, w: 2 * b.r + 8, h: 2 * b.r + 8, key: b.key, edge: 1 as const })),
@@ -67,6 +70,12 @@ export class ExpeditionScene extends ExpeditionLogic {
     const names = ['cmf_c0', ...new Set(zone.spawns.map((s) => `cmf_c${SPECIES[s.species].cmf}`))];
     const cmfs = await Promise.all(names.map((n) => this.cmf(n)));
     await this.view.prepare(zone, this.sets!, names.map((name, i) => ({ name, cmf: cmfs[i], equip: name === 'cmf_c0' ? HERO_EQUIP : undefined })));
+  }
+
+  protected override onBattle(b: Battle): void {
+    const names = [...new Set(b.units.filter((u) => u.sp).map((u) => `cmf_c${u.sp!.cmf}`))];
+    void Promise.all(names.map((n) => this.cmf(n))).then((cmfs) =>
+      this.view.preloadSprites([{ name: 'cmf_c0', cmf: this.cmfs.get('cmf_c0')!, equip: HERO_EQUIP }, ...names.map((name, i) => ({ name, cmf: cmfs[i] }))], ['ec', 'c', 'oc', 't']));
   }
 
   /** the tick's presses wait for the next frame */
@@ -95,13 +104,32 @@ export class ExpeditionScene extends ExpeditionLogic {
   draw(): void {
     const now = performance.now(), dt = (now - this.last) / 1000;
     this.last = now;
-    this.frame(dt, this.takePresses(now));
+    this.frame(dt, this.takePresses(now), now);
     const u = this.ctx.ui, hud = this.ctx.hud;
     if (this.mode === 'loading' || !this.field) {
       this.ctx.compositor.clear();
       this.ctx.compositor.show();
       u.begin();
       u.view('ex-loading', 0, 0, 480, 320, h('div.v-fill.v-col.ex-screen', null, h('div.ex-sub', null, '원정지를 만드는 중...')));
+      u.end();
+      hud.begin(); hud.end();
+      return;
+    }
+    if (this.mode === 'battle' && this.battle) {
+      u.begin();
+      this.battleView.draw(this.battle, this.field);
+      u.end();
+      hud.begin();
+      this.drawTouch();
+      hud.end();
+      return;
+    }
+    if (this.mode === 'over') {
+      this.ctx.compositor.clear();
+      this.ctx.compositor.show();
+      u.begin();
+      u.view('ex-over', 0, 0, 480, 320, h('div.v-fill.v-col.ex-screen', null, h('div.ex-title', null, '원정 실패'),
+        h('div.ex-sub', null, '파티가 쓰러졌다. 원정은 여기서 끝난다.'), h('div.ex-item.sel', { on: () => [AVK.OK] }, '타이틀로')));
       u.end();
       hud.begin(); hud.end();
       return;
@@ -190,7 +218,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     const inp = this.ctx.input, f = this.field!;
     const left = f.enemies.filter((e) => e.alive).length;
     this.ctx.ui.view('ex-hud', 0, 0, 480, 320, h('div.v-fill.ex-hud', null,
-      h('div.v-row.ex-zone', null, h('span', null, '원정 · 초원 1'), h('span.ex-dim', null, `적 ${left}`), h('span.ex-dim', null, `EXP ${this.exp}`)),
+      h('div.v-row.ex-zone', null, h('span', null, '원정 · 초원 1'), h('span.ex-dim', null, `적 ${left}`), h('span.ex-dim', null, `Lv.${this.run.party[0].lv}`)),
       inp.device !== 'touch' ? h('div.v-row.ex-keys', null,
         this.hint(FK.LIGHT, '공격'), this.hint(FK.HEAVY, '강공격'), this.hint(FK.DODGE, '회피'), this.hint(FK.PARRY, '패링'), this.hint(AVK.CLR, '메뉴')) : null,
       h('div.v-col.ex-toasts', null, this.toasts.map((t) => h('div.ex-toast', { style: `opacity:${Math.min(1, (2.4 - t.t) * 2)}` }, t.text)))));
@@ -217,12 +245,19 @@ export class ExpeditionScene extends ExpeditionLogic {
   /** the touch stick and buttons (touch only) */
   private drawTouch(): void {
     const inp = this.ctx.input;
-    if (inp.device !== 'touch' || this.mode !== 'field') return;
-    const hud = this.ctx.hud, { x, y, s } = ctrlAt('stick', inp.edge);
+    if (inp.device !== 'touch') return;
+    const hud = this.ctx.hud, e = inp.edge;
+    if (this.mode === 'battle') {                                     // the defense buttons while an enemy attacks
+      if (this.battle?.phase !== 'enemy') return;
+      for (const b of TOUCH) if (b.key === FK.PARRY || b.key === FK.DODGE)
+        hud.el(`ex-tbtn big${inp.isHeld(b.key) ? ' on' : ''}`, b.x + e - b.r - 6, b.y - b.r - 6, 2 * b.r + 12, 2 * b.r + 12, { key: `tb${b.key}`, text: b.label });
+      return;
+    }
+    if (this.mode !== 'field') return;
+    const { x, y, s } = ctrlAt('stick', inp.edge);
     hud.el('ex-stick', x - 30 * s, y - 30 * s, 60 * s, 60 * s);
     const d = Math.hypot(inp.stick.dx, inp.stick.dy), k = d > 22 * s ? (22 * s) / d : 1;
     hud.el('ex-knob', x - 11 * s + inp.stick.dx * k, y - 11 * s + inp.stick.dy * k, 22 * s, 22 * s);
-    const e = inp.edge;
     for (const b of TOUCH) {
       hud.el(`ex-tbtn${inp.isHeld(b.key) ? ' on' : ''}${b.key === FK.ACT && !this.field!.actHint() ? ' dim' : ''}`, b.x + e - b.r, b.y - b.r, 2 * b.r, 2 * b.r,
         { key: `tb${b.key}`, text: b.label });

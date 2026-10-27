@@ -49,3 +49,58 @@
 .ex-tbtn.on { background: rgba(255, 224, 102, 0.55); transform: scale(0.92); }
 .ex-tbtn.dim { opacity: 0.4; }
 .ex-tbtn.menu { border-radius: 4px; font-size: 9px; }
+
+/* battle (battleView.ts) */
+.exb { pointer-events: none; }
+.exb-order { position: absolute; left: 0; right: 0; top: 6px; justify-content: center; gap: 3px; align-items: center; }
+.exb-order-l { color: #9aa6bd; font-size: 8px; margin-right: 2px; }
+.exb-chip { padding: 1px 5px; font-size: 8px; border-radius: 2px; color: #fff; background: #2a4a7a; opacity: 0.8; }
+.exb-chip.enemy { background: #7a2a2a; }
+.exb-chip.now { opacity: 1; box-shadow: 0 0 0 1px #ffe066; transform: scale(1.12); }
+.exb-chip.broken { color: #ffe066; }
+.exb-line { position: absolute; left: 0; right: 0; top: 24px; text-align: center; color: #e8ecf4; font-size: 10px; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.exb-tag { position: absolute; width: 68px; gap: 2px; align-items: center; }
+.exb-name { color: #fff; font-size: 8px; text-shadow: 0 0 2px #000, 0 0 2px #000; white-space: nowrap; }
+.exb-bar { position: relative; width: 60px; height: 3px; background: rgba(0, 0, 0, 0.7); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8); }
+.exb-fill { position: absolute; left: 0; top: 0; bottom: 0; }
+.exb-bar.hp .exb-fill { background: #e0483e; }
+.exb-member .exb-bar.hp .exb-fill { background: #5fd36a; }
+.exb-bar.brk .exb-fill { background: #f0c63a; }
+.exb-bar.brk.full .exb-fill { background: #fff3a0; animation: ex-blink 0.3s steps(2) infinite; }
+.exb-cursor, .exb-me { position: absolute; color: #ffe066; font-size: 11px; animation: exb-bob 0.6s ease-in-out infinite alternate; text-shadow: 0 0 2px #000; }
+.exb-me { color: #8fd8ff; }
+@keyframes exb-bob { to { transform: translateY(-3px); } }
+.exb-party { position: absolute; left: 8px; bottom: 8px; gap: 3px; padding: 5px 7px; background: rgba(8, 14, 26, 0.8); border: 1px solid #3a4a66; border-radius: 4px; }
+.exb-ap { gap: 2px; align-items: center; color: #8fd8ff; font-size: 8px; }
+.exb-pip { width: 7px; height: 7px; border-radius: 50%; background: #1d2a40; box-shadow: inset 0 0 0 1px #3f5a80; }
+.exb-pip.on { background: #6fd0ff; box-shadow: 0 0 3px #6fd0ff; }
+.exb-member { gap: 6px; align-items: center; font-size: 9px; color: #e6efff; }
+.exb-member.turn .exb-mname { color: #ffe066; }
+.exb-member.down { opacity: 0.45; }
+.exb-mname { width: 92px; white-space: nowrap; }
+.exb-hpn { width: 50px; font-size: 8px; color: #b8c2d8; }
+.exb-menu { position: absolute; left: 172px; bottom: 8px; width: 136px; min-width: 0; padding: 5px; gap: 1px; pointer-events: auto; }
+.exb-menu .ex-item { padding: 2px 8px; font-size: 10px; }
+.exb-why, .exb-cost { float: right; color: #8090a8; font-size: 8px; margin-left: 8px; }
+.exb-desc { font-size: 8px; color: #8fa0bc; }
+.exb-sub { font-size: 9px; color: #9aa6bd; padding: 2px 4px; }
+.exb-pop { position: absolute; width: 60px; text-align: center; font-size: 13px; font-weight: bold; color: #fff; text-shadow: 0 0 2px #000, 0 0 3px #000; }
+.exb-pop.heal { color: #7dff8a; }
+.exb-pop.parry { color: #9ff3ff; font-size: 12px; }
+.exb-pop.dodge { color: #d0d8ff; font-size: 10px; }
+.exb-pop.break { color: #ffe066; }
+.exb-pop.info { color: #c8d0e0; font-size: 9px; }
+.exb-ring { position: absolute; border-radius: 50%; border: 2px solid #ff7a5a; box-sizing: border-box; box-shadow: 0 0 6px #ff7a5a; }
+.exb-ring.good { border-color: #9ff3ff; box-shadow: 0 0 8px #9ff3ff; }
+.exb-ring.core { border: 1px dashed rgba(255, 255, 255, 0.7); box-shadow: none; }
+.exb-defkeys { position: absolute; left: 0; right: 0; top: 40px; justify-content: center; gap: 14px; font-size: 10px; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.exb-dim { color: #9aa6bd; }
+.exb-whiff { position: absolute; width: 60px; text-align: center; color: #ff8a7a; font-size: 10px; text-shadow: 0 0 2px #000; }
+.exb-intro { position: absolute; left: 0; right: 0; top: 130px; text-align: center; font-size: 16px; color: #ffe066; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+.exb-result { position: absolute; left: 140px; right: 140px; top: 90px; padding: 10px; gap: 4px; align-items: center; background: rgba(8, 14, 26, 0.9);
+  border: 1px solid #3a4a66; border-radius: 4px; color: #e6efff; font-size: 10px; pointer-events: auto; }
+.exb-result-t { font-size: 16px; color: #ffe066; }
+.exb-result.lost .exb-result-t { color: #ff7a6a; }
+.exb-lvup { color: #7dff8a; }
+.exb-cont { margin-top: 6px; padding: 3px 12px; border-radius: 3px; background: #2a3d5e; cursor: pointer; }
+.ex-tbtn.big { font-size: 10px; }

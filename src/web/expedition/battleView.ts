@@ -4,7 +4,7 @@
 // of an enemy's hits and the damage popups. A shot move (Move.shot) is fired from where the enemy stands: its projectile
 // (the species' field shot frame) reaches the target on each hit's time. The boss's 왕의 포효 cannot be defended: no
 // closing ring, a red flash over the whole party instead; its tag counts down to the enrage. Rare creatures and shiny
-// recruits sparkle (cmf_status 0x5d..0x63). At night the backdrop is darker still.
+// recruits sparkle (cmf_status 0x5d..0x63). The backdrop carries the field's day / night shift.
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { ALL_OUT, AP_MAX, BK, DODGE_MS, PARRY_MS, type Battle, type BUnit } from '../../core/expedition/battle';
@@ -102,9 +102,9 @@ export class BattleView {
     });
   }
 
-  /** dark 0..1: the night (§8) darkens the backdrop further */
-  draw(b: Battle, f: FieldSim, talk: Talk | null = null, dark = 0): void {
-    setDayShift(Math.round(14 + 8 * dark), Math.round(30 + 14 * dark), Math.round(12 + 2 * dark));   // subtracted: about 45% darker by day
+  /** day: the field's day / night shift (the original's row); the backdrop is that and about 45% darker on top */
+  draw(b: Battle, f: FieldSim, talk: Talk | null = null, day: [number, number, number] = [0, 0, 0]): void {
+    setDayShift(14 + day[0], 30 + day[1], 12 + day[2]);
     this.world.render(f.camX, f.camY, []);
     setDayShift(0, 0, 0);
     const ents = b.units.map((u) => this.sprite(b, u)).filter((d): d is Drawable => !!d).sort((p, q) => p.y - q.y);

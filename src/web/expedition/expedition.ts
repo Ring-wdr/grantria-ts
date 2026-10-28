@@ -7,7 +7,7 @@
 // buttons on the right), not the main game's editable one.
 // Growth and rewards (web/docs/expedition-balance.md): chests (cmf_oc 14..17), the rare creature's sparkle (cmf_status
 // 0x5d..0x63, the original's ground-item sparkle), the dark merchant (the original's dark merchant actor 0x9E) and the
-// night, a colour shift on the field like main play's day / night. Equipment shows the main game's item icons (sheets
+// day / night colour, the original's own palette shift rows and fade. Equipment shows the main game's item icons (sheets
 // i0..i3) and grade colours, and a piece for a filled slot opens the comparison (before / after, 교체 or 버리기).
 import { AVK } from '../input/input';
 import type { GameContext } from '../game/scene';
@@ -35,8 +35,8 @@ import './expedition.css';
 const SPARKLE = 0x5d;
 /** the original's dark merchant actor (its sprite: actorTypes[id][0]) */
 const MERCHANT_ACTOR = 0x9e;
-/** the field's colour shift at full night (subtracted, bluish) */
-const NIGHT_SHIFT: [number, number, number] = [12, 26, 6];
+/** the original's palette shift table (d.dat 0x26e0c, 3 signed bytes a row): (dr, dg, db) taken off every colour */
+const TINT_TABLE = 0x26e0c;
 /** sprites farther than this (px) outside the view are not drawn (the boss and the trees reach about this far) */
 const CULL = 96;
 
@@ -88,6 +88,12 @@ export class ExpeditionScene extends ExpeditionLogic {
     let c = this.cmfs.get(name);
     if (!c) { c = await this.ctx.assets.cmf(name); this.cmfs.set(name, c); }
     return c;
+  }
+
+  /** this frame's day / night shift: the original's row (core ExpeditionLogic.tint) */
+  protected tintShift(): [number, number, number] {
+    const a = this.ctx.assets, o = TINT_TABLE + 3 * this.tint;
+    return [a.s8(o), a.s8(o + 1), a.s8(o + 2)];
   }
 
   /** the dark merchant's sprite */
@@ -151,7 +157,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     }
     if (this.mode === 'battle' && this.battle) {
       u.begin();
-      this.battleView.draw(this.battle, this.field, this.talk, this.darkness);
+      this.battleView.draw(this.battle, this.field, this.talk, this.tintShift());
       u.end();
       hud.begin();
       this.drawTouch();
@@ -240,8 +246,7 @@ export class ExpeditionScene extends ExpeditionLogic {
       const x = f.zone.exit;
       ents.push({ cmfName: 'cmf_oc', cmf: this.sets.oc, frame: EXIT_MARKER + (Math.floor(f.time * 20) % 8), x: x.x + 26, y: x.y + 6, depth: x.y + 30 });
     }
-    const k = this.darkness;
-    setDayShift(Math.round(NIGHT_SHIFT[0] * k), Math.round(NIGHT_SHIFT[1] * k), Math.round(NIGHT_SHIFT[2] * k));
+    setDayShift(...this.tintShift());
     this.view.render(f.camX, f.camY, ents, undefined, (V) => { for (const e of f.enemies) if (e.rare && e.alive && this.inView(e.x, e.y)) this.sparkles(V, e.x, e.y, f.time); });
     setDayShift(0, 0, 0);
     this.ctx.compositor.show();

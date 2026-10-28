@@ -56,6 +56,13 @@ export const DUSK_AT = 300, NIGHT_AT = 360, CLOCK_SPEED = 2.5;
 /** at night: damage the party takes ×, gold × */
 export const NIGHT_TAKEN = 1.2, NIGHT_GOLD = 1.3;
 export type DayPhase = 'day' | 'dusk' | 'night';
+/** the original's day / night colour: rows of its palette shift table (d.dat 0x26e0c, 40 rows of (dr, dg, db) taken off
+ *  every colour). Each phase rests on its base row (day 0, dusk 11, night 26); a change starts `steps` rows above the
+ *  new base and walks down one row a field tick (50 ms) to it (FUN_00025990; DAY_EVENTS / TINT_BASE in core/rules/buffs.ts,
+ *  which this mode may not import) */
+export const TINT_BASE: Record<DayPhase, number> = { day: 0, dusk: 11, night: 26 };
+export const TINT_STEPS: Record<DayPhase, number> = { day: 11, dusk: 15, night: 14 };
+export const TINT_TICK = 0.05;
 
 /** a stage-1 plan: battle zones in order, a rest zone between them about half the time, always one before the boss */
 export function stagePlan(seed: number): ZoneKind[] {
@@ -182,10 +189,14 @@ export class ExpeditionLogic {
   get night(): boolean { return this.inBattleZone && this.dayPhase === 'night'; }
   get goldMul(): number { return this.night ? NIGHT_GOLD : 1; }
   get takenMul(): number { return this.night ? NIGHT_TAKEN : 1; }
-  /** 0 (day) .. 1 (night): how dark the field is */
-  get darkness(): number {
-    if (!this.inBattleZone) return 0;
-    return Math.max(0, Math.min(1, (this.clock - DUSK_AT) / (NIGHT_AT - DUSK_AT)));
+  /** the palette shift row drawn this frame (TINT_BASE), and the change still walking down to its base */
+  tint = 0;
+  private fade = { steps: 0, base: 0, t: 0 };
+
+  /** one field tick of a day / night change: the next row down, or the base once the steps are spent */
+  private tintTick(): void {
+    const f = this.fade;
+    if (f.steps > 0) { this.tint = f.steps - 1 + f.base; f.steps--; } else this.tint = f.base;
   }
 
   /** build the zone of this step and put the hero at its start (the host prepares its drawing in onZone) */
@@ -204,6 +215,8 @@ export class ExpeditionLogic {
     this.toasts = [];
     this.clock = 0;
     this.dayPhase = 'day';
+    this.tint = 0;
+    this.fade = { steps: 0, base: 0, t: 0 };
     this.stock = [];
     this.zlog = null;
     if (kind === 'battle') {
@@ -260,9 +273,12 @@ export class ExpeditionLogic {
     if (!this.inBattleZone || !this.field) return;
     this.clock += dt * CLOCK_SPEED;
     if (this.zlog) this.zlog.time[this.dayPhase] += dt;
+    for (this.fade.t += dt; this.fade.t >= TINT_TICK; this.fade.t -= TINT_TICK) this.tintTick();
     const ph: DayPhase = this.clock >= NIGHT_AT ? 'night' : this.clock >= DUSK_AT ? 'dusk' : 'day';
     if (ph === this.dayPhase) return;
     this.dayPhase = ph;
+    this.fade = { steps: TINT_STEPS[ph], base: TINT_BASE[ph], t: 0 };
+    this.tintTick();
     if (ph === 'dusk') this.toast('날이 어두워집니다.');
     else if (ph === 'night') {
       this.toast('밤이 되었습니다. 몬스터들이 강해집니다.');

@@ -165,20 +165,21 @@ export class BattleView {
     kids.push(h('div.v-row.exb-order', null, h('span.exb-order-l', null, '순서'),
       order.map((x, i) => h(`div.exb-chip.${x.side}${i === 0 && (b.phase === 'command' || b.phase === 'enemy') ? '.now' : ''}${x.broken ? '.broken' : ''}`, null, x.name.slice(0, 4)))));
     kids.push(h('div.exb-line', null, b.line));
-    // enemy gauges over their heads
+    // enemy gauges over their heads (the one being aimed at lit)
+    const picking = b.phase === 'command' && b.menu === 'target', aimed = picking ? b.targets()[b.targetSel] : null;
     b.enemies.forEach((e) => {
       if (e.gone || e.hp <= 0) return;
       const [x, y] = this.pos(b, e);
       const ein = e.sp?.boss ? b.enrageIn : null;
-      kids.push(h('div.v-col.exb-tag', { style: `left:${x - 34}px;top:${y - 66}px` },
+      kids.push(h(`div.v-col.exb-tag${e === aimed ? '.aimed' : ''}`, { style: `left:${x - 34}px;top:${y - 66}px` },
         h('div.exb-name', null, `${e.rare ? '빛나는 ' : ''}${e.name}${e.broken ? ' · BREAK' : ''}`),
         this.bar('hp', e.hp / e.hpMax), this.bar(`brk${e.broken ? '.full' : ''}`, e.brk / e.brkMax),
         e.enraged ? h('div.exb-enrage.on', null, '광폭화!') : ein !== null ? h('div.exb-enrage', null, `광폭화까지 ${ein}턴`) : null));
     });
-    // target cursor
-    if (b.phase === 'command' && b.menu === 'target') {
-      const t = b.targets()[b.targetSel];
-      if (t) { const [x, y] = this.pos(b, t); kids.push(h('div.exb-cursor', { style: `left:${x - 6}px;top:${y - 80}px` }, '▼')); }
+    // target cursor; each target is tapped or clicked to pick it at once
+    if (picking) {
+      if (aimed) { const [x, y] = this.pos(b, aimed); kids.push(h('div.exb-cursor', { style: `left:${x - 6}px;top:${y - 80}px` }, '▼')); }
+      b.targets().forEach((t, i) => { const [x, y] = this.pos(b, t); kids.push(h('div.exb-pick', { style: `left:${x - 28}px;top:${y - 60}px`, on: () => { b.tap('target', i); } })); });
     }
     if (b.phase === 'command' && b.actor) { const [x, y] = this.pos(b, b.actor); kids.push(h('div.exb-me', { style: `left:${x - 6}px;top:${y - 62}px` }, '▼')); }
     // the party
@@ -187,7 +188,7 @@ export class BattleView {
       b.party.map((p) => h(`div.v-row.exb-member${b.actor === p ? '.turn' : ''}${p.hp <= 0 ? '.down' : ''}`, null,
         h('span.exb-mname', null, `${p.name} Lv.${p.member?.lv ?? p.lv}`),
         this.bar('hp', p.hp / p.hpMax), h('span.exb-hpn', null, `${p.hp}/${p.hpMax}`)))));
-    if (b.phase === 'command') { kids.push(this.menuTree(b)); const p = this.prompt(b); if (p) kids.push(h('div.exb-prompt', null, p)); }
+    if (b.phase === 'command') { const m = this.menuTree(b); if (m) kids.push(m); const p = this.prompt(b); if (p) kids.push(h('div.exb-prompt', null, p)); }
     if (b.phase === 'enemy') kids.push(...this.defenseTree(b));
     for (const p of b.popups) {
       if (p.unit.gone && p.kind !== 'info') continue;
@@ -223,7 +224,10 @@ export class BattleView {
 
   /** the guidance under the turn line: what to pick, the skill under the cursor, why a command is off */
   private prompt(b: Battle): string | null {
-    if (b.menu === 'target') return b.pending?.kind === 'talk' ? '누구와 대화할까?' : '대상을 고르세요';
+    if (b.menu === 'target') {
+      const touch = this.ctx.input.device === 'touch', what = b.pending?.kind === 'talk' ? '누구와 대화할까?' : '누구를 칠까?';
+      return touch ? `${what} 적을 누르세요` : `${what}  ◀▶ 고르기 · ${this.glyph([AVK.OK])} 결정 · ${this.glyph([AVK.CLR])} 뒤로`;
+    }
     if (b.menu === 'item') return `회복약 ×${b.run.potions} — 누구에게?`;
     if (b.menu === 'skill') { const s = b.skills()[b.subSel]; return s ? `${s.name} · ${s.desc}` : null; }
     const c = b.commands()[b.sel];
@@ -232,10 +236,15 @@ export class BattleView {
     return c ? b.blocked(c) : null;
   }
 
-  /** the command column at the right edge; the skill / item lists open in the same place */
-  private menuTree(b: Battle): VNode {
+  /** the command column at the right edge; the skill / item lists open in the same place. While a target is picked the
+   *  column is gone (the eye goes to the enemies), but for a back button on touch */
+  private menuTree(b: Battle): VNode | null {
     const rows: VNode[] = [];
-    if (b.menu === 'main' || b.menu === 'target') {
+    if (b.menu === 'target') {
+      if (this.ctx.input.device !== 'touch') return null;
+      return h('div.v-col.ex-menu.exb-menu', null, h('div.ex-item.exb-back', { on: () => { b.menuKey(AVK.CLR); } }, '◀ 뒤로'));
+    }
+    if (b.menu === 'main') {
       b.commands().forEach((c, i) => {
         const why = b.blocked(c);
         rows.push(h(`div.ex-item${i === b.sel ? '.sel' : ''}${why ? '.off' : ''}${c === ALL_OUT ? '.allout' : ''}`, { on: () => { b.tap('main', i); } }, c));

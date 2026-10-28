@@ -7,18 +7,20 @@
 // buttons on the right), not the main game's editable one.
 // Growth and rewards (web/docs/expedition-balance.md): chests (cmf_oc 14..17), the rare creature's sparkle (cmf_status
 // 0x5d..0x63, the original's ground-item sparkle), the dark merchant (the original's dark merchant actor 0x9E) and the
-// night, a colour shift on the field like main play's day / night.
+// night, a colour shift on the field like main play's day / night. Equipment shows the main game's item icons (sheets
+// i0..i3) and grade colours, and a piece for a filled slot opens the comparison (before / after, 교체 or 버리기).
 import { AVK } from '../input/input';
 import type { GameContext } from '../game/scene';
-import { h, padBadge, type VNode } from '../render/view';
+import { h, padBadge, sprite, type VNode } from '../render/view';
 import { KEYMAP } from '../input/bindings';
 import { keyHint } from '../input/keyHints';
 import { ctrlAt } from '../input/touchLayout';
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { bodyBox } from '../../core/world/world';
-import { ADVANTAGE_LABEL, CLOCK_SPEED, ExpeditionLogic, NIGHT_AT, PAUSE_ITEMS } from '../../core/expedition/expedition';
-import { CHEST_FRAME, GRADE_NAME, relicDesc } from '../../core/expedition/loot';
+import { ADVANTAGE_LABEL, CLOCK_SPEED, ExpeditionLogic, GEAR_CHOICES, NIGHT_AT, PAUSE_ITEMS } from '../../core/expedition/expedition';
+import { CHEST_FRAME, GRADE_NAME, SLOT_NAME, gearDesc, gearIcon, type Gear } from '../../core/expedition/loot';
+import { statsWith } from '../../core/expedition/run';
 import { DEFAULT_EQUIP, setDayShift, type SpriteLayer } from '../render/sprites';
 import { FK, type FieldEnemy, type Press } from '../../core/expedition/field';
 import { SPECIES } from '../../core/expedition/species';
@@ -37,6 +39,15 @@ const MERCHANT_ACTOR = 0x9e;
 const NIGHT_SHIFT: [number, number, number] = [12, 26, 6];
 /** sprites farther than this (px) outside the view are not drawn (the boss and the trees reach about this far) */
 const CULL = 96;
+
+/** a piece's 16×16 icon from the main game's item sheets (FUN_0003bc80: sheet i<icon/117>, nine to a row) */
+function gearSprite(g: Gear): VNode {
+  const i = gearIcon(g);
+  return sprite(`i${Math.floor(i / 117)}`, (i % 9) * 16, Math.floor((i % 117) / 9) * 16, 16, 16, { cls: 'ex-icon' });
+}
+
+/** a piece's name in its grade colour */
+function gearName(g: Gear): VNode { return h(`span.ex-ware-name.g${g.grade}`, null, `[${GRADE_NAME[g.grade]}] ${g.name}`); }
 
 /** the mode's touch buttons (virtual px, right side; edge 1 moves them out with Input.edge) */
 const TOUCH: { key: number; label: string; x: number; y: number; r: number }[] = [
@@ -165,6 +176,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     if (this.mode === 'encounter') this.drawBanner();
     if (this.mode === 'summary') this.drawSummary();
     if (this.mode === 'shop') this.drawShop();
+    if (this.mode === 'gear') this.drawGear();
     if (this.mode === 'pause') this.drawPause();
     u.end();
     this.drawTouch();
@@ -321,11 +333,13 @@ export class ExpeditionScene extends ExpeditionLogic {
   /** the dark merchant: its four slots and 떠나기 */
   private drawShop(): void {
     const rows = this.stock.map((w, i) => {
-      const r = w.relic, cls = `div.v-col.ex-item.ex-ware${i === this.shopSel ? '.sel' : ''}${w.sold || this.run.gold < w.price ? '.off' : ''}`;
+      const g = w.gear, cls = `div.v-col.ex-item.ex-ware${i === this.shopSel ? '.sel' : ''}${w.sold || this.run.gold < w.price ? '.off' : ''}`;
+      const worn = g ? this.run.equip[g.slot] : null;
       return h(cls, { on: () => { this.buy(i); } },
-        h('div.v-row.ex-ware-top', null, h(`span.ex-ware-name${r ? `.g${r.grade}` : ''}`, null, r ? `[${GRADE_NAME[r.grade]}] ${r.name}` : `회복약 (남은 ${w.n})`),
+        h('div.v-row.ex-ware-top', null, g ? gearSprite(g) : null, g ? gearName(g) : h('span.ex-ware-name', null, `회복약 (남은 ${w.n})`),
           h('span.ex-ware-price', null, w.sold ? '매진' : `${w.price}G`)),
-        h('span.ex-ware-desc', null, r ? relicDesc(r) : '한 명의 HP 40% 회복'));
+        h('span.ex-ware-desc', null, g ? `${SLOT_NAME[g.slot]} · ${gearDesc(g)}` : '한 명의 HP 40% 회복'),
+        g ? h('span.ex-ware-desc.ex-dim', null, worn ? `착용 중: ${worn.name} (${gearDesc(worn)})` : '이 부위는 비어 있다') : null);
     });
     this.ctx.ui.view('ex-shop', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
       h('div.v-col.ex-menu.ex-shop', null,
@@ -333,6 +347,31 @@ export class ExpeditionScene extends ExpeditionLogic {
         ...rows,
         h(`div.ex-item${this.shopSel >= this.stock.length ? '.sel' : ''}`, { on: () => { this.closeShop(); } }, '떠나기'),
         h('div.ex-line.ex-dim', null, this.shopLine))));
+  }
+
+  /** a piece for a filled slot: the worn one and the new one side by side, the hero's stats before and after, 교체 / 버리기 */
+  private drawGear(): void {
+    const o = this.offers[0];
+    if (!o) return;
+    const g = o.gear, worn = this.run.equip[g.slot], hero = this.run.party[0];
+    const now = statsWith(hero, this.run.gearStats()), then = statsWith(hero, this.run.gearStats(g));
+    const pct = (v: number) => `${Math.round(v * 100)}%`;
+    const rows: [string, number, number, (v: number) => string][] = [
+      ['공격', now.atk, then.atk, String], ['속도', now.spd, then.spd, String], ['최대 HP', now.hpMax, then.hpMax, String],
+      ['받는 피해 감소', this.run.guard, this.run.guardWith(g), pct],
+    ];
+    const piece = (label: string, x: Gear | null) => h('div.v-col.ex-gear-piece', null, h('div.ex-dim', null, label),
+      x ? h('div.v-row.ex-ware-top', null, gearSprite(x), gearName(x)) : h('div.ex-ware-name', null, '없음'),
+      h('span.ex-ware-desc', null, x ? gearDesc(x) : ''));
+    this.ctx.ui.view('ex-gear', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
+      h('div.v-col.ex-menu.ex-gear', null,
+        h('div.v-row.ex-menu-title', null, h('span.v-grow', null, `${SLOT_NAME[g.slot]} 비교`), h('span.ex-dim', null, `얻은 곳: ${o.from} · 남은 ${this.offers.length}`)),
+        h('div.v-row.ex-gear-pair', null, piece('착용 중', worn), h('div.ex-gear-arrow', null, '→'), piece('새 장비', g)),
+        h('div.v-col.ex-gear-stats', null, h('div.ex-dim', null, `${hero.name} 기준 (파티 전원에게 같은 효과)`),
+          rows.map(([label, a, b, f]) => h('div.v-row.ex-gear-row', null, h('span.v-grow', null, label), h('span', null, f(a)), h('span.ex-dim', null, '→'),
+            h(`span.ex-gear-new${b > a ? '.up' : b < a ? '.down' : ''}`, null, f(b))))),
+        GEAR_CHOICES.map((label, i) => h(`div.ex-item${i === this.gearSel ? '.sel' : ''}`, { on: () => { this.chooseGear(i === 0); } },
+          i === 0 ? `${label} (${worn?.name ?? '착용 중인 장비'}은(는) 버린다)` : `${label} (${g.name}을(를) 두고 간다)`)))));
   }
 
   private nextName(): string {
@@ -348,7 +387,7 @@ export class ExpeditionScene extends ExpeditionLogic {
       h('div.ex-sub', null, clear ? '초원의 왕을 쓰러뜨렸다. (이후 스테이지는 준비 중)' : '파티가 쓰러졌다. 원정은 여기서 끝난다.'),
       h('div.v-col.ex-stats', null,
         h('div', null, `돌파한 지역 ${r.cleared} / 3`), h('div', null, `쓰러뜨린 적 ${r.kills}`), h('div', null, `패링 ${r.parries}회`), h('div', null, `영입 ${r.recruits}`),
-        h('div', null, `골드 ${r.gold}G · 유물 ${r.relics.length}개`),
+        h('div', null, `골드 ${r.gold}G · 장비 ${r.equip.filter(Boolean).length} / ${r.equip.length}`),
         r.party.map((m) => h('div.ex-dim', null, `${m.shiny ? '빛나는 ' : ''}${m.name} Lv.${m.lv}`))),
       h('div.v-row.ex-item.sel.ex-go', { on: () => [AVK.OK] }, padBadge(this.ctx.input, AVK.OK), '타이틀로'));
   }
@@ -366,8 +405,9 @@ export class ExpeditionScene extends ExpeditionLogic {
         h('div.ex-menu-title', null, '일시 정지'),
         PAUSE_ITEMS.map((label, i) => h(`div.ex-item${i === this.pauseSel ? '.sel' : ''}`, { on: () => { this.pickPause(i); } }, label)),
         h('div.ex-line.ex-dim', null, `골드 ${this.run.gold}G · 회복약 ${this.run.potions}`),
-        this.run.relics.length ? this.run.relics.map((r) => h('div.v-col.ex-relic', null, h(`span.ex-ware-name.g${r.grade}`, null, `[${GRADE_NAME[r.grade]}] ${r.name}`), h('span.ex-ware-desc', null, relicDesc(r))))
-          : h('div.ex-line.ex-dim', null, '유물 없음'))));
+        this.run.equip.map((g, i) => h('div.v-col.ex-relic', null,
+          h('div.v-row.ex-ware-top', null, h('span.ex-slot', null, SLOT_NAME[i]), g ? gearSprite(g) : null, g ? gearName(g) : h('span.ex-ware-name.ex-dim', null, '없음')),
+          g ? h('span.ex-ware-desc', null, gearDesc(g)) : null)))));
   }
 
   /** the touch stick and buttons (touch only) */

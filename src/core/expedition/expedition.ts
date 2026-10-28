@@ -3,8 +3,9 @@
 // combat, rules or saves (tests/boundary.test.ts). The run (stage 1): three battle zones on t3, one after another,
 // with a rest zone between them half the time and always one before the boss room (초원 - 깊숙한곳, m124). The hero
 // walks 360° and fights in the field; an encounter becomes a turn battle. Growth and rewards follow
-// web/docs/expedition-balance.md: creatures drop gold, chests hold gold, potions and relics (party-wide, for the run), a
-// battle zone may hold a rare creature, and a battle zone grows dark the longer the party stays (§8): at night the
+// web/docs/expedition-balance.md: creatures drop gold and now and then a piece of the main game's equipment (four
+// slots, each piece on the whole party, for the run; a piece for a slot already filled is compared with the worn one and
+// either put on or thrown away), chests hold gold, potions and equipment, a battle zone may hold a rare creature, and a battle zone grows dark the longer the party stays (§8): at night the
 // party takes ×1.2 damage, gold is ×1.3 and the dark merchant appears (§9). Leaving a battle zone by its exit stone heals
 // 30% and shows what the zone gave; a rest zone heals fully. Beating the boss clears the stage; a party wipe ends the
 // run. Either way it is back to the title: nothing is kept (the host gets the run log, §12.1).
@@ -20,7 +21,8 @@ import { Run, recruit, type Member } from './run';
 import { Talk } from './talk';
 import { BOSS_SPECIES, FIELD_SPECIES } from './species';
 import { Rng } from './rng';
-import { CHEST_NAME, GRADE_NAME, RARE_CHANCE, RARE_GRADES, merchantStock, openChest, pickRelic, relicDesc, type Grade, type Relic, type Ware } from './loot';
+import { CHEST_NAME, DROP_CHANCE, FIELD_DROP_CHANCE, GRADE_NAME, RARE_CHANCE, SLOT_NAME, creatureDrop, gearDesc, gearNamer, merchantStock, openChest, rareDrop,
+  type Gear, type Namer, type Ware } from './loot';
 import { buildBoss, buildField, zoneSets, type Zone, type ZoneKind, type ZoneSets } from './zone';
 
 /** what the mode needs from its host: the game data, the input, the sound and the way back to the title */
@@ -31,7 +33,13 @@ export interface ExpeditionHost {
   readonly screens: { title(): void };
 }
 
-export type Mode = 'loading' | 'field' | 'pause' | 'encounter' | 'battle' | 'summary' | 'shop' | 'over' | 'clear';
+export type Mode = 'loading' | 'field' | 'pause' | 'encounter' | 'battle' | 'summary' | 'shop' | 'gear' | 'over' | 'clear';
+
+/** the rows of the equipment comparison */
+export const GEAR_CHOICES = ['교체', '버리기'] as const;
+
+/** a piece found for a slot already filled, waiting for the comparison: where it came from */
+export interface GearOffer { gear: Gear; from: string }
 
 /** the zone heal on leaving a battle zone */
 export const EXIT_HEAL = 0.3;
@@ -79,12 +87,14 @@ export interface ZoneLog {
   chests: { placed: number[]; opened: number[] };
   rare: { met: number; caught: number; lost: number };
   merchant: { met: boolean; bought: string[] };
+  /** equipment found here, put on, and thrown away */
+  gear: { found: string[]; worn: number; dropped: number };
 }
 
 /** the boss fight in the run log */
 export interface BossLog {
   party: string[];
-  relics: string[];
+  equip: string[];
   potions: number;
   gold: number;
   advantage: Advantage;
@@ -130,8 +140,14 @@ export class ExpeditionLogic {
   readonly log: { zones: ZoneLog[]; boss: BossLog | null } = { zones: [], boss: null };
   /** this battle zone's entry in the log */
   zlog: ZoneLog | null = null;
-  /** loot rolls (chests, rare drops, the merchant), from the run seed */
+  /** loot rolls (drops, chests, the merchant), from the run seed */
   private readonly lootRng: Rng;
+  /** the main game's equipment names (its data, read when a piece is made) */
+  private readonly names: Namer;
+  /** pieces for filled slots waiting for the comparison, its cursor, and the mode it returns to */
+  offers: GearOffer[] = [];
+  gearSel = 0;
+  private gearBack: 'field' | 'shop' = 'field';
   /** parries before the boss battle began */
   private parriesAtBoss = 0;
 
@@ -140,6 +156,7 @@ export class ExpeditionLogic {
     this.seed = seed;
     this.plan = stagePlan(seed);
     this.lootRng = new Rng((seed ^ 0x2545f491) >>> 0);
+    this.names = gearNamer(ctx.assets);
     void this.enterZone();
   }
 
@@ -185,7 +202,7 @@ export class ExpeditionLogic {
       for (const c of zone.chests ?? []) placed[c.kind]++;
       this.zlog = { zone: this.zoneName, time: { day: 0, dusk: 0, night: 0 }, battles: { party: 0, none: 0, enemy: 0 }, kills: { battle: 0, field: 0 }, exp: 0,
         gold: { got: 0, spent: 0 }, chests: { placed, opened: [0, 0, 0, 0] }, rare: { met: zone.spawns.filter((s) => s.rare).length, caught: 0, lost: 0 },
-        merchant: { met: false, bought: [] } };
+        merchant: { met: false, bought: [] }, gear: { found: [], worn: 0, dropped: 0 } };
       this.log.zones.push(this.zlog);
     }
     if (kind === 'rest') { this.run.heal(1); this.toast('쉼터: 파티가 모두 회복했다'); this.toast('출구의 돌에서 상호작용으로 다음 지역으로'); }
@@ -201,7 +218,7 @@ export class ExpeditionLogic {
       this.run.heal(EXIT_HEAL);
       this.summary = [`${this.zoneName} 돌파!`, `파티 HP ${EXIT_HEAL * 100}% 회복`,
         `쓰러뜨린 적 ${z.kills.battle + z.kills.field} · EXP +${z.exp}`, `골드 +${z.gold.got}${z.gold.spent ? ` (쓴 골드 ${z.gold.spent})` : ''}`,
-        `연 상자 ${opened} / ${placed}`, ...(z.rare.met ? [`빛나는 몬스터 ${z.rare.caught ? '포획' : '놓침'}`] : [])];
+        `연 상자 ${opened} / ${placed}`, `얻은 장비 ${z.gear.found.length} (착용 ${z.gear.worn})`, ...(z.rare.met ? [`빛나는 몬스터 ${z.rare.caught ? '포획' : '놓침'}`] : [])];
       this.mode = 'summary';
       return;
     }
@@ -241,7 +258,7 @@ export class ExpeditionLogic {
     else if (ph === 'night') {
       this.toast('밤이 되었습니다. 몬스터들이 강해집니다.');
       this.field.placeMerchant();
-      this.stock = merchantStock(this.battleNo, this.lootRng, this.run.relics);
+      this.stock = merchantStock(this.battleNo, this.lootRng, this.names);
       this.toast('어디선가 상인의 등불이 켜졌다');
     }
   }
@@ -258,6 +275,7 @@ export class ExpeditionLogic {
     if (this.mode === 'over' || this.mode === 'clear') { if (keys.includes(AVK.OK)) this.ctx.screens.title(); return; }
     if (this.mode === 'summary') { if (keys.includes(AVK.OK)) this.nextZone(); return; }
     if (this.mode === 'shop') { this.shopKeys(keys); return; }
+    if (this.mode === 'gear') { this.gearKeys(keys); return; }
     if (this.mode === 'battle') { this.tickClock(dt); this.battleFrame(dt, presses, now, keys); return; }
     if (!this.field) return;
     if (this.mode === 'encounter') {
@@ -286,6 +304,7 @@ export class ExpeditionLogic {
           if (this.zlog) { this.zlog.kills.field++; this.zlog.exp += gain; }
           this.toast(`${e.enemy.sp.name} 처치 · EXP +${gain} · ${gold}G`);
           for (const l of this.run.award(gain)) this.toast(l);
+          if (this.lootRng.chance(FIELD_DROP_CHANCE)) this.gainGear(creatureDrop(this.battleNo, this.lootRng, this.names), e.enemy.sp.name);
           break;
         }
         case 'chest': this.openChest(e.chest); break;
@@ -298,22 +317,65 @@ export class ExpeditionLogic {
         default: break;
       }
     }
+    this.openOffer();
   }
 
-  /** a chest opened: its gold, potion or relic (§6.3) */
+  /** a chest opened: its gold, potion or piece (§6.3) */
   private openChest(c: FieldChest): void {
-    const loot = openChest(c.kind, this.battleNo, this.lootRng, this.run.relics);
+    const loot = openChest(c.kind, this.battleNo, this.lootRng, this.names);
     if (this.zlog) this.zlog.chests.opened[c.kind]++;
     if (loot.kind === 'gold') { this.run.gold += loot.gold; this.gainGold(loot.gold); this.toast(`${CHEST_NAME[c.kind]}: ${loot.gold}G`); }
     else if (loot.kind === 'potion') { this.run.potions += loot.n; this.toast(`${CHEST_NAME[c.kind]}: 회복약 +${loot.n}`); }
-    else this.takeRelic(loot.relic, CHEST_NAME[c.kind]);
+    else this.gainGear(loot.gear, CHEST_NAME[c.kind]);
   }
 
-  /** a relic for the run, with its lines */
-  private takeRelic(r: Relic, from: string): void {
-    this.run.addRelic(r);
-    this.toast(`${from}: [${GRADE_NAME[r.grade]}] ${r.name}`);
-    this.toast(relicDesc(r));
+  // --- equipment ------------------------------------------------------------------------------------------------
+
+  /** a piece found: an empty slot puts it on at once, a filled one waits for the comparison */
+  private gainGear(g: Gear, from: string): void {
+    this.zlog?.gear.found.push(`[${GRADE_NAME[g.grade]}] ${g.name}`);
+    if (!this.run.equip[g.slot]) {
+      this.run.wear(g);
+      if (this.zlog) this.zlog.gear.worn++;
+      this.toast(`${from}: [${GRADE_NAME[g.grade]}] ${g.name} 장착`);
+      this.toast(gearDesc(g));
+      return;
+    }
+    this.toast(`${from}: [${GRADE_NAME[g.grade]}] ${g.name}`);
+    this.offers.push({ gear: g, from });
+  }
+
+  /** the comparison opens over the field or the merchant when a piece waits */
+  private openOffer(): void {
+    if (!this.offers.length || (this.mode !== 'field' && this.mode !== 'shop')) return;
+    this.gearBack = this.mode;
+    this.mode = 'gear';
+    this.gearSel = 0;
+  }
+
+  /** the waiting piece: put on (the worn one is thrown away) or thrown away */
+  chooseGear(wear: boolean): void {
+    const o = this.offers[0];
+    if (!o || this.mode !== 'gear') return;
+    this.offers.shift();
+    if (wear) {
+      const old = this.run.wear(o.gear);
+      if (this.zlog) { this.zlog.gear.worn++; this.zlog.gear.dropped++; }
+      this.toast(`${SLOT_NAME[o.gear.slot]} 교체: ${o.gear.name}${old ? ` (${old.name} 버림)` : ''}`);
+    } else {
+      if (this.zlog) this.zlog.gear.dropped++;
+      this.toast(`${o.gear.name}을(를) 버렸다`);
+    }
+    this.gearSel = 0;
+    if (!this.offers.length) this.mode = this.gearBack;
+  }
+
+  private gearKeys(keys: number[]): void {
+    for (const k of keys) {
+      if (k === AVK.UP || k === AVK.DOWN) this.gearSel = (this.gearSel + 1) % GEAR_CHOICES.length;
+      else if (k === AVK.CLR) { this.chooseGear(false); return; }
+      else if (k === AVK.OK) { this.chooseGear(this.gearSel === 0); return; }
+    }
   }
 
   // --- the dark merchant ----------------------------------------------------------------------------------------
@@ -325,7 +387,7 @@ export class ExpeditionLogic {
     if (this.zlog) this.zlog.merchant.met = true;
   }
 
-  /** buy what slot i holds: a potion (one at a time) or a relic */
+  /** buy what slot i holds: a potion (one at a time) or a piece (compared with the worn one when its slot is filled) */
   buy(i: number): void {
     const w = this.stock[i];
     if (!w || this.mode !== 'shop') return;
@@ -334,7 +396,7 @@ export class ExpeditionLogic {
     if (this.run.gold < w.price) { this.shopLine = `골드가 모자라다 (${w.price}G)`; return; }
     this.run.gold -= w.price;
     if (this.zlog) this.zlog.gold.spent += w.price;
-    if (!w.relic) {
+    if (!w.gear) {
       this.run.potions++;
       if (--w.n <= 0) w.sold = true;
       this.shopLine = `회복약을 샀다 (보유 ${this.run.potions})`;
@@ -342,9 +404,10 @@ export class ExpeditionLogic {
       return;
     }
     w.sold = true;
-    this.run.addRelic(w.relic);
-    this.shopLine = `${w.relic.name}: ${relicDesc(w.relic)}`;
-    this.zlog?.merchant.bought.push(w.relic.name);
+    this.shopLine = `${w.gear.name}을(를) 샀다`;
+    this.zlog?.merchant.bought.push(w.gear.name);
+    this.gainGear(w.gear, '암흑상인');
+    this.openOffer();
   }
 
   /** leave the merchant */
@@ -435,12 +498,14 @@ export class ExpeditionLogic {
       this.run.kills += beaten;
       this.gainGold(b.gold);
       if (this.zlog) { this.zlog.kills.battle += beaten; this.zlog.exp += b.exp; }
-      for (const r of b.rares) {                                   // a beaten rare creature drops a relic (§7)
-        if (this.zlog) this.zlog.rare.caught++;
-        this.takeRelic(pickRelic(this.lootRng.weighted(RARE_GRADES) as Grade, this.lootRng, this.run.relics), `빛나는 ${r.name}`);
-      }
       this.field!.resume(enc.enemies, []);
       if (b.isBoss) { this.logBoss(b, 'won'); this.battle = null; this.encounter = null; this.mode = 'clear'; this.finishLog(); return; }
+      const first = b.enemies.find((e) => !e.gone);                // one roll for the won battle (§4.3)
+      if (first && this.lootRng.chance(DROP_CHANCE)) this.gainGear(creatureDrop(this.battleNo, this.lootRng, this.names), first.name);
+      for (const r of b.rares) {                                   // a beaten rare creature drops a piece of its own (§7)
+        if (this.zlog) this.zlog.rare.caught++;
+        this.gainGear(rareDrop(this.battleNo, this.lootRng, this.names), `빛나는 ${r.name}`);
+      }
     } else {
       const gone = b.enemies.filter((e) => e.gone).map((e) => e.field!);
       this.field!.resume(gone, enc.enemies.filter((e) => !gone.includes(e)));
@@ -451,6 +516,7 @@ export class ExpeditionLogic {
     this.battle = null;
     this.encounter = null;
     this.mode = 'field';
+    this.openOffer();
   }
 
   // --- the run log (§12.1) --------------------------------------------------------------------------------------
@@ -459,7 +525,7 @@ export class ExpeditionLogic {
     const boss = b.enemies.find((e) => e.sp?.boss);
     this.log.boss = {
       party: this.run.party.map((m) => `${m.shiny ? '빛나는 ' : ''}${m.name} Lv.${m.lv}`),
-      relics: this.run.relics.map((r) => `[${GRADE_NAME[r.grade]}] ${r.name}`), potions: this.run.potions, gold: this.run.gold,
+      equip: this.run.equip.flatMap((g) => g ? [`[${GRADE_NAME[g.grade]}] ${g.name}`] : []), potions: this.run.potions, gold: this.run.gold,
       advantage: b.advantage, result, turns: boss?.turns ?? 0, parries: this.run.parries - this.parriesAtBoss, hitsTaken: b.hitsTaken,
       roarDmg: b.roarDmg, enraged: !!boss?.enraged,
     };

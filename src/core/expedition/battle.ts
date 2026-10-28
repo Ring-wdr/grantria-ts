@@ -181,7 +181,7 @@ export class Battle {
   /** damage the party takes ×this (the night, §8) and the gold of the win ×goldMul (set by the owner) */
   takenMul = 1;
   goldMul = 1;
-  /** gold of the win, and the rare creatures beaten in it (each drops a relic) */
+  /** gold of the win, and the rare creatures beaten in it (each drops a piece of equipment) */
   gold = 0;
   rares: BUnit[] = [];
   /** the run log (§12.1): hits the party took, the damage its roars did */

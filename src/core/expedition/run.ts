@@ -1,6 +1,6 @@
 // 원정(가제): the run, in memory only (no save slot): the party (the hero and up to two recruited creatures), their
-// levels inside this run, the potions, gold and relics (web/docs/expedition-balance.md §4.3), and where the run is.
-import type { Relic } from './loot';
+// levels inside this run, the potions, gold and the equipment worn (web/docs/expedition-balance.md §4.3), and where the run is.
+import { SLOTS, addStats, type Gear, type Stats } from './loot';
 import { SPECIES } from './species';
 
 export interface Member {
@@ -16,6 +16,8 @@ export interface Member {
   spd: number;
   /** a rare creature recruited: ×1.2 and it keeps its sparkle */
   shiny?: boolean;
+  /** what the party's equipment adds to this member now (taken off again when a piece is changed) */
+  gear?: { atk: number; spd: number; hp: number };
 }
 
 export const PARTY_MAX = 3;
@@ -58,22 +60,21 @@ export function gainExp(m: Member, n: number): number {
   return up;
 }
 
-/** the damage a party takes is cut by its relics at most this much */
+/** the damage a party takes is cut by its equipment at most this much */
 export const GUARD_MAX = 0.5;
 
-/** a relic's gains on one member */
-function applyRelic(m: Member, r: Relic): void {
-  m.atk += r.atk ?? 0;
-  m.spd += r.spd ?? 0;
-  if (r.hpPct) { const d = Math.round(m.hpMax * r.hpPct); m.hpMax += d; m.hp += d; }
+/** a member's attack, speed and max HP with these equipment stats instead of what it wears now */
+export function statsWith(m: Member, s: Stats): { atk: number; spd: number; hpMax: number } {
+  const was = m.gear ?? { atk: 0, spd: 0, hp: 0 }, base = m.hpMax - was.hp;
+  return { atk: m.atk - was.atk + (s.atk ?? 0), spd: m.spd - was.spd + (s.spd ?? 0), hpMax: base + Math.round(base * (s.hpPct ?? 0)) };
 }
 
 export class Run {
   party: Member[] = [newHero()];
   potions = 3;
   gold = 0;
-  /** relics found or bought, in order (each on every member) */
-  relics: Relic[] = [];
+  /** the pieces worn by slot (무기, 투구, 갑옷, 목걸이), each on every member */
+  equip: (Gear | null)[] = Array(SLOTS).fill(null);
   /** battle zones cleared */
   cleared = 0;
   /** run statistics for the result screen */
@@ -83,18 +84,37 @@ export class Run {
 
   get alive(): Member[] { return this.party.filter((m) => m.hp > 0); }
 
-  /** the share of damage the party's relics take off */
-  get guard(): number { return Math.min(GUARD_MAX, this.relics.reduce((s, r) => s + (r.guard ?? 0), 0)); }
-
-  /** a relic for the run: on everyone now, and on whoever joins later */
-  addRelic(r: Relic): void {
-    this.relics.push(r);
-    for (const m of this.party) applyRelic(m, r);
+  /** what the worn pieces add up to (or would, with g in its slot) */
+  gearStats(g: Gear | null = null): Stats {
+    return this.equip.reduce<Stats>((s, e, i) => { const x = g && g.slot === i ? g : e; return x ? addStats(s, x) : s; }, {});
   }
 
-  /** a recruit joins with the relics already found */
+  /** the share of damage the party's equipment takes off (or would, with g in its slot) */
+  guardWith(g: Gear | null = null): number { return Math.min(GUARD_MAX, this.gearStats(g).guard ?? 0); }
+  get guard(): number { return this.guardWith(); }
+
+  /** put g on (for everyone now, and whoever joins later); the piece it replaces is returned (and gone) */
+  wear(g: Gear): Gear | null {
+    const old = this.equip[g.slot];
+    this.equip[g.slot] = g;
+    for (const m of this.party) this.fit(m);
+    return old;
+  }
+
+  /** a member's stats with the equipment worn now: what it added before is taken off, what it adds now put on (max HP
+   *  by the share, so it is fitted again after a level-up) */
+  private fit(m: Member): void {
+    const was = m.gear ?? { atk: 0, spd: 0, hp: 0 }, s = this.gearStats(), now = statsWith(m, s), hp = now.hpMax - (m.hpMax - was.hp);
+    m.atk = now.atk;
+    m.spd = now.spd;
+    m.hpMax = now.hpMax;
+    if (m.hp > 0) m.hp = Math.max(1, Math.min(m.hpMax, m.hp + hp - was.hp));
+    m.gear = { atk: s.atk ?? 0, spd: s.spd ?? 0, hp };
+  }
+
+  /** a recruit joins with the equipment worn */
   join(m: Member): void {
-    for (const r of this.relics) applyRelic(m, r);
+    this.fit(m);
     this.party.push(m);
   }
 
@@ -109,7 +129,7 @@ export class Run {
     for (const m of this.party) {
       if (m.hp <= 0) continue;
       const up = gainExp(m, exp);
-      if (up) lines.push(`${m.name} Lv.${m.lv}!`);
+      if (up) { this.fit(m); lines.push(`${m.name} Lv.${m.lv}!`); }
     }
     return lines;
   }

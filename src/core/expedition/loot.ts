@@ -1,17 +1,27 @@
-// 원정(가제): this mode's own loot (web/docs/expedition-balance.md §4.3, §6, §7, §9): the run-only relics that apply to
-// the whole party, the four chests and what they hold, the rare creature's drop and the dark merchant's stock and
-// prices. Its own tables: the main game's drop rolls and the 개발자 모드 grade multipliers (core/rules) are never read.
+// 원정(가제): this mode's own loot (web/docs/expedition-balance.md §4.3, §6, §7, §9): the main game's equipment worn for
+// the run (four slots, each piece on the whole party), what creatures drop, the four chests and what they hold, the rare
+// creature's drop and the dark merchant's stock and prices. Its own tables: the main game's drop rolls, item records,
+// level limits and the 개발자 모드 grade multipliers (core/rules) are never read. Only the names come from the main
+// game's data (d.dat and text.json through Assets), and the icon sheet position is the main game's formula.
+import type { Assets } from '../data/assets';
 import type { Rng } from './rng';
 
-/** 일반 · 고급 · 희귀 · 영웅 · 전설 */
+/** 일반 · 고급 · 희귀 · 영웅 · 전설: the main game's grade 0..4 (white, green, yellow, orange, purple) */
 export type Grade = 0 | 1 | 2 | 3 | 4;
 export const GRADE_NAME = ['일반', '고급', '희귀', '영웅', '전설'] as const;
 
-/** a relic: for the run, on every member (also those who join later). No effect touches parry (2026-10-28). */
-export interface Relic {
-  id: string;
-  name: string;
-  grade: Grade;
+/** 무기 · 투구 · 갑옷 · 목걸이 */
+export type Slot = 0 | 1 | 2 | 3;
+export const SLOTS = 4;
+export const SLOT_NAME = ['무기', '투구', '갑옷', '목걸이'] as const;
+/** the main game's equipment types of the 검사 (class 0) a slot is filled from: 양손검; 투구; 갑옷, 그리브 and 건틀렛;
+ *  목걸이 (analysis/features/items.md §0.5) */
+export const SLOT_TYPES: readonly (readonly number[])[] = [[0], [3], [6, 9, 12], [15]];
+/** tiers 1..4 = the main game's item sub 0..3 (worn from Lv 1, 9, 17, 25 there; no level limit here) */
+export const TIERS = 4;
+
+/** what a piece does for the run, on every member (also those who join later). No effect touches parry (2026-10-28). */
+export interface Stats {
   atk?: number;
   spd?: number;
   /** max HP ×(1 + hpPct) */
@@ -20,40 +30,88 @@ export interface Relic {
   guard?: number;
 }
 
-/** the effect line of a relic */
-export function relicDesc(r: Relic): string {
-  const out: string[] = [];
-  if (r.atk) out.push(`공격 +${r.atk}`);
-  if (r.spd) out.push(`속도 +${r.spd}`);
-  if (r.hpPct) out.push(`최대 HP +${Math.round(r.hpPct * 100)}%`);
-  if (r.guard) out.push(`받는 피해 −${Math.round(r.guard * 100)}%`);
-  return `파티 전원 ${out.join(', ')}`;
+export interface Gear extends Stats {
+  slot: Slot;
+  /** the main game's item type and sub (= tier − 1): its name and icon */
+  type: number;
+  sub: number;
+  grade: Grade;
+  name: string;
 }
 
-/** budget per grade in eLv (§4.3): 0.3 · 0.6 · 1.0 · 1.6 · 2.5 */
-export const RELICS: Relic[] = [
-  { id: 'herb', name: '초원의 약초 주머니', grade: 0, hpPct: 0.1 },
-  { id: 'hide', name: '질긴 가죽 조각', grade: 0, guard: 0.1 },
-  { id: 'whet', name: '무딘 숫돌', grade: 0, atk: 1 },
-  { id: 'wind', name: '바람새 깃털', grade: 1, spd: 1 },
-  { id: 'heart', name: '사냥꾼의 심장', grade: 1, hpPct: 0.2 },
-  { id: 'scale', name: '물가의 비늘', grade: 1, guard: 0.15, hpPct: 0.05 },
-  { id: 'fang', name: '흑표의 송곳니', grade: 2, atk: 2, hpPct: 0.1 },
-  { id: 'dew', name: '새벽 이슬 병', grade: 2, atk: 1, spd: 1 },
-  { id: 'shell', name: '호수 거북 등딱지', grade: 2, hpPct: 0.2, guard: 0.15 },
-  { id: 'banner', name: '초원 기사단의 깃발', grade: 3, atk: 3, spd: 1 },
-  { id: 'moon', name: '달빛 호수의 가호', grade: 3, atk: 2, hpPct: 0.25 },
-  { id: 'crown', name: '초원의 왕관', grade: 4, atk: 4, spd: 1 },
-  { id: 'storm', name: '폭풍을 부르는 뿔피리', grade: 4, atk: 3, spd: 1, hpPct: 0.2 },
+/** a slot's main effect by tier (§4.3) */
+export const MAIN: readonly (readonly Stats[])[] = [
+  [{ atk: 1 }, { atk: 2 }, { atk: 3 }, { atk: 4 }],
+  [{ hpPct: 0.08 }, { hpPct: 0.12 }, { hpPct: 0.16 }, { hpPct: 0.2 }],
+  [{ guard: 0.06 }, { guard: 0.1 }, { guard: 0.14 }, { guard: 0.18 }],
+  [{ spd: 1 }, { spd: 1, hpPct: 0.05 }, { spd: 1, hpPct: 0.1 }, { spd: 2, hpPct: 0.05 }],
 ];
+/** one extra line per grade step (고급 1 .. 전설 4), by weight; the same line twice adds up */
+export const LINES: readonly [Stats, number][] = [[{ atk: 1 }, 30], [{ hpPct: 0.05 }, 30], [{ guard: 0.04 }, 30], [{ spd: 1 }, 10]];
 
-/** a relic of this grade; 영웅 and 전설 never come twice in a run (owned ones are left out, then the grade below) */
-export function pickRelic(grade: Grade, rng: Rng, owned: readonly Relic[], exclude: readonly Relic[] = []): Relic {
-  for (let g = grade; g >= 0; g--) {
-    const pool = RELICS.filter((r) => r.grade === g && !exclude.includes(r) && !(g >= 3 && owned.includes(r)));
-    if (pool.length) return rng.pick(pool);
+const KEYS = ['atk', 'spd', 'hpPct', 'guard'] as const;
+
+/** a + b, stat by stat (hpPct and guard kept to whole percents) */
+export function addStats(a: Stats, b: Stats): Stats {
+  const out: Stats = {};
+  for (const k of KEYS) {
+    const v = (a[k] ?? 0) + (b[k] ?? 0);
+    if (v) out[k] = k === 'atk' || k === 'spd' ? v : Math.round(v * 100) / 100;
   }
-  return RELICS[0];
+  return out;
+}
+
+/** the effect lines of a piece (or of a whole set) */
+export function statText(s: Stats): string[] {
+  const out: string[] = [];
+  if (s.atk) out.push(`공격 +${s.atk}`);
+  if (s.spd) out.push(`속도 +${s.spd}`);
+  if (s.hpPct) out.push(`최대 HP +${Math.round(s.hpPct * 100)}%`);
+  if (s.guard) out.push(`받는 피해 −${Math.round(s.guard * 100)}%`);
+  return out;
+}
+
+/** the effect line of a piece */
+export function gearDesc(g: Stats): string { return `파티 전원 ${statText(g).join(', ')}`; }
+
+/** the display name of a main-game item (type, sub): text 0x7fc + model, model = 21·type + d8(0x245ff + 5·sub)
+ *  (FUN_00036458; for sub 0..3 every grade shares the grade-0 model) */
+export type Namer = (type: number, sub: number) => string;
+export function gearNamer(a: Pick<Assets, 'd8' | 'text'>): Namer {
+  return (type, sub) => a.text[0x7fc + 21 * type + a.d8(0x245ff + sub * 5)] ?? '?';
+}
+
+/** the main game's item icon id of (type, sub) (FUN_000365ac: 11·type + sub for equipment) */
+export function gearIcon(g: Pick<Gear, 'type' | 'sub'>): number { return 11 * g.type + g.sub; }
+
+/** a piece of the slot, tier (0..3) and grade: the main effect and one random line per grade step */
+export function makeGear(slot: Slot, tier: number, grade: Grade, rng: Rng, name: Namer): Gear {
+  const type = rng.pick(SLOT_TYPES[slot]), sub = Math.max(0, Math.min(TIERS - 1, tier));
+  let st: Stats = { ...MAIN[slot][sub] };
+  for (let i = 0; i < grade; i++) st = addStats(st, LINES[rng.weighted(LINES.map((l) => l[1]))][0]);
+  return { ...st, slot, type, sub, grade, name: name(type, sub) };
+}
+
+/** a piece of any slot: the tier by weight (moved up `tierUp` steps), the grade by weight */
+export function rollGear(tiers: readonly number[], grades: readonly number[], rng: Rng, name: Namer, tierUp = 0): Gear {
+  const slot = rng.int(0, SLOTS - 1) as Slot;
+  return makeGear(slot, rng.weighted(tiers) + tierUp, rng.weighted(grades) as Grade, rng, name);
+}
+
+const zi = (n: number) => Math.max(0, Math.min(2, n - 1));
+
+// --- creatures ------------------------------------------------------------------------------------------------------
+
+/** a won battle drops a piece this often (one roll however many fell); a field kill half as often (like its EXP) */
+export const DROP_CHANCE = 0.3, FIELD_DROP_CHANCE = 0.15;
+/** tier weights 1..4 of a creature's drop in battle zone 1..3 */
+export const DROP_TIERS = [[75, 22, 3, 0], [40, 42, 15, 3], [20, 40, 30, 10]] as const;
+/** grade weights 일반..전설 of a creature's drop in battle zone 1..3 */
+export const DROP_GRADES = [[75, 20, 5, 0, 0], [62, 27, 9, 2, 0], [50, 32, 14, 4, 0]] as const;
+
+/** what a creature of battle zone n drops */
+export function creatureDrop(n: number, rng: Rng, name: Namer): Gear {
+  return rollGear(DROP_TIERS[zi(n)], DROP_GRADES[zi(n)], rng, name);
 }
 
 // --- chests ---------------------------------------------------------------------------------------------------------
@@ -68,7 +126,7 @@ export const CHEST_DEPTH = [10, 20, 30, 30] as const;
 
 /** the chests of battle zone n (1..3): two wooden plus one at 50%, the others by chance */
 export function chestRoll(n: number, rng: Rng): ChestKind[] {
-  const i = Math.max(0, Math.min(2, n - 1)), out: ChestKind[] = [];
+  const i = zi(n), out: ChestKind[] = [];
   if (rng.chance([0.05, 0.1, 0.15][i])) out.push(3);
   if (rng.chance([0.2, 0.25, 0.3][i])) out.push(2);
   if (rng.chance(0.5)) out.push(1);
@@ -77,52 +135,57 @@ export function chestRoll(n: number, rng: Rng): ChestKind[] {
   return out;
 }
 
-/** grade weights 일반..전설 of the item a chest holds */
+/** grade weights 일반..전설 of the piece a chest holds */
 export const CHEST_GRADES: Record<ChestKind, readonly number[]> = {
   0: [80, 20, 0, 0, 0],
   1: [40, 45, 15, 0, 0],
   2: [0, 35, 50, 15, 0],
   3: [0, 0, 0, 50, 50],
 };
+/** a chest's piece is this many tiers above the zone's creature drop (silver and gold: one) */
+export const CHEST_TIER_UP: Record<ChestKind, number> = { 0: 0, 1: 0, 2: 1, 3: 1 };
 
-export type Loot = { kind: 'gold'; gold: number } | { kind: 'potion'; n: number } | { kind: 'relic'; relic: Relic };
+export type Loot = { kind: 'gold'; gold: number } | { kind: 'potion'; n: number } | { kind: 'gear'; gear: Gear };
 
-/** what a chest of battle zone n holds: a wooden one gold 50%, a potion 25%, an item 25%; the others an item */
-export function openChest(kind: ChestKind, n: number, rng: Rng, owned: readonly Relic[]): Loot {
+/** what a chest of battle zone n holds: a wooden one gold 50%, a potion 25%, a piece 25%; the others a piece */
+export function openChest(kind: ChestKind, n: number, rng: Rng, name: Namer): Loot {
   if (kind === 0) {
     const r = rng.next();
     if (r < 0.5) return { kind: 'gold', gold: 15 + 10 * Math.max(1, Math.min(3, n)) };
     if (r < 0.75) return { kind: 'potion', n: 1 };
   }
-  return { kind: 'relic', relic: pickRelic(rng.weighted(CHEST_GRADES[kind]) as Grade, rng, owned) };
+  return { kind: 'gear', gear: rollGear(DROP_TIERS[zi(n)], CHEST_GRADES[kind], rng, name, CHEST_TIER_UP[kind]) };
 }
 
 // --- the rare creature ----------------------------------------------------------------------------------------------
 
 /** a rare creature appears in a battle zone this often (at most one) */
 export const RARE_CHANCE = 0.25;
-/** its drop: 희귀 80 / 영웅 17 / 전설 3 */
+/** its drop: 희귀 80 / 영웅 17 / 전설 3, one tier above the zone's */
 export const RARE_GRADES = [0, 0, 80, 17, 3] as const;
 export const RARE_GOLD = 5;
+
+export function rareDrop(n: number, rng: Rng, name: Namer): Gear {
+  return rollGear(DROP_TIERS[zi(n)], RARE_GRADES, rng, name, 1);
+}
 
 // --- the dark merchant ----------------------------------------------------------------------------------------------
 
 export const POTION_PRICE = 30;
-/** relic prices by grade (500G per eLv); 전설 is not sold */
-export const PRICE = [150, 300, 500, 800] as const;
-/** grade weights 일반..영웅 of the merchant's relics in battle zone 1..3 */
+/** a piece's price: 120G, +100G a tier step, +100G a grade step (전설 is not sold) */
+export function gearPrice(g: Pick<Gear, 'sub' | 'grade'>): number { return 120 + 100 * g.sub + 100 * g.grade; }
+/** grade weights 일반..영웅 of the merchant's pieces in battle zone 1..3 (one tier above the zone's creature drop) */
 export const MERCHANT_GRADES = [[60, 35, 5, 0], [40, 40, 17, 3], [25, 40, 28, 7]] as const;
 
-export interface Ware { relic: Relic | null; /** potions left (the potion slot) */ n: number; price: number; sold: boolean }
+export interface Ware { gear: Gear | null; /** potions left (the potion slot) */ n: number; price: number; sold: boolean }
 
-/** four slots: the potions (3..5), then three different relics by the zone's weights */
-export function merchantStock(n: number, rng: Rng, owned: readonly Relic[]): Ware[] {
-  const ws = MERCHANT_GRADES[Math.max(0, Math.min(2, n - 1))], out: Ware[] = [{ relic: null, n: rng.int(3, 5), price: POTION_PRICE, sold: false }];
-  const picked: Relic[] = [];
-  for (let i = 0; i < 3; i++) {
-    const r = pickRelic(rng.weighted(ws) as Grade, rng, owned, picked);
-    picked.push(r);
-    out.push({ relic: r, n: 1, price: PRICE[Math.min(3, r.grade)], sold: false });
+/** four slots: the potions (3..5), then three pieces for different slots by the zone's weights */
+export function merchantStock(n: number, rng: Rng, name: Namer): Ware[] {
+  const out: Ware[] = [{ gear: null, n: rng.int(3, 5), price: POTION_PRICE, sold: false }];
+  const slots = rng.shuffle([0, 1, 2, 3] as Slot[]).slice(0, 3);
+  for (const slot of slots) {
+    const g = makeGear(slot, rng.weighted(DROP_TIERS[zi(n)]) + 1, rng.weighted(MERCHANT_GRADES[zi(n)]) as Grade, rng, name);
+    out.push({ gear: g, n: 1, price: gearPrice(g), sold: false });
   }
   return out;
 }

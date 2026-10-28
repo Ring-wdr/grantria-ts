@@ -1,6 +1,7 @@
-// 원정(가제): the growth and reward rules of web/docs/expedition-balance.md: relics on the whole party (and on whoever
-// joins later), the chests and the merchant's stock, the boss's unblockable roar and its enrage, the rare creature
-// that runs (in the field and in battle), the night's damage and gold, and where chests stand in a grown zone.
+// 원정(가제): the growth and reward rules of web/docs/expedition-balance.md: equipment on the whole party (and on whoever
+// joins later), what creatures drop, the chests and the merchant's stock, the boss's unblockable roar and its enrage,
+// the rare creature that runs (in the field and in battle), the night's damage and gold, and where chests stand in a
+// grown zone.
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -8,9 +9,10 @@ import { AVK } from '../src/core/keys.ts';
 import { Battle } from '../src/core/expedition/battle.ts';
 import { FieldEnemy, FieldSim, MERCHANT_STEPS, RARE_RUN } from '../src/core/expedition/field.ts';
 import type { InputState } from '../src/core/input.ts';
-import { CHEST_DEPTH, PRICE, POTION_PRICE, RELICS, chestRoll, merchantStock, openChest, pickRelic, type Relic } from '../src/core/expedition/loot.ts';
+import { CHEST_DEPTH, DROP_CHANCE, FIELD_DROP_CHANCE, MAIN, POTION_PRICE, SLOT_TYPES, TIERS, chestRoll, creatureDrop, gearIcon, gearNamer, gearPrice, merchantStock, openChest, rareDrop,
+  rollGear, type Gear, type Grade, type Stats } from '../src/core/expedition/loot.ts';
 import { Rng } from '../src/core/expedition/rng.ts';
-import { GUARD_MAX, Run, SHINY_MUL, recruit } from '../src/core/expedition/run.ts';
+import { GUARD_MAX, Run, SHINY_MUL, recruit, statsWith } from '../src/core/expedition/run.ts';
 import { RARE, SPECIES, zoneStats } from '../src/core/expedition/species.ts';
 import type { Assets, Cmf, GameMap } from '../src/core/data/assets.ts';
 import { TILE, buildField, walkDist, zoneSets, type Zone } from '../src/core/expedition/zone.ts';
@@ -19,28 +21,58 @@ const foe = (species: number, rare = false) => ({ species, sp: SPECIES[species],
 const idle = { isHeld: () => false, stick: { active: false, level: 0, angle: 0, dx: 0, dy: 0 } } as unknown as InputState;
 const open = (W: number, H: number) => ({ kind: 'battle', map: { header: { width: W, height: H } }, walk: new Uint8Array(W * H).fill(1), start: { x: 100, y: 160 }, exit: { x: 600, y: 160 }, spawns: [] }) as unknown as Zone;
 
-test('relics: on every member now and on whoever joins later; guard is capped; a rare recruit is ×1.2', () => {
+const names = (type: number, sub: number) => `${type}:${sub}`;
+const piece = (slot: 0 | 1 | 2 | 3, st: Stats, grade: Grade = 0): Gear => ({ ...st, slot, type: SLOT_TYPES[slot][0], sub: 0, grade, name: `p${slot}` });
+
+test('equipment: on every member now and on whoever joins later; a slot holds one piece; guard is capped; a rare recruit is ×1.2', () => {
   const run = new Run();
   run.party.push(recruit(1));
   const before = run.party.map((m) => ({ ...m }));
-  run.addRelic({ id: 't', name: 't', grade: 2, atk: 2, spd: 1, hpPct: 0.1 });
+  assert.equal(run.wear(piece(0, { atk: 2, spd: 1 })), null);
+  assert.equal(run.wear(piece(1, { hpPct: 0.1 })), null);
   run.party.forEach((m, i) => {
     assert.equal(m.atk, before[i].atk + 2);
     assert.equal(m.spd, before[i].spd + 1);
     assert.equal(m.hpMax, before[i].hpMax + Math.round(before[i].hpMax * 0.1));
   });
+  const old = run.equip[0]!;
+  assert.equal(run.wear(piece(0, { atk: 4 })), old, 'the worn piece comes back (and is gone)');
+  run.party.forEach((m, i) => { assert.equal(m.atk, before[i].atk + 4); assert.equal(m.spd, before[i].spd); });
   const late = recruit(2), base = { ...late };
   run.join(late);
-  assert.equal(late.atk, base.atk + 2);
+  assert.equal(late.atk, base.atk + 4);
+  assert.equal(late.hpMax, base.hpMax + Math.round(base.hpMax * 0.1));
   assert.ok(run.party.includes(late));
-  for (let i = 0; i < 8; i++) run.addRelic({ id: `g${i}`, name: 'g', grade: 0, guard: 0.1 });
-  assert.equal(run.guard, GUARD_MAX);
+  const hero = run.party[0], hp0 = hero.hpMax - hero.gear!.hp;
+  run.award(500);                                                   // a level-up refits max HP by the share
+  assert.equal(hero.hpMax, hero.hpMax - hero.gear!.hp + Math.round((hero.hpMax - hero.gear!.hp) * 0.1));
+  assert.ok(hero.hpMax - hero.gear!.hp > hp0);
+  assert.equal(statsWith(hero, run.gearStats()).atk, hero.atk, 'statsWith the worn set is the member as it is');
+  assert.equal(statsWith(hero, run.gearStats(piece(0, { atk: 1 }))).atk, hero.atk - 3, 'and with a piece swapped in, the comparison');
+  run.wear(piece(2, { guard: 0.4 }));
+  assert.equal(run.guardWith(piece(3, { guard: 0.3 })), GUARD_MAX);
+  assert.equal(run.guard, 0.4);
   const shiny = recruit(1, true), plain = recruit(1);
   assert.ok(shiny.shiny);
   assert.equal(shiny.atk, Math.round(plain.atk * SHINY_MUL));
 });
 
-test('loot: chests by zone, what they hold, the merchant\'s four slots; 영웅 and 전설 come once a run', () => {
+test('gear: a slot draws from its main-game types, tier 1..4 is item sub 0..3, one extra line per grade step', () => {
+  const rng = new Rng(3);
+  for (let i = 0; i < 300; i++) {
+    const g = rollGear([1, 1, 1, 1], [1, 1, 1, 1, 1], rng, names, i % 3);
+    assert.ok(SLOT_TYPES[g.slot].includes(g.type));
+    assert.ok(g.sub >= 0 && g.sub < TIERS);
+    assert.equal(g.name, `${g.type}:${g.sub}`);
+    assert.equal(gearIcon(g), 11 * g.type + g.sub);
+    const main = MAIN[g.slot][g.sub], extra = (g.atk ?? 0) - (main.atk ?? 0) + (g.spd ?? 0) - (main.spd ?? 0)
+      + Math.round(((g.hpPct ?? 0) - (main.hpPct ?? 0)) / 0.05) + Math.round(((g.guard ?? 0) - (main.guard ?? 0)) / 0.04);
+    assert.equal(extra, g.grade, `${JSON.stringify(g)}: ${g.grade} lines`);
+  }
+  assert.equal(gearPrice({ sub: 2, grade: 3 }), 120 + 200 + 300);
+});
+
+test("loot: creatures drop by zone, chests by zone and what they hold, the merchant's four slots", () => {
   const rng = new Rng(7);
   let gold = 0, wood = 0;
   for (let i = 0; i < 400; i++) {
@@ -52,19 +84,23 @@ test('loot: chests by zone, what they hold, the merchant\'s four slots; 영웅 a
   assert.ok(wood / 400 > 2.3 && wood / 400 < 2.7, `wooden chests per zone ${wood / 400}`);
   assert.ok(gold / 400 > 0.05 && gold / 400 < 0.16, `gold chests per zone ${gold / 400}`);
   for (let i = 0; i < 50; i++) {
-    const l = openChest(3, 3, rng, []);
-    assert.equal(l.kind, 'relic');
-    if (l.kind === 'relic') assert.ok(l.relic.grade >= 3, 'a gold chest holds 영웅 or 전설');
+    const l = openChest(3, 1, rng, names);
+    assert.equal(l.kind, 'gear');
+    if (l.kind === 'gear') { assert.ok(l.gear.grade >= 3, 'a gold chest holds 영웅 or 전설'); assert.ok(l.gear.sub >= 1, 'a tier above the zone'); }
+    assert.ok(rareDrop(1, rng, names).grade >= 2, 'the rare creature drops 희귀 or better');
   }
-  const legends = RELICS.filter((r) => r.grade === 4), owned: Relic[] = [...legends];
-  for (let i = 0; i < 20; i++) assert.ok(!legends.includes(pickRelic(4, rng, owned)), 'an owned 전설 does not come again');
-  const stock = merchantStock(2, rng, []);
+  const t1 = [0, 0, 0, 0], t3 = [0, 0, 0, 0];
+  for (let i = 0; i < 2000; i++) { t1[creatureDrop(1, rng, names).sub]++; t3[creatureDrop(3, rng, names).sub]++; }
+  assert.ok(t1[0] > t1[1] && t1[3] === 0, `zone 1 tiers ${t1}`);
+  assert.ok(t3[3] > t1[3] && t3[2] > t1[2], `zone 3 tiers ${t3}`);
+  assert.ok(DROP_CHANCE > FIELD_DROP_CHANCE);
+  const stock = merchantStock(2, rng, names);
   assert.equal(stock.length, 4);
-  assert.equal(stock[0].relic, null);
+  assert.equal(stock[0].gear, null);
   assert.equal(stock[0].price, POTION_PRICE);
-  const relics = stock.slice(1).map((w) => w.relic!);
-  assert.equal(new Set(relics).size, 3, 'three different relics');
-  for (const w of stock.slice(1)) { assert.ok(w.relic!.grade < 4); assert.equal(w.price, PRICE[w.relic!.grade]); }
+  const wares = stock.slice(1).map((w) => w.gear!);
+  assert.equal(new Set(wares.map((g) => g.slot)).size, 3, 'three different slots');
+  for (const w of stock.slice(1)) { assert.ok(w.gear!.grade < 4); assert.equal(w.price, gearPrice(w.gear!)); }
 });
 
 /** one boss turn played to its end; `parry` presses on every hit. Returns the clock after it and the move's name */
@@ -183,4 +219,12 @@ test('grown zones: chests stand off the way through (deeper for better ones), ap
   }
   assert.ok(chests >= 10);
   assert.equal(rares, 5, 'rare: 1 gives one in every zone');
+});
+
+const dat = asset('d.dat'), txt = asset('text.json');
+test("gear names: the main game's equipment names from d.dat and text.json", { skip: !(existsSync(dat) && existsSync(txt)) && 'no generated assets' }, () => {
+  const d = new Uint8Array(readFileSync(dat)), name = gearNamer({ d8: (o: number) => d[o], text: json<string[]>('text.json') });
+  assert.deepEqual([0, 1, 2, 3].map((s) => name(0, s)), ['몽둥이', '브로드 소드', '나이트 소드', '본 블레이드']);
+  assert.equal(name(3, 1), '견습기사의 투구');
+  assert.equal(name(15, 0), '별장식 목걸이');
 });

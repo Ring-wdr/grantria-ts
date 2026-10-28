@@ -128,7 +128,7 @@ export const SPECIES: Species[] = [
     name: '초원의 왕 흑표', cmf: 14, fourDir: true, anim: { idle: 0, move: 3, attack: 6 }, tier: 'boss', personality: 'proud',
     talk: 'locked', talkReason: '초원의 왕은 말로 꺾이지 않는다',
     field: { speed: 90, detect: 260, windup: 0.55, breakMax: 160, poise: 2, radius: 16, noKill: true },
-    stats: { hp: 760, atk: 30, def: 12, spd: 16, exp: 120, lv: 10, gold: 0 },
+    stats: { hp: 900, atk: 32, def: 14, spd: 16, exp: 120, lv: 10, gold: 0 },
     moves: [
       { name: '발톱', windup: 0.75, hits: [0], power: 1.1 },
       { name: '삼연격', windup: 1.0, hits: [0, 0.45, 0.9], power: 0.7 },

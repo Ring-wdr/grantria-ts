@@ -90,6 +90,7 @@
   text-align: center; background: rgba(8, 14, 26, 0.78); border: 1px solid #3a4a66; border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .exb-pop { position: absolute; width: 60px; text-align: center; font-size: 13px; font-weight: bold; color: #fff; text-shadow: 0 0 2px #000, 0 0 3px #000; }
 .exb-pop.heal { color: #7dff8a; }
+.exb-pop.crit { color: #ff9a3c; font-size: 16px; }
 .exb-pop.parry { color: #9ff3ff; font-size: 12px; }
 .exb-pop.dodge { color: #d0d8ff; font-size: 10px; }
 .exb-pop.break { color: #ffe066; }

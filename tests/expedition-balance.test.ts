@@ -13,7 +13,7 @@ import { CHEST_DEPTH, DROP_CHANCE, FIELD_DROP_CHANCE, MAIN, POTION_PRICE, SLOT_T
   rollGear, type Gear, type Grade, type Stats } from '../src/core/expedition/loot.ts';
 import { Rng } from '../src/core/expedition/rng.ts';
 import { GUARD_MAX, Run, SHINY_MUL, recruit, statsWith } from '../src/core/expedition/run.ts';
-import { RARE, SPECIES, zoneStats } from '../src/core/expedition/species.ts';
+import { ENEMY_HIT, RARE, SPECIES, zoneStats } from '../src/core/expedition/species.ts';
 import type { Assets, Cmf, GameMap } from '../src/core/data/assets.ts';
 import { TILE, buildField, walkDist, zoneSets, type Zone } from '../src/core/expedition/zone.ts';
 
@@ -227,4 +227,17 @@ test("gear names: the main game's equipment names from d.dat and text.json", { s
   assert.deepEqual([0, 1, 2, 3].map((s) => name(0, s)), ['몽둥이', '브로드 소드', '나이트 소드', '본 블레이드']);
   assert.equal(name(3, 1), '견습기사의 투구');
   assert.equal(name(15, 0), '별장식 목걸이');
+});
+
+test('combat scale (§15): a creature hits ×2.5 / ×3.5 / ×4 by its zone, the boss as it is; crits ×1.8 either way', () => {
+  const at = (power: number) => ({ species: 1, sp: SPECIES[1], stats: zoneStats(SPECIES[1].stats, power), hp: 1, hpMax: 1 }) as unknown as FieldEnemy;
+  const b = new Battle(new Run(), [at(0), at(1), at(2), foe(4)], 'none', () => 0.5);
+  assert.deepEqual(b.enemies.map((e) => e.hitMul), [...ENEMY_HIT, 1]);
+  assert.equal(b.party[0].hitMul, 1);
+  const hit = (rnd: number) => {
+    const x = new Battle(new Run(), [at(2)], 'none', () => rnd);
+    return (x as unknown as { damage(f: unknown, t: unknown, p: number): number }).damage(x.enemies[0], x.party[0], 1);
+  };
+  const plain = hit(0.5), crit = hit(0.05);                         // 0.05 < CRIT_RATE: a crit (the ±10% roll is low too)
+  assert.ok(crit > plain * 1.4, `crit ${crit} vs ${plain}`);
 });

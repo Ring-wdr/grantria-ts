@@ -7,7 +7,7 @@
 // slots, each piece on the whole party, for the run; a piece for a slot already filled is compared with the worn one and
 // either put on or thrown away), chests hold gold, potions and equipment, a battle zone may hold a rare creature, and a battle zone grows dark the longer the party stays (§8): at night the
 // party takes ×1.2 damage, gold is ×1.3 and the dark merchant appears (§9). Leaving a battle zone by its exit stone heals
-// 30% and shows what the zone gave; a rest zone heals fully. Beating the boss clears the stage; a party wipe ends the
+// 60% and shows what the zone gave; a rest zone heals fully. Beating the boss clears the stage; a party wipe ends the
 // run. Either way it is back to the title: nothing is kept (the host gets the run log, §12.1).
 // State and keys; the host draws it (web/expedition/expedition.ts) and steps it every animation frame (frame()).
 // Plain fields, no constructor parameter properties: node's type stripping loads core/ in tests.
@@ -42,7 +42,7 @@ export const GEAR_CHOICES = ['교체', '버리기'] as const;
 export interface GearOffer { gear: Gear; from: string }
 
 /** the zone heal on leaving a battle zone */
-export const EXIT_HEAL = 0.3;
+export const EXIT_HEAL = 0.6;
 export const BATTLE_ZONES = 3;
 
 /** a battle zone's clock (s of its own time, field and battle): dusk, then night (§8). It runs CLOCK_SPEED times

@@ -80,6 +80,12 @@ export function zoneStats(s: Species['stats'], power: number): Species['stats'] 
     spd: s.spd + power, exp: Math.round(s.exp * (1 + 0.4 * power)), lv: s.lv + 2 * power, gold: Math.round(s.gold * (1 + 0.4 * power)) };
 }
 
+/** a normal creature's hits on the party ×this in battle zone 1..3 (power 0..2); the boss is tuned as it is
+ *  (web/docs/expedition-balance.md §15: a hit takes 10–15% of a member) */
+export const ENEMY_HIT = [2.5, 3.5, 4] as const;
+/** every hit, either side: this chance of ×CRIT_MUL (§15) */
+export const CRIT_RATE = 0.1, CRIT_MUL = 1.8;
+
 /** a rare creature (§7) in battle: HP ×0.7, defense ×1.5; it may run on its turn, and its field break gauge is half */
 export const RARE = { hp: 0.7, def: 1.5, flee: 0.35, brk: 0.5 } as const;
 export function rareStats(s: Species['stats']): Species['stats'] {
@@ -128,7 +134,7 @@ export const SPECIES: Species[] = [
     name: '초원의 왕 흑표', cmf: 14, fourDir: true, anim: { idle: 0, move: 3, attack: 6 }, tier: 'boss', personality: 'proud',
     talk: 'locked', talkReason: '초원의 왕은 말로 꺾이지 않는다',
     field: { speed: 90, detect: 260, windup: 0.55, breakMax: 160, poise: 2, radius: 16, noKill: true },
-    stats: { hp: 900, atk: 32, def: 14, spd: 16, exp: 120, lv: 10, gold: 0 },
+    stats: { hp: 950, atk: 32, def: 14, spd: 16, exp: 120, lv: 10, gold: 0 },
     moves: [
       { name: '발톱', windup: 0.75, hits: [0], power: 1.1 },
       { name: '삼연격', windup: 1.0, hits: [0, 0.45, 0.9], power: 0.7 },

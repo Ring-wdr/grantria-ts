@@ -192,7 +192,7 @@ export class BattleView {
     for (const p of b.popups) {
       if (p.unit.gone && p.kind !== 'info') continue;
       const [x, y] = this.pos0(b, p.unit);
-      kids.push(h(`div.exb-pop.${p.kind}`, { style: `left:${x - 30}px;top:${y - 50 - p.t * 26}px;opacity:${Math.min(1, (1.1 - p.t) * 3)}` }, p.text));
+      kids.push(h(`div.exb-pop.${p.kind}${p.crit ? '.crit' : ''}`, { style: `left:${x - 30}px;top:${y - 50 - p.t * 26}px;opacity:${Math.min(1, (1.1 - p.t) * 3)}` }, p.text));
     }
     if (talk) kids.push(this.talkTree(talk));
     if (b.phase === 'intro') kids.push(h('div.exb-intro', null, b.line));

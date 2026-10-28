@@ -17,7 +17,7 @@ import type { FieldEnemy } from './field';
 import type { Member, Run } from './run';
 import { PARTY_MAX, POTION_HEAL } from './run';
 import { RARE_GOLD } from './loot';
-import { RARE, SPECIES, type Move, type Species } from './species';
+import { CRIT_MUL, CRIT_RATE, ENEMY_HIT, RARE, SPECIES, type Move, type Species } from './species';
 
 export const PARRY_MS = 95, DODGE_MS = 160;
 /** a press that matches no hit locks defense out this long (no mashing) */
@@ -68,6 +68,8 @@ export interface BUnit {
   /** turns it has acted (a broken turn does not count): the boss's roar and enrage clock */
   turns: number;
   enraged: boolean;
+  /** an enemy's hits on the party × this (its battle zone, §15); 1 for the party and the boss */
+  hitMul: number;
 }
 
 export interface Skill {
@@ -135,21 +137,22 @@ export interface EnemyAct {
   countered: boolean;
 }
 
-export interface Popup { unit: BUnit; text: string; kind: 'dmg' | 'heal' | 'parry' | 'dodge' | 'break' | 'info'; t: number }
+export interface Popup { unit: BUnit; text: string; kind: 'dmg' | 'heal' | 'parry' | 'dodge' | 'break' | 'info'; t: number; crit?: boolean }
 
 let ids = 1;
 
 function fromMember(m: Member): BUnit {
   const sp = m.species === null ? null : SPECIES[m.species];
   return { id: ids++, side: 'party', name: m.name, species: m.species, sp, member: m, field: null, lv: m.lv, hp: m.hp, hpMax: m.hpMax,
-    atk: m.atk, def: m.def, spd: m.spd, ct: 0, brk: 0, brkMax: 1, broken: false, rapport: 0, mood: 0, talks: 0, gone: false, rare: false, fled: false, turns: 0, enraged: false };
+    atk: m.atk, def: m.def, spd: m.spd, ct: 0, brk: 0, brkMax: 1, broken: false, rapport: 0, mood: 0, talks: 0, gone: false, rare: false, fled: false, turns: 0, enraged: false, hitMul: 1 };
 }
 
 function fromEnemy(e: FieldEnemy): BUnit {
   const sp = e.sp, s = e.stats ?? sp.stats;                       // zone-scaled (tests pass bare enemies)
   return { id: ids++, side: 'enemy', name: sp.name, species: e.species, sp, member: null, field: e, lv: s.lv,
     hp: Math.max(1, Math.round((s.hp * e.hp) / e.hpMax)), hpMax: s.hp, atk: s.atk, def: s.def, spd: s.spd, ct: 0,
-    brk: 0, brkMax: sp.field.breakMax, broken: false, rapport: 0, mood: 0, talks: 0, gone: false, rare: !!e.rare, fled: false, turns: 0, enraged: false };
+    brk: 0, brkMax: sp.field.breakMax, broken: false, rapport: 0, mood: 0, talks: 0, gone: false, rare: !!e.rare, fled: false, turns: 0, enraged: false,
+    hitMul: sp.tier === 'boss' ? 1 : ENEMY_HIT[Math.max(0, Math.min(2, Math.round((s.lv - sp.stats.lv) / 2)))] };   // zone power = lv steps of 2
 }
 
 export class Battle {
@@ -281,12 +284,19 @@ export class Battle {
     for (const u of this.party) if (u.member) u.member.hp = Math.max(0, u.hp);
   }
 
-  pop(unit: BUnit, text: string, kind: Popup['kind']): void { this.popups.push({ unit, text, kind, t: 0 }); }
+  pop(unit: BUnit, text: string, kind: Popup['kind'], crit = false): void { this.popups.push({ unit, text, kind, t: 0, crit: crit || undefined }); }
 
+  /** a crit rolled by damage() since the last hurt() (its popup shows it) */
+  private critHit = false;
+
+  /** a hit's damage: attack × power ± 10% − defense × 0.6, ×1.5 on the broken; on the party × the enemy's zone and the
+   *  night, less its guard; then a 10% crit ×1.8 either way (§15) */
   private damage(from: BUnit, to: BUnit, power: number): number {
     const base = from.atk * power * (0.9 + this.rnd() * 0.2) - to.def * 0.6;
-    const k = to.side === 'party' ? this.takenMul * (1 - this.run.guard) : 1;
-    return Math.max(1, Math.round(base * (to.broken ? 1.5 : 1) * k));
+    const k = to.side === 'party' ? from.hitMul * this.takenMul * (1 - this.run.guard) : 1;
+    const crit = this.rnd() < CRIT_RATE;
+    if (crit) this.critHit = true;
+    return Math.max(1, Math.round(base * (to.broken ? 1.5 : 1) * k * (crit ? CRIT_MUL : 1)));
   }
 
   /** the boss's turns left before it is enraged, or null (no pattern, or already enraged) */
@@ -301,7 +311,8 @@ export class Battle {
 
   private hurt(to: BUnit, dmg: number, brk: number): void {
     to.hp = Math.max(0, to.hp - dmg);
-    this.pop(to, String(dmg), 'dmg');
+    this.pop(to, this.critHit ? `${dmg}!` : String(dmg), 'dmg', this.critHit);
+    this.critHit = false;
     if (to.side === 'enemy' && to.hp > 0 && !to.broken && brk > 0) {
       to.brk = Math.min(to.brkMax, to.brk + brk);
       if (to.brk >= to.brkMax) { to.broken = true; this.pop(to, 'BREAK', 'break'); this.line = `${to.name} 브레이크! 다음 턴을 쉬고 ×1.5 피해`; }

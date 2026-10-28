@@ -21,8 +21,9 @@ import { Run, recruit, type Member } from './run';
 import { Talk } from './talk';
 import { BOSS_SPECIES, FIELD_SPECIES } from './species';
 import { Rng } from './rng';
-import { CHEST_NAME, DROP_CHANCE, FIELD_DROP_CHANCE, GRADE_NAME, RARE_CHANCE, SLOT_NAME, creatureDrop, gearDesc, gearNamer, merchantStock, openChest, rareDrop,
+import { CHEST_NAME, DROP_CHANCE, FIELD_DROP_CHANCE, FIELD_SKILL_DROP, RARE_SKILL, SKILL_DROP, rollSkill, GRADE_NAME, RARE_CHANCE, SLOT_NAME, creatureDrop, gearDesc, gearNamer, merchantStock, openChest, rareDrop,
   type Gear, type Namer, type Ware } from './loot';
+import { SKILLBOOK, SKILL_MAX_GOLD, loadSkills } from './skillbook';
 import { buildBoss, buildField, zoneSets, type Zone, type ZoneKind, type ZoneSets } from './zone';
 
 /** what the mode needs from its host: the game data, the input, the sound and the way back to the title */
@@ -93,6 +94,8 @@ export interface ZoneLog {
   merchant: { met: boolean; bought: string[] };
   /** equipment found here, put on, and thrown away */
   gear: { found: string[]; worn: number; dropped: number };
+  /** skills found (name and the level it reached) */
+  skills: string[];
 }
 
 /** the boss fight in the run log */
@@ -161,6 +164,7 @@ export class ExpeditionLogic {
     this.plan = stagePlan(seed);
     this.lootRng = new Rng((seed ^ 0x2545f491) >>> 0);
     this.names = gearNamer(ctx.assets);
+    loadSkills(ctx.assets);
     void this.enterZone();
   }
 
@@ -207,7 +211,7 @@ export class ExpeditionLogic {
       for (const c of zone.chests ?? []) placed[c.kind]++;
       this.zlog = { zone: this.zoneName, time: { day: 0, dusk: 0, night: 0 }, battles: { party: 0, none: 0, enemy: 0 }, kills: { battle: 0, field: 0 }, exp: 0,
         gold: { got: 0, spent: 0 }, chests: { placed, opened: [0, 0, 0, 0] }, rare: { met: zone.spawns.filter((s) => s.rare).length, caught: 0, lost: 0 },
-        merchant: { met: false, bought: [] }, gear: { found: [], worn: 0, dropped: 0 } };
+        merchant: { met: false, bought: [] }, gear: { found: [], worn: 0, dropped: 0 }, skills: [] };
       this.log.zones.push(this.zlog);
     }
     if (kind === 'rest') { this.run.heal(1); this.toast('쉼터: 파티가 모두 회복했다'); this.toast('출구의 돌에서 상호작용으로 다음 지역으로'); }
@@ -310,6 +314,7 @@ export class ExpeditionLogic {
           this.toast(`${e.enemy.sp.name} 처치 · EXP +${gain} · ${gold}G`);
           for (const l of this.run.award(gain)) this.toast(l);
           if (this.lootRng.chance(FIELD_DROP_CHANCE)) this.gainGear(creatureDrop(this.battleNo, this.lootRng, this.names), e.enemy.sp.name);
+          if (this.lootRng.chance(FIELD_SKILL_DROP)) this.gainSkill(rollSkill(this.battleNo, this.lootRng), e.enemy.sp.name);
           break;
         }
         case 'chest': this.openChest(e.chest); break;
@@ -331,7 +336,22 @@ export class ExpeditionLogic {
     if (this.zlog) this.zlog.chests.opened[c.kind]++;
     if (loot.kind === 'gold') { this.run.gold += loot.gold; this.gainGold(loot.gold); this.toast(`${CHEST_NAME[c.kind]}: ${loot.gold}G`); }
     else if (loot.kind === 'potion') { this.run.potions += loot.n; this.toast(`${CHEST_NAME[c.kind]}: 회복약 +${loot.n}`); }
+    else if (loot.kind === 'skill') this.gainSkill(loot.id, CHEST_NAME[c.kind]);
     else this.gainGear(loot.gear, CHEST_NAME[c.kind]);
+  }
+
+  /** a skill found (§16): learned at Lv 1 or one level up; at the top level it turns into gold */
+  private gainSkill(id: number, from: string): void {
+    const d = SKILLBOOK[id], r = this.run.learnSkill(id), lv = this.run.skillLv[id];
+    if (r === 'max') {
+      const g = SKILL_MAX_GOLD[d.tier];
+      this.run.gold += g;
+      this.gainGold(g);
+      this.toast(`${from}: ${d.name} (최고 레벨) → ${g}G`);
+      return;
+    }
+    this.zlog?.skills.push(`${d.name} Lv.${lv}`);
+    this.toast(r === 'new' ? `${from}: 스킬 ${d.name} 습득!` : `${from}: ${d.name} Lv.${lv}!`);
   }
 
   // --- equipment ------------------------------------------------------------------------------------------------
@@ -507,9 +527,11 @@ export class ExpeditionLogic {
       if (b.isBoss) { this.logBoss(b, 'won'); this.battle = null; this.encounter = null; this.mode = 'clear'; this.finishLog(); return; }
       const first = b.enemies.find((e) => !e.gone);                // one roll for the won battle (§4.3)
       if (first && this.lootRng.chance(DROP_CHANCE)) this.gainGear(creatureDrop(this.battleNo, this.lootRng, this.names), first.name);
+      if (first && this.lootRng.chance(SKILL_DROP)) this.gainSkill(rollSkill(this.battleNo, this.lootRng), first.name);
       for (const r of b.rares) {                                   // a beaten rare creature drops a piece of its own (§7)
         if (this.zlog) this.zlog.rare.caught++;
-        this.gainGear(rareDrop(this.battleNo, this.lootRng, this.names), `빛나는 ${r.name}`);
+        if (this.lootRng.chance(RARE_SKILL)) this.gainSkill(rollSkill(this.battleNo, this.lootRng, 1), `빛나는 ${r.name}`);
+        else this.gainGear(rareDrop(this.battleNo, this.lootRng, this.names), `빛나는 ${r.name}`);
       }
     } else {
       const gone = b.enemies.filter((e) => e.gone).map((e) => e.field!);

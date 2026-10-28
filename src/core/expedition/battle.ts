@@ -83,6 +83,11 @@ export interface Skill {
   /** effect bank frames played on the target */
   fx: [number, number];
   desc: string;
+  /** an original skill (skillbook.ts): its hit times and length (s), its level and the projectile drawn on the target */
+  hits?: number[];
+  dur?: number;
+  lv?: number;
+  proj?: 'boomerang' | 'slider';
 }
 
 export const HERO_SKILLS: Skill[] = [
@@ -117,6 +122,9 @@ export interface Act {
   dur: number;
   hitAt: number;
   done: boolean;
+  /** hits landed so far and when the last one did (a skill may hit several times) */
+  hitN?: number;
+  lastHit?: number;
 }
 
 export interface DefHit { t: number; result: 'parry' | 'dodge' | 'hit' | null }
@@ -322,7 +330,7 @@ export class Battle {
   // --- the party's turn ------------------------------------------------------------------------------------------
 
   /** skills of the acting unit */
-  skills(u: BUnit | null = this.actor): Skill[] { return !u ? [] : u.species === null ? HERO_SKILLS
+  skills(u: BUnit | null = this.actor): Skill[] { return !u ? [] : u.species === null ? [...HERO_SKILLS, ...this.run.learned()]
     : RECRUIT_SKILLS[u.species] ? [RECRUIT_SKILLS[u.species], BEAST_SKILL] : [BEAST_SKILL]; }
 
   /** why a command cannot be used now, or null */
@@ -420,14 +428,26 @@ export class Battle {
   }
 
   private startAct(a: { kind: Act['kind']; skill?: Skill; targets: BUnit[] }): void {
-    const dur = a.kind === 'item' ? 0.7 : a.kind === 'skill' ? 1.0 : a.kind === 'allout' ? 1.3 : 0.75;
-    this.act = { actor: this.actor!, kind: a.kind, skill: a.skill, targets: a.targets, t: 0, dur, hitAt: a.kind === 'item' ? 0.3 : dur * 0.45, done: false };
+    const hs = a.skill?.hits, dur = a.skill?.dur ?? (a.kind === 'item' ? 0.7 : a.kind === 'skill' ? 1.0 : a.kind === 'allout' ? 1.3 : 0.75);
+    this.act = { actor: this.actor!, kind: a.kind, skill: a.skill, targets: a.targets, t: 0, dur, hitAt: hs ? hs[0] : a.kind === 'item' ? 0.3 : dur * 0.45, done: false };
     if (a.skill) this.ap -= a.skill.ap;
     this.phase = 'act';
     this.menu = 'main';
     this.pending = null;
     this.t = 0;
     this.line = a.kind === 'allout' ? '총공격!' : a.kind === 'skill' ? `${this.actor!.name}: ${a.skill!.name}!` : a.kind === 'item' ? `회복약 (남은 ${this.run.potions})` : `${this.actor!.name}의 공격`;
+  }
+
+  /** land the hits whose time has come (an original skill hits on each of its hit times) */
+  private stepAct(a: Act): void {
+    while (!a.done && a.t >= a.hitAt) {
+      this.landAct(a);
+      a.hitN = (a.hitN ?? 0) + 1;
+      a.lastHit = a.t;
+      const hs = a.skill?.hits;
+      if (hs && a.hitN < hs.length) a.hitAt = hs[a.hitN];
+      else a.done = true;
+    }
   }
 
   private landAct(a: Act): void {
@@ -566,7 +586,7 @@ export class Battle {
       case 'act': {
         const a = this.act!;
         a.t += dt;
-        if (!a.done && a.t >= a.hitAt) { a.done = true; this.landAct(a); }
+        this.stepAct(a);
         if (a.t >= a.dur) { this.act = null; this.phase = 'next'; this.t = 0; }
         break;
       }
@@ -578,7 +598,7 @@ export class Battle {
         if (this.act) {
           const a = this.act;
           a.t += dt;
-          if (!a.done && a.t >= a.hitAt) { a.done = true; this.landAct(a); }
+          this.stepAct(a);
         }
         this.enemyFrame();
         break;

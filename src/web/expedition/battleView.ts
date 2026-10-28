@@ -24,6 +24,8 @@ const PARTY_AT: [number, number][] = [[300, 196], [334, 246], [266, 252]];
 const ENEMY_AT: [number, number][] = [[104, 196], [62, 246], [146, 252]];
 /** a shot flies this long to its hit (ms) */
 const SHOT_MS = 380;
+/** skill rows shown at once (the list scrolls with the cursor) */
+const SKILL_ROWS = 6;
 
 export class BattleView {
   constructor(private readonly ctx: GameContext, private readonly world: WorldView, private readonly cmfs: Map<string, Cmf>) {}
@@ -106,7 +108,7 @@ export class BattleView {
     this.world.render(f.camX, f.camY, []);
     setDayShift(0, 0, 0);
     const ents = b.units.map((u) => this.sprite(b, u)).filter((d): d is Drawable => !!d).sort((p, q) => p.y - q.y);
-    this.world.overlay([...ents, ...this.shots(b), ...this.sparkles(b)]);
+    this.world.overlay([...ents, ...this.shots(b), ...this.skillProj(b), ...this.sparkles(b)]);
     this.ctx.compositor.show();
     const u = this.ctx.ui;
     u.view('ex-battle', 0, 0, 480, 320, this.tree(b, talk));
@@ -115,6 +117,25 @@ export class BattleView {
 
   /** a shot move's projectiles: each leaves the shooter SHOT_MS before its hit and reaches the target on it; parried it
    *  flies back, dodged it flies on past */
+  /** an original skill's projectile on its targets, in cmf_c0 frames at the original's ticks (skills.md §4.2):
+   *  부메랑소드's sword circling from tick 10 for 17 ticks (frames 631 → 623), 슬라이더's sword mark from tick 6 for 5
+   *  ticks (633..637) and the struck mark after its hit (651..653, two ticks a frame) */
+  private skillProj(b: Battle): Drawable[] {
+    const a = b.act, p = a?.skill?.proj, cmf = this.cmfs.get('cmf_c0');
+    if (!a || !p || !cmf) return [];
+    const tick = Math.floor(a.t / 0.05), out: Drawable[] = [];
+    const at = (t: BUnit, frame: number, dy: number) => { const [x, y] = this.pos0(b, t); out.push({ cmfName: 'cmf_c0', cmf, frame, x, y: y + dy, equip: HERO_EQUIP }); };
+    for (const t of a.targets) {
+      if (t.hp <= 0 && t.side === 'enemy' && p === 'slider' && tick > 14) continue;
+      if (p === 'boomerang' && tick >= 10 && tick < 27) at(t, 631 - ((tick - 10) % 9), -10);
+      if (p === 'slider') {
+        if (tick >= 6 && tick < 11) at(t, 633 + (tick - 6), -10);
+        if (tick >= 8 && tick < 14) at(t, 651 + Math.min(2, Math.floor((tick - 8) / 2)), -24);
+      }
+    }
+    return out;
+  }
+
   private shots(b: Battle): Drawable[] {
     const ea = b.enemyAct, sp = ea?.actor.sp, shot = sp?.field.shot;
     if (!ea || !ea.move.shot || !sp || !shot) return [];
@@ -139,8 +160,8 @@ export class BattleView {
   /** effect sprites on the struck and the parry rings */
   private drawFx(b: Battle): void {
     const u = this.ctx.ui, a = b.act;
-    if (a && a.done && a.kind !== 'item') {
-      const k = Math.floor(((a.t - a.hitAt) / 0.35) * 6);
+    if (a && a.lastHit !== undefined && a.kind !== 'item') {        // after every hit (a skill may land several)
+      const k = Math.floor(((a.t - a.lastHit) / 0.35) * 6);
       if (k < 6) for (const t of a.targets) { const [x, y] = this.pos0(b, t); u.effect(k, x, y - 18); }
     }
     for (const p of b.popups) {
@@ -250,8 +271,12 @@ export class BattleView {
         rows.push(h(`div.ex-item${i === b.sel ? '.sel' : ''}${why ? '.off' : ''}${c === ALL_OUT ? '.allout' : ''}`, { on: () => { b.tap('main', i); } }, c));
       });
     } else if (b.menu === 'skill') {
-      b.skills().forEach((s, i) => rows.push(h(`div.v-row.ex-item${i === b.subSel ? '.sel' : ''}${b.ap < s.ap ? '.off' : ''}`, { on: () => { b.tap('skill', i); } },
-        h('span.v-grow', null, s.name), h('span.exb-cost', null, `AP ${s.ap}`))));
+      // up to SKILL_ROWS at a time, the cursor's window (the found skills make the list long)
+      const all = b.skills(), from = Math.max(0, Math.min(b.subSel - (SKILL_ROWS >> 1), all.length - SKILL_ROWS));
+      if (from > 0) rows.push(h('div.exb-more', null, '▲'));
+      all.slice(from, from + SKILL_ROWS).forEach((s, j) => { const i = from + j; rows.push(h(`div.v-row.ex-item${i === b.subSel ? '.sel' : ''}${b.ap < s.ap ? '.off' : ''}`, { on: () => { b.tap('skill', i); } },
+        h('span.v-grow', null, s.lv ? `${s.name} ${s.lv}` : s.name), h('span.exb-cost', null, `AP ${s.ap}`))); });
+      if (from + SKILL_ROWS < all.length) rows.push(h('div.exb-more', null, '▼'));
     } else if (b.menu === 'item') {
       b.liveParty.forEach((p, i) => rows.push(h(`div.v-row.ex-item${i === b.subSel ? '.sel' : ''}`, { on: () => { b.tap('item', i); } },
         h('span.v-grow', null, p.name), h('span.exb-cost', null, `${p.hp}/${p.hpMax}`))));

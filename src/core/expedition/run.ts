@@ -2,6 +2,8 @@
 // levels inside this run, the potions, gold and the equipment worn (web/docs/expedition-balance.md §4.3), and where the run is.
 import { SLOTS, addStats, type Gear, type Stats } from './loot';
 import { SPECIES } from './species';
+import { SKILLBOOK, SKILL_MAX, skillAt } from './skillbook';
+import type { Skill } from './battle';
 
 export interface Member {
   name: string;
@@ -83,6 +85,20 @@ export class Run {
   parries = 0;
 
   get alive(): Member[] { return this.party.filter((m) => m.hp > 0); }
+
+  /** the hero's skills found in this run, by original skill number: their levels (0 = not found; §16) */
+  skillLv: number[] = SKILLBOOK.map(() => 0);
+
+  /** a skill found: learned at Lv 1, or one level up, or (at SKILL_MAX already) 'max' */
+  learnSkill(id: number): 'new' | 'up' | 'max' {
+    const lv = this.skillLv[id];
+    if (lv >= SKILL_MAX) return 'max';
+    this.skillLv[id] = lv + 1;
+    return lv ? 'up' : 'new';
+  }
+
+  /** the skills found, in the original's order, at their levels */
+  learned(): Skill[] { return SKILLBOOK.filter((d) => this.skillLv[d.id] > 0).map((d) => skillAt(d, this.skillLv[d.id])); }
 
   /** what the worn pieces add up to (or would, with g in its slot) */
   gearStats(g: Gear | null = null): Stats {

@@ -16,6 +16,7 @@ import { GUARD_MAX, Run, SHINY_MUL, recruit, statsWith } from '../src/core/exped
 import { ENEMY_HIT, RARE, SPECIES, zoneStats } from '../src/core/expedition/species.ts';
 import type { Assets, Cmf, GameMap } from '../src/core/data/assets.ts';
 import { TILE, buildField, walkDist, zoneSets, type Zone } from '../src/core/expedition/zone.ts';
+import { SKILLBOOK, SKILL_AP, SKILL_MAX, loadSkills, skillAt } from '../src/core/expedition/skillbook.ts';
 
 const foe = (species: number, rare = false) => ({ species, sp: SPECIES[species], hp: SPECIES[species].stats.hp, hpMax: SPECIES[species].stats.hp, rare }) as unknown as FieldEnemy;
 const idle = { isHeld: () => false, stick: { active: false, level: 0, angle: 0, dx: 0, dy: 0 } } as unknown as InputState;
@@ -85,7 +86,8 @@ test("loot: creatures drop by zone, chests by zone and what they hold, the merch
   assert.ok(gold / 400 > 0.05 && gold / 400 < 0.16, `gold chests per zone ${gold / 400}`);
   for (let i = 0; i < 50; i++) {
     const l = openChest(3, 1, rng, names);
-    assert.equal(l.kind, 'gear');
+    assert.ok(l.kind === 'gear' || l.kind === 'skill', 'a gold chest holds a piece or a skill');
+    if (l.kind === 'skill') assert.ok(SKILLBOOK[l.id].tier >= 1, 'a gold chest holds a skill a tier up');
     if (l.kind === 'gear') { assert.ok(l.gear.grade >= 3, 'a gold chest holds 영웅 or 전설'); assert.ok(l.gear.sub >= 1, 'a tier above the zone'); }
     assert.ok(rareDrop(1, rng, names).grade >= 2, 'the rare creature drops 희귀 or better');
   }
@@ -240,4 +242,32 @@ test('combat scale (§15): a creature hits ×2.5 / ×3.5 / ×4 by its zone, the 
   };
   const plain = hit(0.5), crit = hit(0.05);                         // 0.05 < CRIT_RATE: a crit (the ±10% roll is low too)
   assert.ok(crit > plain * 1.4, `crit ${crit} vs ${plain}`);
+});
+
+const skillData = existsSync(asset('d.dat')) && existsSync(asset('text.json'));
+test('skills (§16): found ones level up to 10 and join the hero skills; a skill hits on each of its original hit ticks', { skip: !skillData && 'no generated assets' }, () => {
+  const d = readFileSync(asset('d.dat'));
+  loadSkills({ d16: (o: number) => d[o] | (d[o + 1] << 8), text: json<string[]>('text.json') });
+  const run = new Run();
+  assert.equal(run.learnSkill(7), 'new');
+  assert.equal(run.learnSkill(7), 'up');
+  assert.equal(run.skillLv[7], 2);
+  for (let i = 0; i < 20; i++) run.learnSkill(7);
+  assert.equal(run.skillLv[7], SKILL_MAX);
+  assert.equal(run.learnSkill(7), 'max');
+  const b = new Battle(run, [foe(1), foe(1)], 'none', () => 0.5);
+  const hero = b.party[0], def = SKILLBOOK[7], sk = b.skills(hero).find((s) => s.name === def.name)!;
+  assert.ok(sk && sk.all && sk.ap === SKILL_AP[2] && sk.lv === SKILL_MAX);
+  assert.ok(def.dmg[0] > 0 && def.dmg[1] > 0, 'damage from the game data');
+  assert.equal(sk.power, (def.dmg[0] + 9 * def.dmg[1]) / 100);
+  // play it: five hits on both enemies, each landing at its tick
+  b.phase = 'command'; b.actor = hero; b.ap = 9;
+  for (const e of b.enemies) { e.hp = e.hpMax = 100000; }
+  (b as unknown as { startAct(a: unknown): void }).startAct({ kind: 'skill', skill: sk, targets: b.liveEnemies });
+  let pops = 0;
+  for (let t = 0; t < 2; t += 0.02) { b.frame(0.02, [], 0); pops = Math.max(pops, b.popups.filter((p) => p.kind === 'dmg').length); if (b.phase !== 'act') break; }
+  assert.equal(b.act, null);
+  assert.ok(b.enemies.every((e) => e.hp < 100000));
+  assert.equal(skillAt(SKILLBOOK[2], 1).hits!.length, 6, '드릴소드 hits six times');
+  assert.deepEqual(SKILLBOOK.filter((x) => x.all).map((x) => x.id), [1, 4, 5, 7]);
 });

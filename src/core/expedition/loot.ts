@@ -5,6 +5,7 @@
 // game's data (d.dat and text.json through Assets), and the icon sheet position is the main game's formula.
 import type { Assets } from '../data/assets';
 import type { Rng } from './rng';
+import { SKILLBOOK } from './skillbook';
 
 /** 일반 · 고급 · 희귀 · 영웅 · 전설: the main game's grade 0..4 (white, green, yellow, orange, purple) */
 export type Grade = 0 | 1 | 2 | 3 | 4;
@@ -114,6 +115,22 @@ export function creatureDrop(n: number, rng: Rng, name: Namer): Gear {
   return rollGear(DROP_TIERS[zi(n)], DROP_GRADES[zi(n)], rng, name);
 }
 
+// --- skills (§16) ---------------------------------------------------------------------------------------------------
+
+/** a won battle teaches a skill this often (rolled apart from its piece), a field kill half as often */
+export const SKILL_DROP = 0.08, FIELD_SKILL_DROP = 0.04;
+/** tier weights (1·2·3단계) of a skill found in battle zone 1..3 */
+export const SKILL_TIERS = [[80, 20, 0], [50, 40, 10], [30, 40, 30]] as const;
+/** the share of chests holding a skill instead (나무, 녹슨, 은, 황금), and of rare creatures dropping one instead of a piece */
+export const CHEST_SKILL: Record<ChestKind, number> = { 0: 0.05, 1: 0.15, 2: 0.25, 3: 0.3 };
+export const RARE_SKILL = 0.3;
+
+/** a skill of battle zone n (an original skill number), its tier moved up `tierUp` steps */
+export function rollSkill(n: number, rng: Rng, tierUp = 0): number {
+  const tier = Math.min(2, rng.weighted(SKILL_TIERS[zi(n)]) + tierUp);
+  return rng.pick(SKILLBOOK.filter((d) => d.tier === tier)).id;
+}
+
 // --- chests ---------------------------------------------------------------------------------------------------------
 
 /** 나무 · 녹슨 · 은 · 황금 */
@@ -145,10 +162,11 @@ export const CHEST_GRADES: Record<ChestKind, readonly number[]> = {
 /** a chest's piece is this many tiers above the zone's creature drop (silver and gold: one) */
 export const CHEST_TIER_UP: Record<ChestKind, number> = { 0: 0, 1: 0, 2: 1, 3: 1 };
 
-export type Loot = { kind: 'gold'; gold: number } | { kind: 'potion'; n: number } | { kind: 'gear'; gear: Gear };
+export type Loot = { kind: 'gold'; gold: number } | { kind: 'potion'; n: number } | { kind: 'gear'; gear: Gear } | { kind: 'skill'; id: number };
 
 /** what a chest of battle zone n holds: a wooden one gold 50%, a potion 25%, a piece 25%; the others a piece */
 export function openChest(kind: ChestKind, n: number, rng: Rng, name: Namer): Loot {
+  if (rng.chance(CHEST_SKILL[kind])) return { kind: 'skill', id: rollSkill(n, rng, CHEST_TIER_UP[kind]) };
   if (kind === 0) {
     const r = rng.next();
     if (r < 0.5) return { kind: 'gold', gold: 15 + 10 * Math.max(1, Math.min(3, n)) };

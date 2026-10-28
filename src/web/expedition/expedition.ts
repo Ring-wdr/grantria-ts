@@ -5,6 +5,9 @@
 // main play: no imports of the field game, combat, rules or saves (tests/boundary.test.ts).
 // Touch: a fixed layout of this mode's own (the stick where 조작 배치 puts it, since Input reads it there; the action
 // buttons on the right), not the main game's editable one.
+// Growth and rewards (web/docs/expedition-balance.md): chests (cmf_oc 14..17), the rare creature's sparkle (cmf_status
+// 0x5d..0x63, the original's ground-item sparkle), the dark merchant (the original's dark merchant actor 0x9E) and the
+// night, a colour shift on the field like main play's day / night.
 import { AVK } from '../input/input';
 import type { GameContext } from '../game/scene';
 import { h, padBadge, type VNode } from '../render/view';
@@ -14,7 +17,9 @@ import { ctrlAt } from '../input/touchLayout';
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { bodyBox } from '../../core/world/world';
-import { ADVANTAGE_LABEL, ExpeditionLogic, PAUSE_ITEMS } from '../../core/expedition/expedition';
+import { ADVANTAGE_LABEL, ExpeditionLogic, NIGHT_AT, PAUSE_ITEMS } from '../../core/expedition/expedition';
+import { CHEST_FRAME, GRADE_NAME, relicDesc } from '../../core/expedition/loot';
+import { DEFAULT_EQUIP, setDayShift, type SpriteLayer } from '../render/sprites';
 import { FK, type FieldEnemy, type Press } from '../../core/expedition/field';
 import { SPECIES } from '../../core/expedition/species';
 import { EXIT_MARKER, type Zone } from '../../core/expedition/zone';
@@ -24,6 +29,12 @@ import { HERO_EQUIP } from './heroLook';
 import type { Battle } from '../../core/expedition/battle';
 import './expedition.css';
 
+/** the rare creature's sparkle: cmf_status frames SPARKLE..SPARKLE + 6 */
+const SPARKLE = 0x5d;
+/** the original's dark merchant actor (its sprite: actorTypes[id][0]) */
+const MERCHANT_ACTOR = 0x9e;
+/** the field's colour shift at full night (subtracted, bluish) */
+const NIGHT_SHIFT: [number, number, number] = [12, 26, 6];
 
 /** the mode's touch buttons (virtual px, right side; edge 1 moves them out with Input.edge) */
 const TOUCH: { key: number; label: string; x: number; y: number; r: number }[] = [
@@ -66,14 +77,24 @@ export class ExpeditionScene extends ExpeditionLogic {
     return c;
   }
 
+  /** the dark merchant's sprite */
+  private get merchantCmf(): string { return `cmf_c${this.ctx.assets.tables.actorTypes[MERCHANT_ACTOR][0]}`; }
+
   protected override async onZone(zone: Zone): Promise<void> {
     const names = ['cmf_c0', ...new Set(zone.spawns.map((s) => `cmf_c${SPECIES[s.species].cmf}`))];
-    const cmfs = await Promise.all(names.map((n) => this.cmf(n)));
-    await this.view.prepare(zone, this.sets!, names.map((name, i) => ({ name, cmf: cmfs[i], equip: name === 'cmf_c0' ? HERO_EQUIP : undefined })));
+    if (zone.kind === 'battle') names.push(this.merchantCmf);
+    const [cmfs, status] = await Promise.all([Promise.all(names.map((n) => this.cmf(n))), this.cmf('cmf_status')]);
+    await this.view.prepare(zone, this.sets!, names.map((name, i) => ({ name, cmf: cmfs[i], equip: name === 'cmf_c0' ? HERO_EQUIP : undefined })),
+      [{ name: 'cmf_status', cmf: status, ids: Array.from({ length: 7 }, (_, i) => SPARKLE + i) }]);
+  }
+
+  /** the run log (web/docs/expedition-balance.md §12.1) to the console, for tuning */
+  protected override onRunEnd(log: ExpeditionLogic['log']): void {
+    console.info('[원정 기록]', JSON.stringify(log));
   }
 
   protected override onBattle(b: Battle): void {
-    const names = [...new Set(b.units.filter((u) => u.sp).map((u) => `cmf_c${u.sp!.cmf}`))];
+    const names = [...new Set(b.units.filter((u) => u.sp).map((u) => `cmf_c${u.sp!.cmf}`)), 'cmf_status'];
     void Promise.all(names.map((n) => this.cmf(n))).then((cmfs) =>
       this.view.preloadSprites([{ name: 'cmf_c0', cmf: this.cmfs.get('cmf_c0')!, equip: HERO_EQUIP }, ...names.map((name, i) => ({ name, cmf: cmfs[i] }))], ['ec', 'c', 'oc', 't']));
   }
@@ -117,7 +138,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     }
     if (this.mode === 'battle' && this.battle) {
       u.begin();
-      this.battleView.draw(this.battle, this.field, this.talk);
+      this.battleView.draw(this.battle, this.field, this.talk, this.darkness);
       u.end();
       hud.begin();
       this.drawTouch();
@@ -140,7 +161,8 @@ export class ExpeditionScene extends ExpeditionLogic {
     this.drawFieldUi();
     this.drawHud();
     if (this.mode === 'encounter') this.drawBanner();
-    if (this.mode === 'reward') this.drawReward();
+    if (this.mode === 'summary') this.drawSummary();
+    if (this.mode === 'shop') this.drawShop();
     if (this.mode === 'pause') this.drawPause();
     u.end();
     this.drawTouch();
@@ -164,10 +186,29 @@ export class ExpeditionScene extends ExpeditionLogic {
     return { cmfName: name, cmf, frame, x: Math.round(e.x), y: Math.round(e.y), mirror, shadow: true, fx };
   }
 
+  /** the sparkles over a rare creature, over everything (it is seen behind trees too): three, a beat apart */
+  private sparkles(V: SpriteLayer, x: number, y: number, t: number): void {
+    const cmf = this.cmfs.get('cmf_status')!, z = this.zone?.map.header.zone ?? 3;
+    for (const [dx, dy, k] of [[-8, -10, 0], [7, -22, 2], [2, -4, 4]]) V.frame('cmf_status', cmf, SPARKLE + (Math.floor(t * 10 + k) % 7), Math.round(x + dx), Math.round(y + dy), z, DEFAULT_EQUIP);
+  }
+
   private drawField(): void {
     const f = this.field!, ents: Drawable[] = [];
-    for (const e of f.enemies) { const d = this.enemyDrawable(e); if (d) ents.push(d); }
+    for (const e of f.enemies) {
+      const d = this.enemyDrawable(e);
+      if (!d) continue;
+      ents.push(d);
+    }
     ents.push(this.heroDrawable());
+    for (const c of f.chests) {                                       // a chest's top-left is 14 px up-left of its cell's centre
+      if (c.opened && c.t > 0.8) continue;
+      ents.push({ cmfName: 'cmf_oc', cmf: this.sets!.oc, frame: CHEST_FRAME[c.kind], x: c.x - 14, y: c.y - 14, depth: c.y + 6,
+        fx: c.opened ? { alpha: Math.max(0, Math.round(32 - c.t * 40)) } : undefined });
+    }
+    if (f.merchant) {
+      const name = this.merchantCmf, cmf = this.cmfs.get(name)!, rec = cmf.anims[0];
+      ents.push({ cmfName: name, cmf, frame: rec.frames[Math.floor(f.time * 6) % rec.n] ?? 0, x: f.merchant.x, y: f.merchant.y, shadow: true });
+    }
     for (const s of f.shots) {
       const name = `cmf_c${s.owner.sp.cmf}`, { frame, mirror } = s.look();
       ents.push({ cmfName: name, cmf: this.cmfs.get(name)!, frame, x: Math.round(s.x), y: Math.round(s.y - s.shot.lift), mirror, depth: s.y,
@@ -177,7 +218,10 @@ export class ExpeditionScene extends ExpeditionLogic {
       const x = f.zone.exit;
       ents.push({ cmfName: 'cmf_oc', cmf: this.sets.oc, frame: EXIT_MARKER + (Math.floor(f.time * 20) % 8), x: x.x + 26, y: x.y + 6, depth: x.y + 30 });
     }
-    this.view.render(f.camX, f.camY, ents);
+    const k = this.darkness;
+    setDayShift(Math.round(NIGHT_SHIFT[0] * k), Math.round(NIGHT_SHIFT[1] * k), Math.round(NIGHT_SHIFT[2] * k));
+    this.view.render(f.camX, f.camY, ents, undefined, (V) => { for (const e of f.enemies) if (e.rare && e.alive) this.sparkles(V, e.x, e.y, f.time); });
+    setDayShift(0, 0, 0);
     this.ctx.compositor.show();
   }
 
@@ -213,6 +257,14 @@ export class ExpeditionScene extends ExpeditionLogic {
       else if (fl.kind === 'break') u.el('ex-breaktxt', sx - 30, sy - 10 - fl.t * 20, 60, 12, { key: `br${fl.x | 0}`, text: 'BREAK' });
       else u.effect(Math.min(5, Math.floor(fl.t * 14)) + (fl.kind === 'heavy' ? 0 : 0), sx, sy);
     }
+    if (f.merchant) {                                                 // the merchant: a name over it, or an arrow on the edge
+      const mx = f.merchant.x - ox, my = f.merchant.y - oy;
+      if (mx > -10 && mx < 490 && my > -10 && my < 330) u.el('ex-npc', mx - 30, my - 52, 60, 12, { key: 'npc', text: '암흑상인' });
+      else {
+        const a = Math.atan2(my - 160, mx - 240), ex = Math.max(14, Math.min(466, 240 + Math.cos(a) * 400)), ey = Math.max(40, Math.min(306, 160 + Math.sin(a) * 400));
+        u.el('ex-npc-arrow', ex - 8, ey - 8, 16, 16, { key: 'npca', text: '➤', vars: { '--a': `${a}rad` } });
+      }
+    }
     const hint = this.mode === 'field' ? f.actHint() : null;
     if (hint) u.el('ex-act', f.hero.x - ox - 50, f.hero.y - oy - 58, 100, 14, { html: `${this.keyGlyph(FK.ACT)}${hint}` });
   }
@@ -228,7 +280,8 @@ export class ExpeditionScene extends ExpeditionLogic {
     const left = f.enemies.filter((e) => e.alive).length;
     this.ctx.ui.view('ex-hud', 0, 0, 480, 320, h('div.v-fill.ex-hud', null,
       h('div.v-col.ex-status', null,
-        h('div.v-row.ex-zone', null, h('span', null, this.zoneName), this.zone?.kind === 'battle' ? h('span.ex-dim', null, `적 ${left}`) : null, h('span.ex-dim', null, `회복약 ${this.run.potions}`)),
+        h('div.v-row.ex-zone', null, h('span', null, this.zoneName), this.zone?.kind === 'battle' ? h('span.ex-dim', null, `적 ${left}`) : null, h('span.ex-dim', null, `회복약 ${this.run.potions}`),
+          h('span.ex-gold', null, `${this.run.gold}G`), this.inBattleZone ? this.clockTree() : null),
         this.run.party.map((m) => h('div.v-row.ex-mem', null, h('span.ex-mname', null, `${m.name} Lv.${m.lv}`),
           h('div.exb-bar.hp', null, h('div.exb-fill', { style: `width:${(100 * m.hp) / m.hpMax}%` })), h('span.ex-dim', null, `${m.hp}`)))),
       inp.device !== 'touch' ? h('div.v-row.ex-keys', null,
@@ -240,16 +293,36 @@ export class ExpeditionScene extends ExpeditionLogic {
     return h('span.v-row.ex-hint', null, padBadge(this.ctx.input, key), h('span', null, label));
   }
 
-  /** a battle zone left: the heal and the provisional reward, one of three (then on to the next zone) */
-  private drawReward(): void {
-    this.ctx.ui.view('ex-reward', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
+  /** the battle zone's clock: day, dusk or night, and the time to nightfall */
+  private clockTree(): VNode {
+    const ph = this.dayPhase, left = Math.max(0, Math.ceil(NIGHT_AT - this.clock)), mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
+    return h(`span.ex-clock.${ph}`, null, ph === 'night' ? '☾ 밤' : `${ph === 'dusk' ? '◐ 해질녘' : '☀ 낮'} ${mm}:${ss}`);
+  }
+
+  /** a battle zone left: what it gave and the heal (then on to the next zone) */
+  private drawSummary(): void {
+    this.ctx.ui.view('ex-summary', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
       h('div.v-col.ex-menu.ex-result', null,
-        h('div.ex-menu-title', null, this.reward[0]),
-        this.reward.slice(1).map((l) => h('div.ex-line', null, l)),
-        h('div.ex-line.ex-dim', null, `보상 하나를 고른다 (임시 보상) → ${this.nextName()}`),
-        this.rewardChoices.map((r, i) => h(`div.v-col.ex-item.ex-reward${i === this.rewardSel ? '.sel' : ''}`, { on: () => { this.pickReward(i); } },
-          h('span.ex-reward-name', null, r.name), h('span.ex-reward-desc', null, r.desc))),
-        h('div.v-row.ex-go', null, padBadge(this.ctx.input, AVK.OK), '고르기'))));
+        h('div.ex-menu-title', null, this.summary[0]),
+        this.summary.slice(1).map((l) => h('div.ex-line', null, l)),
+        h('div.v-row.ex-item.sel.ex-go', { on: () => { this.nextZone(); } }, padBadge(this.ctx.input, AVK.OK), `다음: ${this.nextName()}`))));
+  }
+
+  /** the dark merchant: its four slots and 떠나기 */
+  private drawShop(): void {
+    const rows = this.stock.map((w, i) => {
+      const r = w.relic, cls = `div.v-col.ex-item.ex-ware${i === this.shopSel ? '.sel' : ''}${w.sold || this.run.gold < w.price ? '.off' : ''}`;
+      return h(cls, { on: () => { this.buy(i); } },
+        h('div.v-row.ex-ware-top', null, h(`span.ex-ware-name${r ? `.g${r.grade}` : ''}`, null, r ? `[${GRADE_NAME[r.grade]}] ${r.name}` : `회복약 (남은 ${w.n})`),
+          h('span.ex-ware-price', null, w.sold ? '매진' : `${w.price}G`)),
+        h('span.ex-ware-desc', null, r ? relicDesc(r) : '한 명의 HP 40% 회복'));
+    });
+    this.ctx.ui.view('ex-shop', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
+      h('div.v-col.ex-menu.ex-shop', null,
+        h('div.v-row.ex-menu-title', null, h('span.v-grow', null, '암흑상인'), h('span.ex-gold', null, `${this.run.gold}G`)),
+        ...rows,
+        h(`div.ex-item${this.shopSel >= this.stock.length ? '.sel' : ''}`, { on: () => { this.closeShop(); } }, '떠나기'),
+        h('div.ex-line.ex-dim', null, this.shopLine))));
   }
 
   private nextName(): string {
@@ -265,7 +338,8 @@ export class ExpeditionScene extends ExpeditionLogic {
       h('div.ex-sub', null, clear ? '초원의 왕을 쓰러뜨렸다. (이후 스테이지는 준비 중)' : '파티가 쓰러졌다. 원정은 여기서 끝난다.'),
       h('div.v-col.ex-stats', null,
         h('div', null, `돌파한 지역 ${r.cleared} / 3`), h('div', null, `쓰러뜨린 적 ${r.kills}`), h('div', null, `패링 ${r.parries}회`), h('div', null, `영입 ${r.recruits}`),
-        r.party.map((m) => h('div.ex-dim', null, `${m.name} Lv.${m.lv}`))),
+        h('div', null, `골드 ${r.gold}G · 유물 ${r.relics.length}개`),
+        r.party.map((m) => h('div.ex-dim', null, `${m.shiny ? '빛나는 ' : ''}${m.name} Lv.${m.lv}`))),
       h('div.v-row.ex-item.sel.ex-go', { on: () => [AVK.OK] }, padBadge(this.ctx.input, AVK.OK), '타이틀로'));
   }
 
@@ -280,7 +354,10 @@ export class ExpeditionScene extends ExpeditionLogic {
     this.ctx.ui.view('ex-pause', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
       h('div.v-col.ex-menu', null,
         h('div.ex-menu-title', null, '일시 정지'),
-        PAUSE_ITEMS.map((label, i) => h(`div.ex-item${i === this.pauseSel ? '.sel' : ''}`, { on: () => { this.pickPause(i); } }, label)))));
+        PAUSE_ITEMS.map((label, i) => h(`div.ex-item${i === this.pauseSel ? '.sel' : ''}`, { on: () => { this.pickPause(i); } }, label)),
+        h('div.ex-line.ex-dim', null, `골드 ${this.run.gold}G · 회복약 ${this.run.potions}`),
+        this.run.relics.length ? this.run.relics.map((r) => h('div.v-col.ex-relic', null, h(`span.ex-ware-name.g${r.grade}`, null, `[${GRADE_NAME[r.grade]}] ${r.name}`), h('span.ex-ware-desc', null, relicDesc(r))))
+          : h('div.ex-line.ex-dim', null, '유물 없음'))));
   }
 
   /** the touch stick and buttons (touch only) */

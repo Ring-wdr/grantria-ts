@@ -1,5 +1,6 @@
 // 원정(가제): the run, in memory only (no save slot): the party (the hero and up to two recruited creatures), their
-// levels inside this run, the items and where the run is.
+// levels inside this run, the potions, gold and relics (web/docs/expedition-balance.md §4.3), and where the run is.
+import type { Relic } from './loot';
 import { SPECIES } from './species';
 
 export interface Member {
@@ -13,6 +14,8 @@ export interface Member {
   atk: number;
   def: number;
   spd: number;
+  /** a rare creature recruited: ×1.2 and it keeps its sparkle */
+  shiny?: boolean;
 }
 
 export const PARTY_MAX = 3;
@@ -25,10 +28,14 @@ export function newHero(): Member {
   return { name: '검사', species: null, lv: 1, exp: 0, hp: 120, hpMax: 120, atk: 14, def: 5, spd: 12 };
 }
 
-/** a creature joining at its own level (a little sturdier than in the wild) */
-export function recruit(species: number): Member {
-  const s = SPECIES[species].stats, hp = Math.round(s.hp * 1.3);
-  return { name: SPECIES[species].name, species, lv: s.lv, exp: 0, hp, hpMax: hp, atk: s.atk, def: s.def, spd: s.spd };
+/** a rare recruit's stats ×this (§7) */
+export const SHINY_MUL = 1.2;
+
+/** a creature joining at its own level (a little sturdier than in the wild); a rare one ×1.2 */
+export function recruit(species: number, shiny = false): Member {
+  const s = SPECIES[species].stats, k = shiny ? SHINY_MUL : 1, hp = Math.round(s.hp * 1.3 * k);
+  return { name: SPECIES[species].name, species, lv: s.lv, exp: 0, hp, hpMax: hp, atk: Math.round(s.atk * k), def: Math.round(s.def * k), spd: Math.round(s.spd * k),
+    shiny: shiny || undefined };
 }
 
 /** one level up: the gains */
@@ -51,20 +58,22 @@ export function gainExp(m: Member, n: number): number {
   return up;
 }
 
-/** 임시 보상 (provisional until the reward system is decided in a meeting): one of three after a battle zone */
-export interface Reward { name: string; desc: string; apply(run: Run): void }
-export const REWARDS: Reward[] = [
-  { name: '체력 단련', desc: '파티 전원의 최대 HP +15%', apply: (r) => { for (const m of r.party) { const d = Math.round(m.hpMax * 0.15); m.hpMax += d; m.hp += d; } } },
-  { name: '날 세우기', desc: '파티 전원의 공격 +3', apply: (r) => { for (const m of r.party) m.atk += 3; } },
-  { name: '단단한 껍질', desc: '파티 전원의 방어 +2', apply: (r) => { for (const m of r.party) m.def += 2; } },
-  { name: '바람의 발', desc: '파티 전원의 속도 +2 (턴이 빨리 온다)', apply: (r) => { for (const m of r.party) m.spd += 2; } },
-  { name: '약초 꾸러미', desc: '회복약 +2', apply: (r) => { r.potions += 2; } },
-  { name: '깊은 휴식', desc: '파티 전원 HP 완전 회복', apply: (r) => { r.heal(1); } },
-];
+/** the damage a party takes is cut by its relics at most this much */
+export const GUARD_MAX = 0.5;
+
+/** a relic's gains on one member */
+function applyRelic(m: Member, r: Relic): void {
+  m.atk += r.atk ?? 0;
+  m.spd += r.spd ?? 0;
+  if (r.hpPct) { const d = Math.round(m.hpMax * r.hpPct); m.hpMax += d; m.hp += d; }
+}
 
 export class Run {
   party: Member[] = [newHero()];
   potions = 3;
+  gold = 0;
+  /** relics found or bought, in order (each on every member) */
+  relics: Relic[] = [];
   /** battle zones cleared */
   cleared = 0;
   /** run statistics for the result screen */
@@ -73,6 +82,21 @@ export class Run {
   parries = 0;
 
   get alive(): Member[] { return this.party.filter((m) => m.hp > 0); }
+
+  /** the share of damage the party's relics take off */
+  get guard(): number { return Math.min(GUARD_MAX, this.relics.reduce((s, r) => s + (r.guard ?? 0), 0)); }
+
+  /** a relic for the run: on everyone now, and on whoever joins later */
+  addRelic(r: Relic): void {
+    this.relics.push(r);
+    for (const m of this.party) applyRelic(m, r);
+  }
+
+  /** a recruit joins with the relics already found */
+  join(m: Member): void {
+    for (const r of this.relics) applyRelic(m, r);
+    this.party.push(m);
+  }
 
   /** heal everyone by a part of their max HP (the fallen get up with it too) */
   heal(part: number): void {

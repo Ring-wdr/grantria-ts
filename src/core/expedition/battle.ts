@@ -7,13 +7,17 @@
 // takes ×1.5 damage. With every enemy standing broken the command column is only 총공격 (the whole party on all of
 // them at once; they get up after it) and 대화 (the hero speaks, whoever's turn it is). A talk that wins over a creature
 // of a kind already in the party, or one the party had no room for and let no member go for, pays EXP instead
-// (bonusExp, given with the win). Timing: `now` is the host's ms clock (the same clock as the press times).
+// (bonusExp, given with the win). A boss with a pattern (Species.boss) roars on every third turn it acts, a hit on the
+// whole party that no parry or dodge stops, and after its twelfth such turn it is enraged: attack ×1.3 and the roar every
+// turn (web/docs/expedition-balance.md §10). A rare creature may run on its turn (§7). The win pays gold besides EXP.
+// Timing: `now` is the host's ms clock (the same clock as the press times).
 import { AVK } from '../keys';
 import type { Advantage, Press } from './field';
 import type { FieldEnemy } from './field';
 import type { Member, Run } from './run';
 import { PARTY_MAX, POTION_HEAL } from './run';
-import { SPECIES, type Move, type Species } from './species';
+import { RARE_GOLD } from './loot';
+import { RARE, SPECIES, type Move, type Species } from './species';
 
 export const PARRY_MS = 95, DODGE_MS = 160;
 /** a press that matches no hit locks defense out this long (no mashing) */
@@ -58,6 +62,12 @@ export interface BUnit {
   talks: number;
   /** recruited / left during the battle: off the field without being beaten */
   gone: boolean;
+  /** a rare creature (it may run on its turn), and it ran */
+  rare: boolean;
+  fled: boolean;
+  /** turns it has acted (a broken turn does not count): the boss's roar and enrage clock */
+  turns: number;
+  enraged: boolean;
 }
 
 export interface Skill {
@@ -132,14 +142,14 @@ let ids = 1;
 function fromMember(m: Member): BUnit {
   const sp = m.species === null ? null : SPECIES[m.species];
   return { id: ids++, side: 'party', name: m.name, species: m.species, sp, member: m, field: null, lv: m.lv, hp: m.hp, hpMax: m.hpMax,
-    atk: m.atk, def: m.def, spd: m.spd, ct: 0, brk: 0, brkMax: 1, broken: false, rapport: 0, mood: 0, talks: 0, gone: false };
+    atk: m.atk, def: m.def, spd: m.spd, ct: 0, brk: 0, brkMax: 1, broken: false, rapport: 0, mood: 0, talks: 0, gone: false, rare: false, fled: false, turns: 0, enraged: false };
 }
 
 function fromEnemy(e: FieldEnemy): BUnit {
   const sp = e.sp, s = e.stats ?? sp.stats;                       // zone-scaled (tests pass bare enemies)
   return { id: ids++, side: 'enemy', name: sp.name, species: e.species, sp, member: null, field: e, lv: s.lv,
     hp: Math.max(1, Math.round((s.hp * e.hp) / e.hpMax)), hpMax: s.hp, atk: s.atk, def: s.def, spd: s.spd, ct: 0,
-    brk: 0, brkMax: sp.field.breakMax, broken: false, rapport: 0, mood: 0, talks: 0, gone: false };
+    brk: 0, brkMax: sp.field.breakMax, broken: false, rapport: 0, mood: 0, talks: 0, gone: false, rare: !!e.rare, fled: false, turns: 0, enraged: false };
 }
 
 export class Battle {
@@ -168,6 +178,15 @@ export class Battle {
   levelUps: string[] = [];
   /** EXP won by talks that could not recruit, given with the win (or on fleeing) */
   bonusExp = 0;
+  /** damage the party takes ×this (the night, §8) and the gold of the win ×goldMul (set by the owner) */
+  takenMul = 1;
+  goldMul = 1;
+  /** gold of the win, and the rare creatures beaten in it (each drops a relic) */
+  gold = 0;
+  rares: BUnit[] = [];
+  /** the run log (§12.1): hits the party took, the damage its roars did */
+  hitsTaken = 0;
+  roarDmg = 0;
   readonly run: Run;
   private rnd: () => number;
   /** set by the owner: a talk begins with this enemy (negotiation runs outside) */
@@ -247,10 +266,14 @@ export class Battle {
   private win(): void {
     this.phase = 'won';
     this.t = 0;
-    this.exp = this.enemies.filter((e) => !e.gone).reduce((s, e) => s + ((e.field?.stats ?? e.sp?.stats)?.exp ?? 0), 0) + this.bonusExp;
+    const beaten = this.enemies.filter((e) => !e.gone);
+    this.exp = beaten.reduce((s, e) => s + ((e.field?.stats ?? e.sp?.stats)?.exp ?? 0), 0) + this.bonusExp;
+    this.gold = Math.round(beaten.reduce((s, e) => s + ((e.field?.stats ?? e.sp?.stats)?.gold ?? 0) * (e.rare ? RARE_GOLD : 1), 0) * this.goldMul);
+    this.rares = beaten.filter((e) => e.rare);
+    this.run.gold += this.gold;
     this.sync();
     this.levelUps = this.run.award(this.exp);
-    this.line = this.exp ? `승리! EXP +${this.exp}` : '적이 남지 않았다';
+    this.line = this.exp ? `승리! EXP +${this.exp}${this.gold ? ` · ${this.gold}G` : ''}` : '적이 남지 않았다';
   }
 
   /** the party's HP back into the run */
@@ -262,8 +285,19 @@ export class Battle {
 
   private damage(from: BUnit, to: BUnit, power: number): number {
     const base = from.atk * power * (0.9 + this.rnd() * 0.2) - to.def * 0.6;
-    return Math.max(1, Math.round(base * (to.broken ? 1.5 : 1)));
+    const k = to.side === 'party' ? this.takenMul * (1 - this.run.guard) : 1;
+    return Math.max(1, Math.round(base * (to.broken ? 1.5 : 1) * k));
   }
+
+  /** the boss's turns left before it is enraged, or null (no pattern, or already enraged) */
+  get enrageIn(): number | null {
+    const b = this.enemies.find((e) => e.sp?.boss && e.hp > 0);
+    if (!b || b.enraged) return null;
+    return Math.max(0, b.sp!.boss!.enrageAt - b.turns);
+  }
+
+  /** the boss is enraged */
+  get enraged(): boolean { return this.enemies.some((e) => e.enraged && e.hp > 0); }
 
   private hurt(to: BUnit, dmg: number, brk: number): void {
     to.hp = Math.max(0, to.hp - dmg);
@@ -412,9 +446,26 @@ export class Battle {
   now = 0;
 
   private startEnemy(u: BUnit): void {
-    const moves = u.sp!.moves;
+    const moves = u.sp!.moves, pat = u.sp!.boss;
+    u.turns++;
+    if (u.rare && this.rnd() < RARE.flee) {                         // a rare creature runs: no reward, gone from the field
+      u.gone = true;
+      u.fled = true;
+      this.pop(u, '도망', 'info');
+      this.line = `${u.name}이(가) 반짝이며 달아났다!`;
+      this.phase = 'next';
+      this.t = 0;
+      return;
+    }
+    let move: Move;
+    if (pat && u.turns > pat.enrageAt && !u.enraged) {
+      u.enraged = true;
+      u.atk = Math.round(u.atk * pat.enrageAtk);
+      this.pop(u, '광폭화', 'break');
+    }
+    if (pat && (u.enraged || u.turns % pat.roarEvery === 0)) move = u.enraged ? { ...pat.roar, power: pat.enragePow } : pat.roar;
     // a boss in the second half uses its heaviest move more often
-    const move = u.sp!.tier === 'boss' && u.hp < u.hpMax / 2 && this.rnd() < 0.4 ? moves[moves.length - 1] : moves[Math.floor(this.rnd() * moves.length)];
+    else move = u.sp!.tier === 'boss' && u.hp < u.hpMax / 2 && this.rnd() < 0.4 ? moves[moves.length - 1] : moves[Math.floor(this.rnd() * moves.length)];
     const live = this.liveParty;
     const target = live[Math.floor(this.rnd() * live.length)];
     const strikeAt = this.now + move.windup * 1000 + 500;           // a beat to read who is targeted, then the windup
@@ -427,13 +478,13 @@ export class Battle {
     this.enemyAct = { actor: u, move, target, strikeAt, hits, lockUntil: 0, whiff: null, endAt: Infinity, countered: false };
     this.phase = 'enemy';
     this.t = 0;
-    this.line = `${u.name}: ${move.name} → ${target.name}`;
+    this.line = move.roar ? `${u.name}: ${move.name}! 막을 수 없다` : `${u.name}: ${move.name} → ${target.name}`;
   }
 
   /** a defense key at time t (ms) */
   private defend(kind: 'parry' | 'dodge', t: number): void {
     const ea = this.enemyAct;
-    if (!ea || t < ea.lockUntil) return;
+    if (!ea || ea.move.roar || t < ea.lockUntil) return;
     const w = kind === 'parry' ? PARRY_MS : DODGE_MS;
     const h = ea.hits.find((x) => !x.result && t >= x.t - w && t <= x.t + w);
     if (h) {
@@ -459,12 +510,17 @@ export class Battle {
     for (const h of ea.hits) {
       if (h.result || this.now <= h.t + Math.max(PARRY_MS, DODGE_MS)) continue;
       h.result = 'hit';
-      this.hurt(ea.target, this.damage(ea.actor, ea.target, ea.move.power), 0);
-      if (ea.target.hp <= 0) { this.pop(ea.target, '쓰러짐', 'info'); }
+      for (const t of ea.move.roar ? this.liveParty : [ea.target]) {
+        const d = this.damage(ea.actor, t, ea.move.power);
+        this.hurt(t, d, 0);
+        this.hitsTaken++;
+        if (ea.move.roar) this.roarDmg += d;
+        if (t.hp <= 0) this.pop(t, '쓰러짐', 'info');
+      }
     }
     if (ea.endAt === Infinity && ea.hits.every((h) => h.result)) {
       ea.endAt = this.now + 450;
-      if (ea.hits.every((h) => h.result === 'parry') && ea.target.hp > 0) {
+      if (!ea.move.roar && ea.hits.every((h) => h.result === 'parry') && ea.target.hp > 0) {
         ea.countered = true;
         this.line = '완벽한 패링! 반격!';
         this.act = { actor: ea.target, kind: 'counter', targets: [ea.actor], t: 0, dur: 0.6, hitAt: 0.25, done: false };

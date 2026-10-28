@@ -6,6 +6,7 @@ import type { Cmf, MapObject } from '../../core/data/assets';
 import { VIEW_H, VIEW_W, type Drawable, type Equip } from '../../core/render';
 import { actorDepth, depthSort, objDepth, type DepthItem } from '../../core/world/world';
 import { EXIT_MARKER, objCmf, TILE, type Zone, type ZoneSets } from '../../core/expedition/zone';
+import { CHEST_FRAME } from '../../core/expedition/loot';
 import type { GameContext } from '../game/scene';
 import { DEFAULT_EQUIP, type SpriteLayer } from '../render/sprites';
 
@@ -53,8 +54,8 @@ export class WorldView {
     this.ctx.compositor.draw(V, this.cam, VIEW_W + 2 * pad, VIEW_H, undefined, false);
   }
 
-  /** index a zone and load everything it draws, plus the given sprites */
-  async prepare(zone: Zone, sets: ZoneSets, sprites: { name: string; cmf: Cmf; equip?: Equip }[]): Promise<void> {
+  /** index a zone and load everything it draws, plus the given sprites and single frames (the chests always) */
+  async prepare(zone: Zone, sets: ZoneSets, sprites: { name: string; cmf: Cmf; equip?: Equip }[], frames: { name: string; cmf: Cmf; ids: number[] }[] = []): Promise<void> {
     const m = zone.map, names: (string | null)[] = [`t${m.header.tileset}`, 'shadow'];
     this.cols = Math.ceil((m.header.width * TILE) / BUCKET);
     this.grid.clear();
@@ -71,6 +72,7 @@ export class WorldView {
       this.grid.set(L, g);
     }
     for (let i = 0; i < 8; i++) names.push(...this.V.frameImages('cmf_oc', sets.oc, EXIT_MARKER + i, m.header.zone, DEFAULT_EQUIP));
+    for (const f of [{ name: 'cmf_oc', cmf: sets.oc, ids: [...CHEST_FRAME] }, ...frames]) for (const id of f.ids) names.push(...this.V.frameImages(f.name, f.cmf, id, m.header.zone, DEFAULT_EQUIP));
     for (const s of sprites) names.push(...this.V.allImages(s.name, s.cmf, m.header.zone, s.equip ?? DEFAULT_EQUIP));
     await this.V.preload(names);
     this.zone = zone;

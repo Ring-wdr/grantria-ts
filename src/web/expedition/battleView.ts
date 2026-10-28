@@ -2,7 +2,9 @@
 // with a night shift), the party on the right facing left, the enemies on the left mirrored to face right (the
 // original side frames), then the DOM: order bar, enemy gauges, party panel, AP, the command menu, the closing rings
 // of an enemy's hits and the damage popups. A shot move (Move.shot) is fired from where the enemy stands: its projectile
-// (the species' field shot frame) reaches the target on each hit's time.
+// (the species' field shot frame) reaches the target on each hit's time. The boss's 왕의 포효 cannot be defended: no
+// closing ring, a red flash over the whole party instead; its tag counts down to the enrage. Rare creatures and shiny
+// recruits sparkle (cmf_status 0x5d..0x63). At night the backdrop is darker still.
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { ALL_OUT, AP_MAX, BK, DODGE_MS, PARRY_MS, type Battle, type BUnit } from '../../core/expedition/battle';
@@ -88,12 +90,23 @@ export class BattleView {
     return { cmfName: name, cmf, frame: rec.frames[k] ?? 0, x, y, mirror: u.side === 'enemy', shadow: true, fx };
   }
 
-  draw(b: Battle, f: FieldSim, talk: Talk | null = null): void {
-    setDayShift(14, 30, 12);                                     // subtracted from the colour: about 45% darker
+  /** the sparkle over a rare creature or a shiny recruit */
+  private sparkles(b: Battle): Drawable[] {
+    const cmf = this.cmfs.get('cmf_status');
+    if (!cmf) return [];
+    return b.units.filter((u) => !u.gone && u.hp > 0 && (u.rare || u.member?.shiny)).map((u) => {
+      const [x, y] = this.pos(b, u);
+      return { cmfName: 'cmf_status', cmf, frame: 0x5d + (Math.floor(b.t * 10 + u.id) % 7), x, y: y - 16 };
+    });
+  }
+
+  /** dark 0..1: the night (§8) darkens the backdrop further */
+  draw(b: Battle, f: FieldSim, talk: Talk | null = null, dark = 0): void {
+    setDayShift(Math.round(14 + 8 * dark), Math.round(30 + 14 * dark), Math.round(12 + 2 * dark));   // subtracted: about 45% darker by day
     this.world.render(f.camX, f.camY, []);
     setDayShift(0, 0, 0);
     const ents = b.units.map((u) => this.sprite(b, u)).filter((d): d is Drawable => !!d).sort((p, q) => p.y - q.y);
-    this.world.overlay([...ents, ...this.shots(b)]);
+    this.world.overlay([...ents, ...this.shots(b), ...this.sparkles(b)]);
     this.ctx.compositor.show();
     const u = this.ctx.ui;
     u.view('ex-battle', 0, 0, 480, 320, this.tree(b, talk));
@@ -156,9 +169,11 @@ export class BattleView {
     b.enemies.forEach((e) => {
       if (e.gone || e.hp <= 0) return;
       const [x, y] = this.pos(b, e);
+      const ein = e.sp?.boss ? b.enrageIn : null;
       kids.push(h('div.v-col.exb-tag', { style: `left:${x - 34}px;top:${y - 66}px` },
-        h('div.exb-name', null, `${e.name}${e.broken ? ' · BREAK' : ''}`),
-        this.bar('hp', e.hp / e.hpMax), this.bar(`brk${e.broken ? '.full' : ''}`, e.brk / e.brkMax)));
+        h('div.exb-name', null, `${e.rare ? '빛나는 ' : ''}${e.name}${e.broken ? ' · BREAK' : ''}`),
+        this.bar('hp', e.hp / e.hpMax), this.bar(`brk${e.broken ? '.full' : ''}`, e.brk / e.brkMax),
+        e.enraged ? h('div.exb-enrage.on', null, '광폭화!') : ein !== null ? h('div.exb-enrage', null, `광폭화까지 ${ein}턴`) : null));
     });
     // target cursor
     if (b.phase === 'command' && b.menu === 'target') {
@@ -182,6 +197,7 @@ export class BattleView {
     if (talk) kids.push(this.talkTree(talk));
     if (b.phase === 'intro') kids.push(h('div.exb-intro', null, b.line));
     if (b.phase === 'won') kids.push(h('div.v-col.exb-result', null, h('div.exb-result-t', null, b.exp ? '승리!' : '전투 종료'), b.exp ? h('div', null, `EXP +${b.exp}`) : null,
+      b.gold ? h('div.exb-gold', null, `골드 +${b.gold}G`) : null,
       b.levelUps.map((l) => h('div.exb-lvup', null, l)), h('div.exb-cont', { on: () => [0x35] }, `${this.glyph([0x35])} 계속`)));
     if (b.phase === 'lost') kids.push(h('div.v-col.exb-result.lost', null, h('div.exb-result-t', null, '전멸...'), h('div.exb-cont', { on: () => [0x35] }, `${this.glyph([0x35])} 계속`)));
     return h('div.v-fill.exb', null, ...kids);
@@ -241,6 +257,12 @@ export class BattleView {
     const ea = b.enemyAct!, out: VNode[] = [];
     const [x, y] = this.pos0(b, ea.target), now = b.now;
     const next = ea.hits.find((hh) => !hh.result);
+    if (ea.move.roar) {                                              // no ring: nothing defends against it
+      const k = next ? Math.max(0, Math.min(1, 1 - (next.t - now) / Math.max(600, ea.move.windup * 1000))) : 1;
+      out.push(h('div.exb-roar', { style: `opacity:${(0.25 + 0.55 * k).toFixed(2)}` }));
+      out.push(h('div.exb-roar-t', null, `${ea.move.name}: 막을 수 없다!`));
+      return out;
+    }
     if (next) {
       const span = Math.max(600, ea.move.windup * 1000), k = Math.max(0, (next.t - now) / span);
       const r = 14 + k * 46, good = Math.abs(next.t - now) <= PARRY_MS;

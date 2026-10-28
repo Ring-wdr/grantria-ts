@@ -16,6 +16,7 @@
 import type { Assets, Cmf, GameMap, MapObject } from '../data/assets';
 import { bodyBox, buildWalk } from '../world/world';
 import { Rng } from './rng';
+import { CHEST_DEPTH, chestRoll, type ChestKind } from './loot';
 import { buildAdjacency, fill, type Adjacency } from './synth';
 
 export const TILE = 16;
@@ -44,7 +45,12 @@ export interface Spawn {
   y: number;
   /** stage-1 species index (species.ts) */
   species: number;
+  /** the zone's rare creature: alone, sparkling, it runs (web/docs/expedition-balance.md §7) */
+  rare?: boolean;
 }
+
+/** a treasure chest (center of its cell) */
+export interface ZoneChest { x: number; y: number; kind: ChestKind }
 
 export interface Zone {
   kind: ZoneKind;
@@ -59,6 +65,8 @@ export interface Zone {
   /** a battle zone's open middle (the bare ground far from everything once grown): its cells, and how many of them
    *  are now something other than walkable grass (rises, ponds and their edges) */
   middle?: { cells: number; terrain: number };
+  /** a battle zone's chests, in tucked-away spots off the way through (§6.2) */
+  chests?: ZoneChest[];
 }
 
 /** the zone objects (cmf_o3) and the common ones (cmf_oc) for the walk stamping and the drawing */
@@ -686,6 +694,58 @@ export interface BattleZoneOpts {
   species: number[];
   /** a template map to grow (one of the kind's templates by the seed otherwise) */
   template?: number;
+  /** the battle zone's number (1..3): its chests are rolled for it */
+  zoneNo?: number;
+  /** the chance of a rare creature */
+  rare?: number;
+}
+
+/** walk steps from (c, r) over the reached cells (-1: not reached) */
+export function walkDist(seen: Uint8Array, W: number, H: number, c: number, r: number): Int32Array {
+  const d = new Int32Array(W * H).fill(-1), q = new Int32Array(W * H);
+  let head = 0, tail = 0;
+  if (c < 0 || r < 0 || c >= W || r >= H || !seen[r * W + c]) return d;
+  d[r * W + c] = 0; q[tail++] = r * W + c;
+  while (head < tail) {
+    const i = q[head++], x = i % W;
+    for (const j of [x + 1 < W ? i + 1 : -1, x > 0 ? i - 1 : -1, i + W < W * H ? i + W : -1, i - W]) {
+      if (j < 0 || !seen[j] || d[j] >= 0) continue;
+      d[j] = d[i] + 1;
+      q[tail++] = j;
+    }
+  }
+  return d;
+}
+
+/** chests stay this far (tiles) from the start, the exit, the groups and each other */
+const CHEST_GAP = 12, CHEST_APART = 25;
+
+/** the chests of a battle zone (§6.2): each kind wants cells at least CHEST_DEPTH off the shortest way through (half the
+ *  extra walk a visit costs), and of those the most tucked-away (fewest open cells around) are preferred */
+function placeChests(seen: Uint8Array, W: number, H: number, start: [number, number], exit: [number, number], taken: [number, number][], kinds: ChestKind[], rng: Rng): ZoneChest[] {
+  const dS = walkDist(seen, W, H, start[0], start[1]), dE = walkDist(seen, W, H, exit[0], exit[1]), L = dS[exit[1] * W + exit[0]];
+  const out: ZoneChest[] = [], at: [number, number][] = [];
+  if (L < 0) return out;
+  const open = (c: number, r: number) => c >= 0 && r >= 0 && c < W && r < H && seen[r * W + c] === 1;
+  for (const kind of kinds) {
+    const cands: [number, number][] = [];
+    for (let i = 0; i < W * H; i++) {
+      if (dS[i] < 0 || dE[i] < 0 || (dS[i] + dE[i] - L) / 2 < CHEST_DEPTH[kind]) continue;
+      const c = i % W, r = (i / W) | 0;
+      if (!open(c + 1, r) || !open(c, r + 1)) continue;
+      if (taken.some(([tc, tr]) => (tc - c) ** 2 + (tr - r) ** 2 < CHEST_GAP ** 2) || at.some(([tc, tr]) => (tc - c) ** 2 + (tr - r) ** 2 < CHEST_APART ** 2)) continue;
+      let n = 0;
+      for (let y = r - 3; y <= r + 3; y++) for (let x = c - 3; x <= c + 3; x++) if (open(x, y)) n++;
+      cands.push([i, n]);
+    }
+    if (!cands.length) continue;
+    cands.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+    const [i] = cands[rng.int(0, Math.min(cands.length, Math.max(12, Math.round(cands.length * 0.15))) - 1)];
+    const c = i % W, r = (i / W) | 0;
+    at.push([c, r]);
+    out.push({ x: c * TILE + 8, y: r * TILE + 8, kind });
+  }
+  return out;
 }
 
 /** a battle zone (or a rest clearing with groups = 0) */
@@ -738,7 +798,18 @@ export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 
     spawns.push({ x: c * TILE + 8, y: r * TILE + 8, species: rng.pick(o.species) });
     g2++;
   }
-  return { kind, map, walk, start: { x: start[0] * TILE + 8, y: start[1] * TILE + 8 }, exit: { x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 }, spawns, template: id, middle };
+  // the rare creature: one more spot, well away from the start
+  if (kind === 'battle' && o.species.length && rng.chance(o.rare ?? 0)) {
+    for (let tries = 0; tries < 4000; tries++) {
+      const c = rng.int(2, W - 3), r = rng.int(2, H - 3);
+      if (!openCell(seen, W, H, c, r) || (c - start[0]) ** 2 + (r - start[1]) ** 2 < 40 * 40 || taken.some(([tc, tr]) => (tc - c) ** 2 + (tr - r) ** 2 < 16 * 16)) continue;
+      taken.push([c, r]);
+      spawns.push({ x: c * TILE + 8, y: r * TILE + 8, species: rng.pick(o.species), rare: true });
+      break;
+    }
+  }
+  const chests = kind === 'battle' && o.zoneNo ? placeChests(seen, W, H, start, exit, taken, chestRoll(o.zoneNo, rng), rng) : undefined;
+  return { kind, map, walk, start: { x: start[0] * TILE + 8, y: start[1] * TILE + 8 }, exit: { x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 }, spawns, template: id, middle, chests };
 }
 
 /** the boss room: m124 as it is, entered from its south passage, the boss where the original places it */

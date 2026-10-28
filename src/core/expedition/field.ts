@@ -9,10 +9,14 @@
 // broken (stunned) enemy starts a battle with the party first. A ranged creature (Species.field.shot) keeps its distance
 // and fires its own projectile instead: parried, the shot flies back and breaks what it meets like a parried lunge; a
 // dodge's i-frames let it pass; a shot that lands starts the battle like a lunge.
+// A battle zone may hold a rare creature (web/docs/expedition-balance.md §7): it sparkles, runs from the hero in bursts
+// (a breath between them is the chance to catch it), lunges once when cornered, and is gone 40 s after it was first
+// seen; broken, it can be engaged like any. Chests (§6) open with 상호작용, and at night the dark merchant (§9) stands
+// somewhere 20..35 steps from where the hero was.
 import { AVK } from '../keys';
 import type { InputState } from '../input';
-import { TILE, type Zone } from './zone';
-import { SPECIES, animRec, zoneStats, type Shot, type Species } from './species';
+import { TILE, walkDist, type Zone, type ZoneChest } from './zone';
+import { RARE, SPECIES, animRec, rareStats, zoneStats, type Shot, type Species } from './species';
 
 /** sprite directions as the original numbers them: left, right, up, down */
 export type Dir = 0 | 1 | 2 | 3;
@@ -180,7 +184,11 @@ export class Hero {
   }
 }
 
-export type EState = 'idle' | 'wander' | 'notice' | 'chase' | 'windup' | 'lunge' | 'recover' | 'flinch' | 'stunned' | 'dead' | 'cooldown' | 'return';
+export type EState = 'idle' | 'wander' | 'notice' | 'chase' | 'windup' | 'lunge' | 'recover' | 'flinch' | 'stunned' | 'dead' | 'cooldown' | 'return' | 'flee';
+
+/** the rare creature runs this much faster than the hero for `run` s, then stops for `rest` s; it is gone `vanish` s
+ *  after it was first seen, and lunges once when it has been stuck `stuck` s close to the hero */
+export const RARE_RUN = { speed: 1.1, run: 2.5, rest: 1.0, vanish: 40, stuck: 0.5 } as const;
 
 let nextId = 1;
 
@@ -223,25 +231,35 @@ export class FieldEnemy {
 
   /** the species' stats at this zone's power */
   readonly stats: Species['stats'];
+  /** the zone's rare creature (§7) */
+  readonly rare: boolean;
+  /** when the hero first made it run (s, sim time) */
+  seenAt: number | null = null;
+  /** it has lunged from a corner (once); how long it has been stuck */
+  cornered = false;
+  private stuckT = 0;
 
-  constructor(species: number, x: number, y: number, sim: FieldSim) {
+  constructor(species: number, x: number, y: number, sim: FieldSim, rare = false) {
     this.species = species;
     this.sim = sim;
     this.sp = SPECIES[species];
+    this.rare = rare;
     this.x = this.homeX = x;
     this.y = this.homeY = y;
     this.angle = sim.rng() * Math.PI * 2;
     this.dir = dirOf(this.angle, 3);
-    this.stats = zoneStats(this.sp.stats, sim.power);
+    this.stats = rare ? rareStats(zoneStats(this.sp.stats, sim.power)) : zoneStats(this.sp.stats, sim.power);
     this.hp = this.hpMax = this.stats.hp;
-    this.brkMax = this.sp.field.breakMax;
+    this.brkMax = Math.round(this.sp.field.breakMax * (rare ? RARE.brk : 1));
     this.rest = 1 + sim.rng() * 2;
     this.pickWander();
   }
 
   get alive(): boolean { return this.state !== 'dead' && !this.removed; }
   get stunned(): boolean { return this.state === 'stunned'; }
-  get killable(): boolean { return this.sp.tier === 'weak' && !this.sp.field.noKill; }
+  get killable(): boolean { return this.sp.tier === 'weak' && !this.sp.field.noKill && !this.rare; }
+  /** after a lunge, a flinch or a stun: back to the hunt, or (a rare one) to running */
+  private get onward(): EState { return this.rare ? 'flee' : 'chase'; }
   get radius(): number { return this.sp.field.radius; }
   /** this attack's windup and lunge (a pounce winds up longer and leaps further) */
   get windupT(): number { return this.sp.field.windup * (this.pounce ? 1.7 : 1); }
@@ -275,6 +293,11 @@ export class FieldEnemy {
     let speed = 0;
     if (this.state !== 'stunned' && sim.time - this.lastHit > 3.5) this.brk = Math.max(0, this.brk - dt * this.brkMax * 0.12);
     const reach = 26 + this.radius;
+    if (this.rare && this.seenAt !== null && sim.time - this.seenAt > RARE_RUN.vanish && this.state !== 'stunned' && sim.controls) {
+      this.removed = true;
+      sim.emit({ kind: 'vanish', enemy: this });
+      return;
+    }
     switch (this.state) {
       case 'idle':
       case 'wander':
@@ -283,8 +306,24 @@ export class FieldEnemy {
           const wd = Math.hypot(this.wx - this.x, this.wy - this.y);
           if (wd < 4 || this.t > 6) { this.pickWander(); this.set('idle'); } else { this.turnTo(Math.atan2(this.wy - this.y, this.wx - this.x), 4, dt); speed = f.speed * 0.4; }
         }
-        if (dist < f.detect && sim.controls && h.invuln <= 0) { this.set('notice'); sim.emit({ kind: 'notice', enemy: this }); }
+        if (this.rare ? dist < f.detect * 1.2 && sim.controls : dist < f.detect && sim.controls && h.invuln <= 0) {
+          if (this.rare) { this.seenAt ??= sim.time; this.set('flee'); } else this.set('notice');
+          sim.emit({ kind: 'notice', enemy: this });
+        }
         break;
+      case 'flee': {
+        const k = this.t % (RARE_RUN.run + RARE_RUN.rest);
+        if (k >= RARE_RUN.run || !sim.controls) { this.turnTo(toH, 6, dt); this.stuckT = 0; break; }    // a breath: the chance
+        // away from the hero; of a few headings around that, the first with room ahead
+        const away = toH + Math.PI, look = 22;
+        const a = [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8].map((o) => away + o).find((x) => sim.ground.fits(this.x + Math.cos(x) * look, this.y + Math.sin(x) * look, this.radius * 0.8)) ?? away;
+        this.turnTo(a, 10, dt);
+        const v = HERO_SPEED * RARE_RUN.speed * dt, went = sim.ground.move(this, Math.cos(this.angle) * v, Math.sin(this.angle) * v, this.radius * 0.8);
+        this.moving = went > 0.2 * v;
+        this.stuckT = this.moving ? 0 : this.stuckT + dt;
+        if (this.stuckT > RARE_RUN.stuck && !this.cornered && dist < reach * 2.5) { this.cornered = true; this.pounce = false; this.shooting = false; this.set('windup'); }
+        return;
+      }
       case 'notice':
         this.turnTo(toH, 10, dt);
         if (this.t > 0.45) this.set('chase');
@@ -320,13 +359,13 @@ export class FieldEnemy {
         break;
       }
       case 'recover':
-        if (this.t > (this.shooting ? 1.3 : 1.0)) this.set('chase');
+        if (this.t > (this.shooting ? 1.3 : 1.0)) this.set(this.onward);
         break;
       case 'flinch':
-        if (this.t > 0.45) this.set('chase');
+        if (this.t > 0.45) this.set(this.onward);
         break;
       case 'stunned':
-        if (this.t > 6) { this.brk = 0; this.set('chase'); }
+        if (this.t > 6) { this.brk = 0; this.set(this.onward); }
         break;
       case 'cooldown':
         if (this.t > 4) this.set('return');
@@ -362,7 +401,10 @@ export class FieldEnemy {
       this.set('flinch');
       const a = Math.atan2(this.y - sim.hero.y, this.x - sim.hero.x), k = heavy ? 18 : 7;
       sim.ground.move(this, Math.cos(a) * k, Math.sin(a) * k, this.radius * 0.8);
-    } else if (this.state === 'idle' || this.state === 'wander' || this.state === 'return') this.set('chase');
+    } else if (this.state === 'idle' || this.state === 'wander' || this.state === 'return') {
+      if (this.rare) this.seenAt ??= sim.time;
+      this.set(this.onward);
+    }
     return true;
   }
 
@@ -420,7 +462,16 @@ export type FieldEvent =
   | { kind: 'hit'; x: number; y: number; heavy: boolean }
   | { kind: 'parry'; x: number; y: number }
   | { kind: 'sfx'; id: number }
+  | { kind: 'chest'; chest: FieldChest }
+  | { kind: 'shop' }
+  | { kind: 'vanish'; enemy: FieldEnemy }
   | { kind: 'exit' };
+
+/** a chest of the zone: once opened it fades (t counts from the opening) */
+export interface FieldChest extends ZoneChest { opened: boolean; t: number }
+
+/** the dark merchant stands this many walk steps (tiles) from where the hero was when night fell (§9) */
+export const MERCHANT_STEPS = [20, 35] as const;
 
 /** One zone being played: the hero on its ground, the enemies, the camera following. */
 export class FieldSim {
@@ -436,6 +487,9 @@ export class FieldSim {
   controls = true;
   /** what happened since the owner last took them */
   events: FieldEvent[] = [];
+  chests: FieldChest[];
+  /** the dark merchant's spot (map px), once night has fallen */
+  merchant: { x: number; y: number } | null = null;
   readonly zone: Zone;
   private seed: number;
 
@@ -449,9 +503,10 @@ export class FieldSim {
     this.ground = new Ground(zone);
     this.hero = new Hero(zone.start.x, zone.start.y);
     this.hero.face(zone.kind === 'boss' ? -Math.PI / 2 : 0);
+    this.chests = (zone.chests ?? []).map((c) => ({ ...c, opened: false, t: 0 }));
     for (const s of zone.spawns) {
-      this.enemies.push(new FieldEnemy(s.species, s.x, s.y, this));
-      if (SPECIES[s.species].tier === 'boss') continue;
+      this.enemies.push(new FieldEnemy(s.species, s.x, s.y, this, !!s.rare));
+      if (SPECIES[s.species].tier === 'boss' || s.rare) continue;
       const n = Math.floor(this.rng() * 2.4);                       // a pack: up to two more of the kind nearby
       for (let i = 0; i < n; i++) {
         const a = this.rng() * Math.PI * 2, x = s.x + Math.cos(a) * 30, y = s.y + Math.sin(a) * 30;
@@ -529,6 +584,7 @@ export class FieldSim {
         break;
     }
     for (const e of this.enemies) e.update(dt);
+    for (const c of this.chests) if (c.opened) c.t += dt;
     for (const s of this.shots) this.fly(s, dt);
     this.shots = this.shots.filter((s) => !s.gone);
     // walking into a broken enemy: the party strikes first (swinging at it instead can still finish a weak one)
@@ -569,12 +625,42 @@ export class FieldSim {
     h.moving = false;
   }
 
-  /** 상호작용: a broken enemy close by is engaged with the party first; the exit stone leaves the zone */
+  /** 상호작용: a broken enemy close by is engaged with the party first; then a chest, the merchant, the exit stone */
   private interact(): void {
     const h = this.hero;
     const e = this.enemies.find((x) => x.stunned && x.alive && Math.hypot(x.x - h.x, x.y - h.y) < 44);
     if (e) { this.startBattle(e, 'party'); return; }
+    const c = this.nearChest();
+    if (c) { c.opened = true; this.emit({ kind: 'chest', chest: c }); this.emit({ kind: 'sfx', id: 39 }); return; }
+    if (this.nearMerchant()) { this.emit({ kind: 'shop' }); return; }
     if (this.nearExit() && this.zone.kind !== 'boss') this.emit({ kind: 'exit' });
+  }
+
+  /** an unopened chest within reach */
+  nearChest(): FieldChest | null {
+    const h = this.hero;
+    return this.chests.find((c) => !c.opened && Math.hypot(c.x - h.x, c.y - h.y) < 28) ?? null;
+  }
+
+  nearMerchant(): boolean {
+    const m = this.merchant, h = this.hero;
+    return !!m && Math.hypot(m.x - h.x, m.y - h.y) < 30;
+  }
+
+  /** night fell: the merchant takes a spot MERCHANT_STEPS walk steps from the hero (the farthest reached, if none is) */
+  placeMerchant(): { x: number; y: number } {
+    const W = this.ground.W, H = this.ground.H, h = this.hero, c0 = Math.floor(h.x / TILE), r0 = Math.floor(h.y / TILE);
+    const d = walkDist(this.zone.walk, W, H, c0, r0), ok: number[] = [];
+    let far = r0 * W + c0;
+    for (let i = 0; i < W * H; i++) {
+      if (d[i] < 0) continue;
+      if (d[i] > d[far]) far = i;
+      const c = i % W, r = (i / W) | 0;
+      if (d[i] >= MERCHANT_STEPS[0] && d[i] <= MERCHANT_STEPS[1] && this.ground.open(c + 1, r) && this.ground.open(c - 1, r) && this.ground.open(c, r + 1)) ok.push(i);
+    }
+    const i = ok.length ? ok[Math.floor(this.rng() * ok.length)] : far;
+    this.merchant = { x: (i % W) * TILE + 8, y: ((i / W) | 0) * TILE + 8 };
+    return this.merchant;
   }
 
   /** on or next to the exit stone (a 64 × 48 slab anchored at its top-left) */
@@ -587,6 +673,8 @@ export class FieldSim {
   actHint(): string | null {
     const h = this.hero;
     if (this.enemies.some((x) => x.stunned && x.alive && Math.hypot(x.x - h.x, x.y - h.y) < 44)) return '선제 공격';
+    if (this.nearChest()) return '상자 열기';
+    if (this.nearMerchant()) return '암흑상인과 거래';
     if (this.nearExit() && this.zone.kind !== 'boss') return '다음 지역으로';
     return null;
   }
@@ -685,10 +773,10 @@ export class FieldSim {
     this.controls = false;
     this.shots = [];
     const group = [e];
-    if (e.sp.tier !== 'boss') {
+    if (e.sp.tier !== 'boss' && !e.rare) {
       for (const o of this.enemies) {
         if (group.length >= 3) break;
-        if (o !== e && o.alive && o.sp.tier !== 'boss' && o.state !== 'cooldown' && Math.hypot(o.x - e.x, o.y - e.y) < 110) group.push(o);
+        if (o !== e && o.alive && o.sp.tier !== 'boss' && !o.rare && o.state !== 'cooldown' && Math.hypot(o.x - e.x, o.y - e.y) < 110) group.push(o);
       }
     }
     this.emit({ kind: 'battle', enemies: group, advantage });

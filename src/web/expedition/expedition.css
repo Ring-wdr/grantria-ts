@@ -137,6 +137,29 @@
 .ex-line { font-size: 10px; color: #d8dde8; padding: 1px 6px; }
 .ex-stats { gap: 2px; align-items: center; font-size: 10px; color: #e6efff; margin: 6px 0; }
 .ex-go { gap: 5px; align-items: center; justify-content: center; }
-.ex-reward { gap: 1px; padding: 3px 8px; }
-.ex-reward-name { font-size: 10px; color: #ffe9a8; }
-.ex-reward-desc { font-size: 8px; color: #b8c2d8; }
+
+/* gold, relics, chests, the night and the dark merchant (web/docs/expedition-balance.md) */
+.ex-gold { color: #ffd34a; }
+.ex-clock { color: #ffe9a8; }
+.ex-clock.dusk { color: #ffb070; }
+.ex-clock.night { color: #a8b8ff; }
+.ex-npc { position: absolute; text-align: center; color: #d6b3ff; font-size: 9px; text-shadow: 0 0 2px #000, 0 0 2px #000; white-space: nowrap; }
+.ex-npc-arrow { position: absolute; color: #d6b3ff; font-size: 13px; line-height: 16px; text-align: center; transform: rotate(var(--a)); text-shadow: 0 0 3px #000; }
+.ex-shop { width: 300px; }
+.ex-ware { gap: 1px; padding: 3px 8px; }
+.ex-ware-top { gap: 8px; }
+.ex-ware-name { flex: 1; font-size: 10px; color: #e6efff; }
+.ex-ware-price { font-size: 10px; color: #ffd34a; }
+.ex-ware-desc { font-size: 8px; color: #b8c2d8; }
+.ex-item.off .ex-ware-name, .ex-item.off .ex-ware-price { color: #6b7590; }
+.ex-ware-name.g1 { color: #7dd3ff; }
+.ex-ware-name.g2 { color: #ffe066; }
+.ex-ware-name.g3 { color: #d08cff; }
+.ex-ware-name.g4 { color: #ff9a3c; }
+.ex-relic { gap: 0; padding: 1px 6px; }
+.exb-gold { color: #ffd34a; }
+.exb-enrage { color: #ffb070; font-size: 8px; text-shadow: 0 0 2px #000, 0 0 2px #000; white-space: nowrap; }
+.exb-enrage.on { color: #ff5a4a; font-weight: bold; }
+.exb-roar { position: absolute; left: 230px; top: 150px; width: 150px; height: 130px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 50, 30, 0.75), rgba(255, 50, 30, 0)); }
+.exb-roar-t { position: absolute; left: 0; right: 0; top: 40px; text-align: center; font-size: 12px; color: #ff6a50; text-shadow: 0 0 3px #000, 0 0 3px #000; }

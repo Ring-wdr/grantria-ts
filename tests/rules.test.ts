@@ -28,7 +28,7 @@ test('monster stats (game-rules.md §3.5)', () => {
 });
 
 test('level 1 max HP/MP without equipment (game-rules.md §1.4)', () => {
-  const base = (cls: 0 | 1 | 2, stats: number[]) => derive({ cls, level: 1, stats, weapon: null });
+  const base = (cls: 0 | 1 | 2, stats: number[]) => derive({ cls, level: 1, stats });
   assert.deepEqual([base(0, [5, 5, 3, 3]).maxHp, base(0, [5, 5, 3, 3]).maxMp], [140, 20]);
   assert.deepEqual([base(1, [3, 3, 3, 7]).maxHp, base(1, [3, 3, 3, 7]).maxMp], [134, 40]);
   assert.deepEqual([base(2, [7, 1, 5, 3]).maxHp, base(2, [7, 1, 5, 3]).maxMp], [170, 20]);
@@ -45,7 +45,7 @@ test('rng stays in range and is reproducible with a fixed clock', () => {
 });
 
 test('starting club gives ATK 30 at level 1 (game-rules.md §1.5)', () => {
-  assert.equal(derive({ cls: 0, level: 1, stats: [5, 5, 3, 3], weapon: { base: 29, enh: 0 } }).atk, 30);
+  assert.equal(derive({ cls: 0, level: 1, stats: [5, 5, 3, 3], equip: [{ type: 0, sub: 0, grade: 0, base: 29, enh: 0, count: 0, reqLevel: 1, sockets: [], options: [] }] }).atk, 30);
 });
 
 test('player basic hit vs Lv8 monster: scale 80%, +-10% spread', () => {

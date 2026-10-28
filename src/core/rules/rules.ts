@@ -126,8 +126,6 @@ export interface PlayerModel {
   stats: number[];          // S0..S3 including distributed points
   /** learned skill levels: 0..8 actives (tab order), 9..15 passives */
   skills?: number[];
-  /** legacy shortcut used by tests: a weapon without options */
-  weapon?: { base: number; enh: number } | null;
   equip?: (EquipLike | null)[];
   /** title bonuses {stat, value}: worn title [2], other owned titles [3] (account.md §3.1) */
   titles?: { stat: number; v: number }[];
@@ -179,7 +177,7 @@ export function derive(p: PlayerModel, tables?: EquipTables): Derived {
     if (stat >= 6 && stat <= 9) D[stat] += v;
     else if (stat === 0xff) for (let k = 6; k <= 9; k++) D[k] += v;
   }
-  const equip = p.equip ?? [p.weapon ? { type: p.cls, sub: 0, grade: 0, base: p.weapon.base, enh: p.weapon.enh, count: 0, reqLevel: 1, sockets: [], options: [] } : null];
+  const equip = p.equip ?? [];
   const setCode = [0, 0, 0, 0, 0, 0];
   for (let slot = 0; slot < 6; slot++) {
     const it = equip[slot];

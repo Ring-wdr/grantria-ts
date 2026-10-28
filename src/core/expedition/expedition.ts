@@ -8,7 +8,7 @@
 // either put on or thrown away), chests hold gold, potions and equipment, a battle zone may hold a rare creature, and a battle zone grows dark the longer the party stays (§8): at night the
 // party takes ×1.2 damage, gold is ×1.3 and the dark merchant appears (§9). Leaving a battle zone by its exit stone heals
 // 60% and shows what the zone gave; a rest zone heals fully. Beating the boss clears the stage; a party wipe ends the
-// run. Either way it is back to the title: nothing is kept (the host gets the run log, §12.1).
+// run. Each zone has its BGM (REST_BGM, BOSS_BGM). Either way it is back to the title: nothing is kept (the host gets the run log, §12.1).
 // State and keys; the host draws it (web/expedition/expedition.ts) and steps it every animation frame (frame()).
 // Plain fields, no constructor parameter properties: node's type stripping loads core/ in tests.
 import { AVK } from '../keys';
@@ -44,6 +44,10 @@ export interface GearOffer { gear: Gear; from: string }
 /** the zone heal on leaving a battle zone */
 export const EXIT_HEAL = 0.6;
 export const BATTLE_ZONES = 3;
+
+/** BGM (0-based, s0..s18; the music room's track N is BGM N − 1): a battle zone plays its template map's own (stage 1's
+ *  t3 maps: 4 = track 5), a rest zone track 17, the boss battle track 13 (0x0c, the original's boss and danger BGM) */
+export const REST_BGM = 16, BOSS_BGM = 12;
 
 /** a battle zone's clock (s of its own time, field and battle): dusk, then night (§8). It runs CLOCK_SPEED times
  *  real time: a zone is crossed well within five real minutes, so night (6:00) falls after 2:24 played */
@@ -191,6 +195,7 @@ export class ExpeditionLogic {
     await this.onZone(zone);
     this.zone = zone;
     this.field = new FieldSim(zone, seed ^ 0x5bd1e995, kind === 'battle' ? this.battleNo - 1 : 0);
+    this.ctx.audio.playBgm(kind === 'rest' ? REST_BGM : zone.map.header.bgm);
     this.mode = 'field';
     this.toasts = [];
     this.clock = 0;
@@ -433,7 +438,7 @@ export class ExpeditionLogic {
     this.battle.goldMul = this.goldMul;
     this.battle.onTalk = (talker, enemy) => this.onTalk(talker, enemy);
     if (this.zlog) this.zlog.battles[enc.advantage]++;
-    if (this.battle.isBoss) this.parriesAtBoss = this.run.parries;
+    if (this.battle.isBoss) { this.parriesAtBoss = this.run.parries; this.ctx.audio.playBgm(BOSS_BGM); }
     this.mode = 'battle';
     this.onBattle(this.battle);
   }

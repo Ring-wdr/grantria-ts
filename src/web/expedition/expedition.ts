@@ -17,7 +17,7 @@ import { ctrlAt } from '../input/touchLayout';
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { bodyBox } from '../../core/world/world';
-import { ADVANTAGE_LABEL, ExpeditionLogic, NIGHT_AT, PAUSE_ITEMS } from '../../core/expedition/expedition';
+import { ADVANTAGE_LABEL, CLOCK_SPEED, ExpeditionLogic, NIGHT_AT, PAUSE_ITEMS } from '../../core/expedition/expedition';
 import { CHEST_FRAME, GRADE_NAME, relicDesc } from '../../core/expedition/loot';
 import { DEFAULT_EQUIP, setDayShift, type SpriteLayer } from '../render/sprites';
 import { FK, type FieldEnemy, type Press } from '../../core/expedition/field';
@@ -35,6 +35,8 @@ const SPARKLE = 0x5d;
 const MERCHANT_ACTOR = 0x9e;
 /** the field's colour shift at full night (subtracted, bluish) */
 const NIGHT_SHIFT: [number, number, number] = [12, 26, 6];
+/** sprites farther than this (px) outside the view are not drawn (the boss and the trees reach about this far) */
+const CULL = 96;
 
 /** the mode's touch buttons (virtual px, right side; edge 1 moves them out with Input.edge) */
 const TOUCH: { key: number; label: string; x: number; y: number; r: number }[] = [
@@ -192,35 +194,43 @@ export class ExpeditionScene extends ExpeditionLogic {
     for (const [dx, dy, k] of [[-8, -10, 0], [7, -22, 2], [2, -4, 4]]) V.frame('cmf_status', cmf, SPARKLE + (Math.floor(t * 10 + k) % 7), Math.round(x + dx), Math.round(y + dy), z, DEFAULT_EQUIP);
   }
 
+  /** a point (map px) is near enough the view (and its fullscreen margins) to be drawn: a battle zone has dozens of
+   *  creatures, chests and shots, and drawing the unseen ones made it far slower than a rest zone */
+  private inView(x: number, y: number): boolean {
+    const f = this.field!, pad = this.ctx.compositor.pad + CULL;
+    return x > f.camX - pad && x < f.camX + 480 + pad && y > f.camY - CULL && y < f.camY + 320 + CULL;
+  }
+
   private drawField(): void {
     const f = this.field!, ents: Drawable[] = [];
     for (const e of f.enemies) {
+      if (!this.inView(e.x, e.y)) continue;
       const d = this.enemyDrawable(e);
-      if (!d) continue;
-      ents.push(d);
+      if (d) ents.push(d);
     }
     ents.push(this.heroDrawable());
     for (const c of f.chests) {                                       // a chest's top-left is 14 px up-left of its cell's centre
-      if (c.opened && c.t > 0.8) continue;
+      if ((c.opened && c.t > 0.8) || !this.inView(c.x, c.y)) continue;
       ents.push({ cmfName: 'cmf_oc', cmf: this.sets!.oc, frame: CHEST_FRAME[c.kind], x: c.x - 14, y: c.y - 14, depth: c.y + 6,
         fx: c.opened ? { alpha: Math.max(0, Math.round(32 - c.t * 40)) } : undefined });
     }
-    if (f.merchant) {
+    if (f.merchant && this.inView(f.merchant.x, f.merchant.y)) {
       const name = this.merchantCmf, cmf = this.cmfs.get(name)!, rec = cmf.anims[0];
       ents.push({ cmfName: name, cmf, frame: rec.frames[Math.floor(f.time * 6) % rec.n] ?? 0, x: f.merchant.x, y: f.merchant.y, shadow: true });
     }
     for (const s of f.shots) {
+      if (!this.inView(s.x, s.y)) continue;
       const name = `cmf_c${s.owner.sp.cmf}`, { frame, mirror } = s.look();
       ents.push({ cmfName: name, cmf: this.cmfs.get(name)!, frame, x: Math.round(s.x), y: Math.round(s.y - s.shot.lift), mirror, depth: s.y,
         fx: s.reflected ? { tint: [120, 200, 255], amount: 14 } : undefined });
     }
-    if (f.zone.kind !== 'boss' && this.sets) {                        // the exit stone's blue light (20 fps loop)
+    if (f.zone.kind !== 'boss' && this.sets && this.inView(f.zone.exit.x, f.zone.exit.y)) {   // the exit stone's blue light (20 fps loop)
       const x = f.zone.exit;
       ents.push({ cmfName: 'cmf_oc', cmf: this.sets.oc, frame: EXIT_MARKER + (Math.floor(f.time * 20) % 8), x: x.x + 26, y: x.y + 6, depth: x.y + 30 });
     }
     const k = this.darkness;
     setDayShift(Math.round(NIGHT_SHIFT[0] * k), Math.round(NIGHT_SHIFT[1] * k), Math.round(NIGHT_SHIFT[2] * k));
-    this.view.render(f.camX, f.camY, ents, undefined, (V) => { for (const e of f.enemies) if (e.rare && e.alive) this.sparkles(V, e.x, e.y, f.time); });
+    this.view.render(f.camX, f.camY, ents, undefined, (V) => { for (const e of f.enemies) if (e.rare && e.alive && this.inView(e.x, e.y)) this.sparkles(V, e.x, e.y, f.time); });
     setDayShift(0, 0, 0);
     this.ctx.compositor.show();
   }
@@ -293,9 +303,9 @@ export class ExpeditionScene extends ExpeditionLogic {
     return h('span.v-row.ex-hint', null, padBadge(this.ctx.input, key), h('span', null, label));
   }
 
-  /** the battle zone's clock: day, dusk or night, and the time to nightfall */
+  /** the battle zone's clock: day, dusk or night, and the real time to nightfall */
   private clockTree(): VNode {
-    const ph = this.dayPhase, left = Math.max(0, Math.ceil(NIGHT_AT - this.clock)), mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
+    const ph = this.dayPhase, left = Math.max(0, Math.ceil((NIGHT_AT - this.clock) / CLOCK_SPEED)), mm = Math.floor(left / 60), ss = String(left % 60).padStart(2, '0');
     return h(`span.ex-clock.${ph}`, null, ph === 'night' ? '☾ 밤' : `${ph === 'dusk' ? '◐ 해질녘' : '☀ 낮'} ${mm}:${ss}`);
   }
 

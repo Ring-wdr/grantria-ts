@@ -37,8 +37,9 @@ export type Mode = 'loading' | 'field' | 'pause' | 'encounter' | 'battle' | 'sum
 export const EXIT_HEAL = 0.3;
 export const BATTLE_ZONES = 3;
 
-/** a battle zone's clock (s, field and battle time): dusk, then night (§8) */
-export const DUSK_AT = 300, NIGHT_AT = 360;
+/** a battle zone's clock (s of its own time, field and battle): dusk, then night (§8). It runs CLOCK_SPEED times
+ *  real time: a zone is crossed well within five real minutes, so night (6:00) falls after 2:24 played */
+export const DUSK_AT = 300, NIGHT_AT = 360, CLOCK_SPEED = 2.5;
 /** at night: damage the party takes ×, gold × */
 export const NIGHT_TAKEN = 1.2, NIGHT_GOLD = 1.3;
 export type DayPhase = 'day' | 'dusk' | 'night';
@@ -118,7 +119,7 @@ export class ExpeditionLogic {
   step = 0;
   /** the lines shown on leaving a battle zone */
   summary: string[] = [];
-  /** the battle zone's clock (s) and its phase (§8) */
+  /** the battle zone's clock (s of its own time) and its phase (§8) */
   clock = 0;
   dayPhase: DayPhase = 'day';
   /** the dark merchant's stock in this zone, the cursor and the line under it */
@@ -231,7 +232,7 @@ export class ExpeditionLogic {
   /** the battle zone's clock: dusk and night fall (§8); the merchant comes with the night */
   private tickClock(dt: number): void {
     if (!this.inBattleZone || !this.field) return;
-    this.clock += dt;
+    this.clock += dt * CLOCK_SPEED;
     if (this.zlog) this.zlog.time[this.dayPhase] += dt;
     const ph: DayPhase = this.clock >= NIGHT_AT ? 'night' : this.clock >= DUSK_AT ? 'dusk' : 'day';
     if (ph === this.dayPhase) return;

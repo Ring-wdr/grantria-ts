@@ -43,6 +43,9 @@ export interface Biome {
   /** where a seam steps sideways, any two tiles that meet in the sources may be brought together (not only plain
    *  ground): for tilesets whose walkable land is narrow ways between walls, lava or chasms */
   shearAny?: boolean;
+  /** blocked floor that meets walkable floor with nothing drawn between them is opened (openFlat: t4's floor and its
+   *  blocked outer band are the same sand, and the seams carry both into the middle; 2026-10-29) */
+  openFlat?: boolean;
 }
 
 /** stage 1, 셀마 초원 (t3, 초원·호수): the big t3 field maps; the boss room 초원 - 깊숙한곳 (m124) */
@@ -205,6 +208,9 @@ interface Source {
   /** the biome's pond inside (Biome.water) */
   water: number | null;
   shearAny: boolean;
+  /** the floor tiles (sand and its decals: used 30 times or more, walkable in 40% of their uses or more; a cliff or a
+   *  rim almost never is): what openFlat opens */
+  flat: Set<number>;
 }
 
 let sourceCache: { a: Assets; b: Biome; p: Promise<Source> }[] = [];
@@ -217,7 +223,7 @@ async function source(a: Assets, sets: ZoneSets, b: Biome): Promise<Source> {
       a, b, p: Promise.all(b.sources.map((id) => a.map(id))).then((maps) => {
         const g = grassOf(maps, b.grassMin), grass = new Set(g.tiles), soft = new Set([...grass, ...b.decals]);
         const isles = maps.map((m) => { const t = gridOf(m, sets, grass); return { t, list: islandsOf(t, { grass, soft } as Source) }; }).filter((x) => x.list.length);
-        return { pairs: tilePairs(maps), grass, grassList: g.tiles, grassWeights: g.weights, soft, isles, adj: buildAdjacency(maps, grass, 2, 3), adjPond: buildAdjacency(maps, grass, 2, 2), water: b.water, shearAny: !!b.shearAny };
+        return { pairs: tilePairs(maps), grass, grassList: g.tiles, grassWeights: g.weights, soft, isles, adj: buildAdjacency(maps, grass, 2, 3), adjPond: buildAdjacency(maps, grass, 2, 2), water: b.water, shearAny: !!b.shearAny, flat: floorOf(maps) };
       }),
     };
     sourceCache.push(hit);
@@ -630,6 +636,36 @@ const RING = 4;
 const GROUND_BIAS = 20;
 
 /** a free object whose ground the seams changed (a tile other than grass slid under its anchor or body) is left out */
+/** the floor tiles of the maps: used 30 times or more and walkable in 40% of their uses or more (t4's sand is walkable
+ *  in 55% of its uses: the rest is the blocked outside, drawn the same) */
+function floorOf(maps: GameMap[]): Set<number> {
+  const used = new Map<number, number>(), walk = new Map<number, number>();
+  for (const m of maps) m.tiles.forEach((row, r) => row.forEach((v, c) => {
+    used.set(v, (used.get(v) ?? 0) + 1);
+    if (m.walk[r]?.[c]) walk.set(v, (walk.get(v) ?? 0) + 1);
+  }));
+  return new Set([...used].filter(([v, n]) => v > 0 && n >= 30 && (walk.get(v) ?? 0) / n >= 0.4).map(([v]) => v));
+}
+
+/** blocked floor reached from walkable floor with no object drawn over it becomes walkable, spreading on: the seams
+ *  repeat lone blocked sand cells into rows of invisible pegs, and stretch the map's blocked outer band (drawn as the
+ *  same sand) into the middle. Only floor tiles count (Source.flat), so a cliff, a rim or anything drawn stops the
+ *  spread: what looks like the floor is the floor */
+function openFlat(g: Grid, flat: Set<number>): void {
+  const { W, H } = g, cov = covered(g), stack: number[] = [];
+  const floor = (c: number, r: number) => c > 0 && r > 0 && c < W - 1 && r < H - 1 && flat.has(g.tiles[r][c]) && !cov[r * W + c];
+  for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) if (g.walk[r][c] && floor(c, r)) stack.push(r * W + c);
+  while (stack.length) {
+    const i = stack.pop()!, c = i % W, r = (i / W) | 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const x = c + dx, y = r + dy;
+      if (!floor(x, y) || g.walk[y][x]) continue;
+      g.walk[y][x] = 1;
+      stack.push(y * W + x);
+    }
+  }
+}
+
 function settle(g: Grid, sets: ZoneSets, grass: Set<number>): void {
   g.objs = g.objs.filter((p) => {
     if (!p.free) return true;
@@ -792,6 +828,7 @@ export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 
   scatter(g, src, rng);
   vary(g, src, rng);
   settle(g, sets, src.grass);
+  if (b.openFlat) openFlat(g, src.flat);
   const map = mapOf(g, tpl), W = g.W, H = g.H;
   // the way through: the largest walkable region, entered at its west end, left by the stone at its east end; of the
   // open cells near each end, the one the rest of the region reaches most directly (not one behind a long cliff line

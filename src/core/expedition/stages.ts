@@ -40,6 +40,8 @@ export const STAGES: readonly Stage[] = [
       // t4's sand is one tile; its plain ground variants are rarer, and its cliffs are drawn with many tiles
       grassMin: 30,
       shearAny: true,
+      // blocked sand that meets walkable sand with no cliff or rim between them is opened (no invisible walls)
+      openFlat: true,
     },
     species: [5, 6, 7, 8], boss: 9,
     intro: '카라스 사막. 모래 속에 잠든 봉인을 골렘이 지킨다',

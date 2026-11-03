@@ -173,10 +173,11 @@ export interface Species {
 }
 
 /** a creature's stats in a deeper battle zone: power 0 in the first, +1 per zone after (bosses are tuned as they are);
- *  gold grows like EXP */
+ *  gold grows like EXP. HP ×(1 + 0.07·power) and attack ×(1 + 0.02·power) more keep pace with the equipment, which
+ *  grows with the zone too (web/docs/expedition-balance.md §19) */
 export function zoneStats(s: Species['stats'], power: number): Species['stats'] {
   if (power <= 0) return s;
-  return { hp: Math.round(s.hp * (1 + 0.3 * power)), atk: Math.round(s.atk * (1 + 0.2 * power)), def: s.def + power,
+  return { hp: Math.round(s.hp * (1 + 0.3 * power) * (1 + 0.07 * power)), atk: Math.round(s.atk * (1 + 0.2 * power) * (1 + 0.02 * power)), def: s.def + power,
     spd: s.spd + power, exp: Math.round(s.exp * (1 + 0.4 * power)), lv: s.lv + 2 * power, gold: Math.round(s.gold * (1 + 0.4 * power)) };
 }
 
@@ -239,7 +240,7 @@ export const SPECIES: Species[] = [
     name: '초원의 왕 흑표', cmf: 14, fourDir: true, anim: { idle: 0, move: 3, attack: 6 }, tier: 'boss', personality: 'proud',
     talk: 'locked', talkReason: '초원의 왕은 말로 꺾이지 않는다',
     field: { speed: 90, detect: 260, windup: 0.55, breakMax: 160, poise: 2, radius: 16, noKill: true },
-    stats: { hp: 1350, atk: 42, def: 14, spd: 16, exp: 120, lv: 10, gold: 0 },
+    stats: { hp: 1500, atk: 44, def: 14, spd: 16, exp: 120, lv: 10, gold: 0 },
     moves: [
       { name: '발톱', windup: 0.75, hits: [0], power: 1.1 },
       { name: '삼연격', windup: 1.0, hits: [0, 0.35, 0.7], power: 0.7 },
@@ -305,7 +306,7 @@ export const SPECIES: Species[] = [
     name: '봉인의 골렘', cmf: 20, fourDir: false, anim: { idle: 0, move: 0, attack: 2 }, tier: 'boss', personality: 'honorable',
     talk: 'locked', talkReason: '봉인을 지키는 골렘에게는 말이 닿지 않는다',
     field: { speed: 60, detect: 260, windup: 0.8, breakMax: 220, poise: 2, radius: 18, noKill: true },
-    stats: { hp: 2600, atk: 62, def: 18, spd: 17, exp: 260, lv: 20, gold: 0 },
+    stats: { hp: 4000, atk: 72, def: 18, spd: 17, exp: 260, lv: 20, gold: 0 },
     moves: [
       { name: '철퇴 휘두르기', windup: 0.9, hits: [0], power: 1.2, late: true, anim: 2 },
       { name: '연타', windup: 1.1, hits: [0, 0.5], power: 0.8, anim: 4 },
@@ -359,7 +360,7 @@ export const SPECIES: Species[] = [
     name: '화염의 지옥견', cmf: 32, fourDir: false, fixed: true, anim: { idle: 0, move: 0, attack: 1 }, tier: 'boss', personality: 'proud',
     talk: 'locked', talkReason: '지옥견의 세 머리는 누구의 말도 듣지 않는다',
     field: { speed: 80, detect: 260, windup: 0.6, breakMax: 260, poise: 2, radius: 22, noKill: true },
-    stats: { hp: 4000, atk: 82, def: 22, spd: 19, exp: 400, lv: 30, gold: 0 },
+    stats: { hp: 7000, atk: 102, def: 22, spd: 19, exp: 400, lv: 30, gold: 0 },
     moves: [{ name: '할퀴기', windup: 0.75, hits: [0], power: 1.1, anim: 1 }],
     weak: ['pierce'],
     boss: {

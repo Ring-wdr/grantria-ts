@@ -9,7 +9,7 @@ import { AVK } from '../src/core/keys.ts';
 import { Battle } from '../src/core/expedition/battle.ts';
 import { FieldEnemy, FieldSim, MERCHANT_STEPS, RARE_RUN } from '../src/core/expedition/field.ts';
 import type { InputState } from '../src/core/input.ts';
-import { CHEST_DEPTH, DROP_CHANCE, FIELD_DROP_CHANCE, MAIN, POTION_PRICE, SLOT_TYPES, TIERS, chestRoll, creatureDrop, gearIcon, gearNamer, gearPrice, merchantStock, openChest, rareDrop,
+import { CHEST_DEPTH, DROP_CHANCE, FIELD_DROP_CHANCE, POTION_PRICE, mainStats, makeGear, SLOT_TYPES, TIERS, chestRoll, creatureDrop, gearIcon, gearNamer, gearPrice, merchantStock, openChest, rareDrop,
   rollGear, type Gear, type Grade, type Stats } from '../src/core/expedition/loot.ts';
 import { Rng } from '../src/core/expedition/rng.ts';
 import { GUARD_MAX, Run, SHINY_MUL, recruit, statsWith } from '../src/core/expedition/run.ts';
@@ -58,19 +58,27 @@ test('equipment: on every member now and on whoever joins later; a slot holds on
   assert.equal(shiny.atk, Math.round(plain.atk * SHINY_MUL));
 });
 
-test('gear: a slot draws from its main-game types, tier 1..4 is item sub 0..3, one extra line per grade step', () => {
+test('gear: a slot draws from its main-game types, tier 1..4 is item sub 0..3; the main effect grows with tier and item level (§19)', () => {
   const rng = new Rng(3);
   for (let i = 0; i < 300; i++) {
-    const g = rollGear([1, 1, 1, 1], [1, 1, 1, 1, 1], rng, names, i % 3);
+    const ilv = 1 + (i % 9), g = rollGear([1, 1, 1, 1], [1, 0, 0, 0, 0], rng, names, i % 3, ilv);
     assert.ok(SLOT_TYPES[g.slot].includes(g.type));
     assert.ok(g.sub >= 0 && g.sub < TIERS);
+    assert.equal(g.ilv, ilv);
     assert.equal(g.name, `${g.type}:${g.sub}`);
     assert.equal(gearIcon(g), 11 * g.type + g.sub);
-    const main = MAIN[g.slot][g.sub], extra = (g.atk ?? 0) - (main.atk ?? 0) + (g.spd ?? 0) - (main.spd ?? 0)
-      + Math.round(((g.hpPct ?? 0) - (main.hpPct ?? 0)) / 0.05) + Math.round(((g.guard ?? 0) - (main.guard ?? 0)) / 0.04);
-    assert.equal(extra, g.grade, `${JSON.stringify(g)}: ${g.grade} lines`);
+    assert.deepEqual({ atk: g.atk, spd: g.spd, hpPct: g.hpPct, guard: g.guard }, { atk: undefined, spd: undefined, hpPct: undefined, guard: undefined, ...mainStats(g.slot, g.sub, ilv) }, '일반: the main effect only');
   }
+  for (const slot of [0, 1, 2, 3] as const) {
+    const v = (t: number, l: number) => { const s = mainStats(slot, t, l); return (s.atk ?? 0) + (s.spd ?? 0) + (s.hpPct ?? 0) + (s.guard ?? 0); };
+    for (let l = 1; l < 9; l++) assert.ok(v(0, l + 1) >= v(0, l), `slot ${slot}: a later zone's piece is no weaker`);
+    assert.ok(v(3, 9) > v(0, 9) * 1.8, `slot ${slot}: tier 4 is about twice tier 1`);
+  }
+  assert.ok(mainStats(0, 3, 9).atk! >= 5 * mainStats(0, 3, 1).atk! / 2, 'a zone-9 sword far above a zone-1 one of its tier');
+  const legend = makeGear(0, 3, 4, new Rng(1), names, 9);
+  assert.ok(legend.atk! > mainStats(0, 3, 9).atk!, '전설 adds four lines');
   assert.equal(gearPrice({ sub: 2, grade: 3 }), 120 + 200 + 300);
+  assert.equal(gearPrice({ sub: 2, grade: 3, ilv: 4 }), 120 + 200 + 300 + 60);
 });
 
 test("loot: creatures drop by zone, chests by zone and what they hold, the merchant's four slots", () => {

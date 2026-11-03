@@ -37,18 +37,33 @@ export interface Gear extends Stats {
   type: number;
   sub: number;
   grade: Grade;
+  /** its item level: the run's battle zone it was made for (1..9); its effects grow with it (§19) */
+  ilv: number;
   name: string;
 }
 
-/** a slot's main effect by tier (§4.3) */
-export const MAIN: readonly (readonly Stats[])[] = [
-  [{ atk: 1 }, { atk: 2 }, { atk: 3 }, { atk: 4 }],
-  [{ hpPct: 0.08 }, { hpPct: 0.12 }, { hpPct: 0.16 }, { hpPct: 0.2 }],
-  [{ guard: 0.06 }, { guard: 0.1 }, { guard: 0.14 }, { guard: 0.18 }],
-  [{ spd: 1 }, { spd: 1, hpPct: 0.05 }, { spd: 1, hpPct: 0.1 }, { spd: 2, hpPct: 0.05 }],
-];
-/** one extra line per grade step (고급 1 .. 전설 4), by weight; the same line twice adds up */
-export const LINES: readonly [Stats, number][] = [[{ atk: 1 }, 30], [{ hpPct: 0.05 }, 30], [{ guard: 0.04 }, 30], [{ spd: 1 }, 10]];
+/** a tier's multiplier on a piece's main effect (tier 1..4) */
+export const TIER_MUL = [1, 1.3, 1.65, 2] as const;
+
+const pct = (v: number) => Math.round(v * 100) / 100;
+
+/** a slot's main effect at item level ilv and tier (0..3) (web/docs/expedition-balance.md §19): it grows with the zone
+ *  it drops in, so each zone's finds beat the last zone's of the same tier */
+export function mainStats(slot: Slot, tier: number, ilv: number): Stats {
+  const k = TIER_MUL[Math.max(0, Math.min(TIERS - 1, tier))];
+  switch (slot) {
+    case 0: return { atk: Math.max(1, Math.round((1.5 + 0.9 * ilv) * k)) };
+    case 1: return { hpPct: pct((0.05 + 0.015 * ilv) * k) };
+    case 2: return { guard: pct((0.04 + 0.008 * ilv) * k) };
+    default: return { spd: Math.max(1, Math.round((0.6 + 0.25 * ilv) * k)), hpPct: pct((0.02 + 0.004 * ilv) * k) };
+  }
+}
+
+/** one extra line per grade step (고급 1 .. 전설 4) at item level ilv, by weight; the same line twice adds up */
+export function lineStats(ilv: number): [Stats, number][] {
+  return [[{ atk: Math.round(1 + 0.45 * ilv) }, 30], [{ hpPct: pct(0.04 + 0.005 * ilv) }, 30], [{ guard: pct(0.03 + 0.002 * ilv) }, 30],
+    [{ spd: ilv >= 6 ? 2 : 1 }, 10]];
+}
 
 const KEYS = ['atk', 'spd', 'hpPct', 'guard'] as const;
 
@@ -72,8 +87,8 @@ export function statText(s: Stats): string[] {
   return out;
 }
 
-/** the effect line of a piece */
-export function gearDesc(g: Stats): string { return `파티 전원 ${statText(g).join(', ')}`; }
+/** the effect line of a piece (with its item level) */
+export function gearDesc(g: Stats & { ilv?: number }): string { return `${g.ilv ? `Lv.${g.ilv} · ` : ''}파티 전원 ${statText(g).join(', ')}`; }
 
 /** the display name of a main-game item (type, sub): text 0x7fc + model, model = 21·type + d8(0x245ff + 5·sub)
  *  (FUN_00036458; for sub 0..3 every grade shares the grade-0 model) */
@@ -85,18 +100,18 @@ export function gearNamer(a: Pick<Assets, 'd8' | 'text'>): Namer {
 /** the main game's item icon id of (type, sub) (FUN_000365ac: 11·type + sub for equipment) */
 export function gearIcon(g: Pick<Gear, 'type' | 'sub'>): number { return 11 * g.type + g.sub; }
 
-/** a piece of the slot, tier (0..3) and grade: the main effect and one random line per grade step */
-export function makeGear(slot: Slot, tier: number, grade: Grade, rng: Rng, name: Namer): Gear {
-  const type = rng.pick(SLOT_TYPES[slot]), sub = Math.max(0, Math.min(TIERS - 1, tier));
-  let st: Stats = { ...MAIN[slot][sub] };
-  for (let i = 0; i < grade; i++) st = addStats(st, LINES[rng.weighted(LINES.map((l) => l[1]))][0]);
-  return { ...st, slot, type, sub, grade, name: name(type, sub) };
+/** a piece of the slot, tier (0..3), grade and item level: the main effect and one random line per grade step */
+export function makeGear(slot: Slot, tier: number, grade: Grade, rng: Rng, name: Namer, ilv = 1): Gear {
+  const type = rng.pick(SLOT_TYPES[slot]), sub = Math.max(0, Math.min(TIERS - 1, tier)), lines = lineStats(ilv);
+  let st: Stats = mainStats(slot, sub, ilv);
+  for (let i = 0; i < grade; i++) st = addStats(st, lines[rng.weighted(lines.map((l) => l[1]))][0]);
+  return { ...st, slot, type, sub, grade, ilv, name: name(type, sub) };
 }
 
-/** a piece of any slot: the tier by weight (moved up `tierUp` steps), the grade by weight */
-export function rollGear(tiers: readonly number[], grades: readonly number[], rng: Rng, name: Namer, tierUp = 0): Gear {
+/** a piece of any slot: the tier by weight (moved up `tierUp` steps), the grade by weight, at item level ilv */
+export function rollGear(tiers: readonly number[], grades: readonly number[], rng: Rng, name: Namer, tierUp = 0, ilv = 1): Gear {
   const slot = rng.int(0, SLOTS - 1) as Slot;
-  return makeGear(slot, rng.weighted(tiers) + tierUp, rng.weighted(grades) as Grade, rng, name);
+  return makeGear(slot, rng.weighted(tiers) + tierUp, rng.weighted(grades) as Grade, rng, name, ilv);
 }
 
 /** the run's battle zones (three stages of three): loot tables have a row for each (§17) */
@@ -116,7 +131,7 @@ export const DROP_GRADES = [[75, 20, 5, 0, 0], [62, 27, 9, 2, 0], [50, 32, 14, 4
 
 /** what a creature of battle zone n drops */
 export function creatureDrop(n: number, rng: Rng, name: Namer): Gear {
-  return rollGear(DROP_TIERS[zi(n)], DROP_GRADES[zi(n)], rng, name);
+  return rollGear(DROP_TIERS[zi(n)], DROP_GRADES[zi(n)], rng, name, 0, zi(n) + 1);
 }
 
 // --- skills (§16) ---------------------------------------------------------------------------------------------------
@@ -177,7 +192,7 @@ export function openChest(kind: ChestKind, n: number, rng: Rng, name: Namer): Lo
     if (r < 0.5) return { kind: 'gold', gold: 15 + 10 * (zi(n) + 1) };
     if (r < 0.75) return { kind: 'potion', n: 1 };
   }
-  return { kind: 'gear', gear: rollGear(DROP_TIERS[zi(n)], CHEST_GRADES[kind], rng, name, CHEST_TIER_UP[kind]) };
+  return { kind: 'gear', gear: rollGear(DROP_TIERS[zi(n)], CHEST_GRADES[kind], rng, name, CHEST_TIER_UP[kind], zi(n) + 1) };
 }
 
 // --- the rare creature ----------------------------------------------------------------------------------------------
@@ -189,14 +204,14 @@ export const RARE_GRADES = [0, 0, 80, 17, 3] as const;
 export const RARE_GOLD = 5;
 
 export function rareDrop(n: number, rng: Rng, name: Namer): Gear {
-  return rollGear(DROP_TIERS[zi(n)], RARE_GRADES, rng, name, 1);
+  return rollGear(DROP_TIERS[zi(n)], RARE_GRADES, rng, name, 1, zi(n) + 1);
 }
 
 // --- the dark merchant ----------------------------------------------------------------------------------------------
 
 export const POTION_PRICE = 30;
-/** a piece's price: 120G, +100G a tier step, +100G a grade step (전설 is not sold) */
-export function gearPrice(g: Pick<Gear, 'sub' | 'grade'>): number { return 120 + 100 * g.sub + 100 * g.grade; }
+/** a piece's price: 120G, +100G a tier step, +100G a grade step, +20G an item level past the first (전설 is not sold) */
+export function gearPrice(g: Pick<Gear, 'sub' | 'grade'> & { ilv?: number }): number { return 120 + 100 * g.sub + 100 * g.grade + 20 * ((g.ilv ?? 1) - 1); }
 /** grade weights 일반..영웅 of the merchant's pieces in battle zone 1..9 (one tier above the zone's creature drop) */
 export const MERCHANT_GRADES = [[60, 35, 5, 0], [40, 40, 17, 3], [25, 40, 28, 7],
   [20, 40, 30, 10], [15, 40, 33, 12], [10, 38, 37, 15], [10, 35, 38, 17], [8, 32, 40, 20], [5, 30, 42, 23]] as const;
@@ -208,7 +223,7 @@ export function merchantStock(n: number, rng: Rng, name: Namer): Ware[] {
   const out: Ware[] = [{ gear: null, n: rng.int(3, 5), price: POTION_PRICE, sold: false }];
   const slots = rng.shuffle([0, 1, 2, 3] as Slot[]).slice(0, 3);
   for (const slot of slots) {
-    const g = makeGear(slot, rng.weighted(DROP_TIERS[zi(n)]) + 1, rng.weighted(MERCHANT_GRADES[zi(n)]) as Grade, rng, name);
+    const g = makeGear(slot, rng.weighted(DROP_TIERS[zi(n)]) + 1, rng.weighted(MERCHANT_GRADES[zi(n)]) as Grade, rng, name, zi(n) + 1);
     out.push({ gear: g, n: 1, price: gearPrice(g), sold: false });
   }
   return out;

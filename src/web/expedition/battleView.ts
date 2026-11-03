@@ -3,8 +3,9 @@
 // original side frames), then the DOM: order bar, enemy gauges, party panel, AP, the command menu, the closing rings
 // of an enemy's hits and the damage popups. A shot move (Move.shot) is fired from where the enemy stands: its projectile
 // (the species' field shot frame) reaches the target on each hit's time. The decision kit (expedition-balance.md §18):
-// status chips under every unit, an enemy's weaknesses (? till found) and its next action in a bubble over it, a boss's
-// charge count and enrage count, the hellhound's three heads as their own tags, the order bar previewing a delay, and
+// an enemy's tag is its name, HP, break and weaknesses (? till found) — its next action and statuses are not shown
+// (2026-10-28, the user's pick: no guidance is tenser); a boss adds its enrage count; status chips under the party; the
+// hellhound's three heads as their own break tags, the order bar previewing a delay, and
 // the defense cues: a red edge before a dodge-only hit, the screen in black and white while a parry-only one comes, a
 // "!" over the attacker before a late hit. Rare creatures and shiny recruits sparkle (cmf_status 0x5d..0x63). The
 // backdrop carries the field's day / night shift.
@@ -202,20 +203,18 @@ export class BattleView {
     const picking = b.phase === 'command' && b.menu === 'target', aimed = picking ? b.targets()[b.targetSel] : null;
     b.enemies.forEach((e) => {
       if (e.gone || e.hp <= 0) return;
-      const [x, y] = this.pos(b, e), heads = e.heads.length > 0, big = !!e.sp?.boss;
-      const ein = big ? b.enrageIn : null, top = y - (big ? 118 : 74) - (heads ? 30 : 0);
+      // only the name, HP, break and weaknesses (and a boss's enrage count): intents and status chips stay hidden
+      const [x, y] = this.pos(b, e), heads = e.heads.length > 0;
+      const ein = e.sp?.boss ? b.enrageIn : null, top = y - 76 - (heads ? 30 : 0);
       kids.push(h(`div.v-col.exb-tag${e === aimed ? '.aimed' : ''}`, { style: `left:${x - 34}px;top:${top}px` },
         h('div.exb-name', null, `${e.rare ? '빛나는 ' : ''}${e.summoned ? '(부하) ' : ''}${e.name}${e.broken ? ' · BREAK' : ''}`),
         this.bar('hp', e.hp / e.hpMax), heads ? null : this.bar(`brk${e.broken ? '.full' : ''}`, e.brk / e.brkMax),
-        this.weakTree(b, e), heads ? null : this.stTree(b, e),
-        e.charge !== null && e.charge > 0 ? h('div.exb-charge', null, `차지 ${e.charge}`) : null,
+        this.weakTree(b, e),
         e.enraged ? h('div.exb-enrage.on', null, '광폭화!') : ein !== null ? h('div.exb-enrage', null, `광폭화까지 ${ein}턴`) : null));
-      const it = b.phase !== 'enemy' || b.enemyAct?.actor !== e ? b.intentText(e) : null;
-      if (it) kids.push(h(`div.exb-intent${e.intent?.charge ? '.charge' : ''}`, { style: `left:${x}px;top:${top - 14}px` }, it));
       for (const hd of e.heads) {
         const [hx, hy] = this.pos0(b, hd);
-        kids.push(h(`div.v-col.exb-tag.head${hd === aimed ? '.aimed' : ''}${hd.broken ? '.broken' : ''}`, { style: `left:${hx - 23}px;top:${hy - 34}px` },
-          h('div.exb-name', null, hd.name.replace(' 머리', '')), this.bar(`brk${hd.broken ? '.full' : ''}`, hd.brk / hd.brkMax), this.stTree(b, hd)));
+        kids.push(h(`div.v-col.exb-tag.head${hd === aimed ? '.aimed' : ''}${hd.broken ? '.broken' : ''}`, { style: `left:${hx - 23}px;top:${hy - 26}px` },
+          h('div.exb-name', null, hd.name.replace(' 머리', '')), this.bar(`brk${hd.broken ? '.full' : ''}`, hd.brk / hd.brkMax)));
       }
     });
     // target cursor; each target is tapped or clicked to pick it at once

@@ -1,7 +1,10 @@
 // 원정(가제): the run, in memory only (no save slot): the party (the hero and up to two recruited creatures), their
 // levels inside this run, the potions, gold and the equipment worn (web/docs/expedition-balance.md §4.3), and where the run is.
 import { SLOTS, addStats, type Gear, type Stats } from './loot';
-import { SPECIES } from './species';
+import { SPECIES, zoneStats } from './species';
+
+/** zone powers a stage spans (three battle zones) */
+const STAGE_POWER = 3;
 import { SKILLBOOK, SKILL_MAX, skillAt } from './skillbook';
 import type { Skill } from './battle';
 
@@ -35,9 +38,12 @@ export function newHero(): Member {
 /** a rare recruit's stats ×this (§7) */
 export const SHINY_MUL = 1.2;
 
-/** a creature joining at its own level (a little sturdier than in the wild); a rare one ×1.2 */
-export function recruit(species: number, shiny = false): Member {
-  const s = SPECIES[species].stats, k = shiny ? SHINY_MUL : 1, hp = Math.round(s.hp * 1.3 * k);
+/** a creature joining at its stage's first level (a little sturdier than in the wild); a rare one ×1.2. lv is the
+ *  level it had in the wild: it joins at the power its stage begins with (stage 1: 0, its species' own level, as
+ *  before; stage 2: 3; stage 3: 6), so a late recruit lags behind within a stage as in stage 1 (§2.1, §17) */
+export function recruit(species: number, shiny = false, lv?: number): Member {
+  const base = SPECIES[species].stats, power = lv === undefined ? 0 : Math.max(0, Math.round((lv - base.lv) / 2));
+  const s = zoneStats(base, power - (power % STAGE_POWER)), k = shiny ? SHINY_MUL : 1, hp = Math.round(s.hp * 1.3 * k);
   return { name: SPECIES[species].name, species, lv: s.lv, exp: 0, hp, hpMax: hp, atk: Math.round(s.atk * k), def: Math.round(s.def * k), spd: Math.round(s.spd * k),
     shiny: shiny || undefined };
 }

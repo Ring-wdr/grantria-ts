@@ -18,7 +18,8 @@ import { ctrlAt } from '../input/touchLayout';
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { bodyBox } from '../../core/world/world';
-import { ADVANTAGE_LABEL, CLOCK_SPEED, ExpeditionLogic, GEAR_CHOICES, NIGHT_AT, PAUSE_ITEMS } from '../../core/expedition/expedition';
+import { ADVANTAGE_LABEL, BATTLE_ZONES, CLOCK_SPEED, ExpeditionLogic, GEAR_CHOICES, NIGHT_AT, PAUSE_ITEMS } from '../../core/expedition/expedition';
+import { STAGES } from '../../core/expedition/stages';
 import { CHEST_FRAME, GRADE_NAME, SLOT_NAME, gearDesc, gearIcon, type Gear } from '../../core/expedition/loot';
 import { statsWith } from '../../core/expedition/run';
 import { DEFAULT_EQUIP, setDayShift, type SpriteLayer } from '../render/sprites';
@@ -380,18 +381,20 @@ export class ExpeditionScene extends ExpeditionLogic {
   }
 
   private nextName(): string {
-    const k = this.plan[this.step + 1];
-    return k === 'rest' ? '쉼터' : k === 'boss' ? '깊숙한 곳' : '초원';
+    const p = this.plan[this.step + 1];
+    if (!p) return '';
+    const s = STAGES[p.stage];
+    return p.kind === 'rest' ? `${s.area} 쉼터` : p.kind === 'boss' ? s.bossArea : p.stage !== this.stageNo ? `${s.name}` : s.area;
   }
 
   /** the run's end: cleared or wiped out */
   private resultTree(): VNode {
     const r = this.run, clear = this.mode === 'clear';
     return h('div.v-fill.v-col.ex-screen', null,
-      h('div.ex-title', null, clear ? '1스테이지 돌파!' : '원정 실패'),
-      h('div.ex-sub', null, clear ? '초원의 왕을 쓰러뜨렸다. (이후 스테이지는 준비 중)' : '파티가 쓰러졌다. 원정은 여기서 끝난다.'),
+      h('div.ex-title', null, clear ? '원정 완주!' : '원정 실패'),
+      h('div.ex-sub', null, clear ? `${STAGES.map((s) => s.name).join(' · ')}를 모두 지났다.` : `${this.stage.name}에서 파티가 쓰러졌다. 원정은 여기서 끝난다.`),
       h('div.v-col.ex-stats', null,
-        h('div', null, `돌파한 지역 ${r.cleared} / 3`), h('div', null, `쓰러뜨린 적 ${r.kills}`), h('div', null, `패링 ${r.parries}회`), h('div', null, `영입 ${r.recruits}`),
+        h('div', null, `돌파한 스테이지 ${clear ? STAGES.length : this.stageNo} / ${STAGES.length} · 지역 ${r.cleared} / ${STAGES.length * BATTLE_ZONES}`), h('div', null, `쓰러뜨린 적 ${r.kills}`), h('div', null, `패링 ${r.parries}회`), h('div', null, `영입 ${r.recruits}`),
         h('div', null, `골드 ${r.gold}G · 장비 ${r.equip.filter(Boolean).length} / ${r.equip.length}`),
         r.party.map((m) => h('div.ex-dim', null, `${m.shiny ? '빛나는 ' : ''}${m.name} Lv.${m.lv}`))),
       h('div.v-row.ex-item.sel.ex-go', { on: () => [AVK.OK] }, padBadge(this.ctx.input, AVK.OK), '타이틀로'));

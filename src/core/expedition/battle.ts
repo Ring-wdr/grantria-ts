@@ -102,6 +102,13 @@ export const RECRUIT_SKILLS: Record<number, Skill> = {
   1: { name: '사냥 본능', ap: 3, power: 2.2, brk: 18, all: false, act: 0, fx: [0, 5], desc: '급소를 노려 한 명에게 큰 피해' },
   2: { name: '물결 노래', ap: 3, power: 0.8, brk: 12, all: true, act: 0, fx: [0, 5], desc: '노래의 물결로 적 전원을 친다' },
   3: { name: '물보라 세례', ap: 2, power: 0.6, brk: 16, all: true, act: 0, fx: [0, 5], desc: '물방울을 흩뿌려 적 전원의 브레이크를 깎는다' },
+  5: { name: '가시 세례', ap: 3, power: 0.7, brk: 18, all: true, act: 0, fx: [0, 5], desc: '가시를 쏟아 적 전원을 찌른다' },
+  6: { name: '석상의 일격', ap: 3, power: 1.4, brk: 60, all: false, act: 0, fx: [0, 5], desc: '돌의 무게로 브레이크 게이지를 크게 깎는다' },
+  7: { name: '급강하', ap: 3, power: 2.2, brk: 18, all: false, act: 0, fx: [0, 5], desc: '하늘에서 내리꽂혀 한 명에게 큰 피해' },
+  8: { name: '모래 폭풍', ap: 2, power: 0.6, brk: 16, all: true, act: 0, fx: [0, 5], desc: '모래를 휘몰아 적 전원의 브레이크를 깎는다' },
+  10: { name: '용암 분출', ap: 3, power: 0.8, brk: 14, all: true, act: 0, fx: [0, 5], desc: '용암을 뿜어 적 전원을 태운다' },
+  11: { name: '불꽃 놀이', ap: 2, power: 0.6, brk: 18, all: true, act: 0, fx: [0, 5], desc: '불티를 흩뿌려 적 전원의 브레이크를 깎는다' },
+  12: { name: '비룡의 송곳니', ap: 3, power: 2.3, brk: 20, all: false, act: 0, fx: [0, 5], desc: '날카로운 이빨로 한 명에게 큰 피해' },
 };
 
 export const COMMANDS = ['공격', '스킬', '아이템', '대화', '도주'] as const;
@@ -160,7 +167,7 @@ function fromEnemy(e: FieldEnemy): BUnit {
   return { id: ids++, side: 'enemy', name: sp.name, species: e.species, sp, member: null, field: e, lv: s.lv,
     hp: Math.max(1, Math.round((s.hp * e.hp) / e.hpMax)), hpMax: s.hp, atk: s.atk, def: s.def, spd: s.spd, ct: 0,
     brk: 0, brkMax: sp.field.breakMax, broken: false, rapport: 0, mood: 0, talks: 0, gone: false, rare: !!e.rare, fled: false, turns: 0, enraged: false,
-    hitMul: sp.tier === 'boss' ? 1 : ENEMY_HIT[Math.max(0, Math.min(2, Math.round((s.lv - sp.stats.lv) / 2)))] };   // zone power = lv steps of 2
+    hitMul: sp.tier === 'boss' ? 1 : ENEMY_HIT[Math.max(0, Math.min(ENEMY_HIT.length - 1, Math.round((s.lv - sp.stats.lv) / 2)))] };   // zone power = lv steps of 2
 }
 
 export class Battle {

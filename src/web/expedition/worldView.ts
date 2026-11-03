@@ -81,7 +81,7 @@ export class WorldView {
 
   private objSprite(sets: ZoneSets, id: number): [string, Cmf, number] {
     const [cmf, f] = objCmf(sets, id);
-    return [id < 0 ? 'cmf_oc' : 'cmf_o3', cmf, f];
+    return [id < 0 ? 'cmf_oc' : sets.objName, cmf, f];
   }
 
   /** objects of a layer whose anchor is near the view rect, in file order */

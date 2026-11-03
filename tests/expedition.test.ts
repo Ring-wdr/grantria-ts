@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { AVK } from '../src/core/keys.ts';
 import { stagePlan } from '../src/core/expedition/expedition.ts';
+import { STAGES } from '../src/core/expedition/stages.ts';
 import { ALL_OUT, Battle, DODGE_MS, PARRY_MS, TALK_EXP } from '../src/core/expedition/battle.ts';
 import { FK, FieldEnemy, FieldSim } from '../src/core/expedition/field.ts';
 import type { InputState } from '../src/core/input.ts';
@@ -14,13 +15,18 @@ import { Talk } from '../src/core/expedition/talk.ts';
 /** a field enemy as the battle reads it */
 const foe = (species: number) => ({ species, sp: SPECIES[species], hp: SPECIES[species].stats.hp, hpMax: SPECIES[species].stats.hp }) as unknown as FieldEnemy;
 
-test('stage plan: three battle zones in order, a rest zone always right before the boss', () => {
+test('stage plan: per stage three battle zones in order, a rest zone always right before its boss; stages in order', () => {
   for (let seed = 1; seed < 60; seed++) {
-    const p = stagePlan(seed);
-    assert.equal(p.filter((k) => k === 'battle').length, 3);
-    assert.deepEqual(p.slice(-2), ['rest', 'boss']);
-    assert.equal(p[0], 'battle');
-    assert.ok(!p.join(',').includes('rest,rest'));
+    const all = stagePlan(seed);
+    assert.deepEqual([...new Set(all.map((p) => p.stage))], STAGES.map((_, i) => i), 'stages in order');
+    for (let s = 0; s < STAGES.length; s++) {
+      const p = all.filter((x) => x.stage === s).map((x) => x.kind);
+      assert.equal(p.filter((k) => k === 'battle').length, 3);
+      assert.deepEqual(p.slice(-2), ['rest', 'boss']);
+      assert.equal(p[0], 'battle');
+      assert.ok(!p.join(',').includes('rest,rest'));
+    }
+    assert.deepEqual(stagePlan(seed, 1), all.filter((x) => x.stage === 0), "stage 1's plan is as before");
   }
 });
 

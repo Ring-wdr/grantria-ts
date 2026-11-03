@@ -1,4 +1,5 @@
-// 원정(가제): the zones of a run, built in the original GameMap format on tileset t3 (초원·호수).
+// 원정(가제): the zones of a run, built in the original GameMap format from a stage's tileset (Biome: stage 1 t3 초원·호수,
+// stage 2 t4 사막, stage 3 t6 화산; the notes below speak of t3, the others differ only in the Biome values).
 // A battle or rest zone is an original t3 field map (the template) grown by reverse seam carving: a seam is a
 // top-to-bottom (or left-to-right) path of k-wide strips, one per row, and each row repeats its strip in place. Every
 // tile meeting in the result occurs in the t3 maps (PAIR_SOURCES): a strip keeps clear of what objects stand on, a tile
@@ -20,21 +21,46 @@ import { CHEST_DEPTH, chestRoll, type ChestKind } from './loot';
 import { buildAdjacency, fill, type Adjacency } from './synth';
 
 export const TILE = 16;
-/** battle zone templates: the big t3 field maps (zone 3, 초원·호수) */
-export const BATTLE_TEMPLATES = [116, 119, 120];
-/** rest zone templates: small t3 clearings */
-export const REST_TEMPLATES = [112, 113];
-/** the maps whose tile meetings a grown zone may use (the templates and the other t3 field maps) */
-export const PAIR_SOURCES = [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 125, 377, 378, 379, 380, 381, 382, 383, 384, 385];
-/** 초원 - 깊숙한곳, the boss room */
-export const BOSS_MAP = 124;
+
+/** where a stage's zones come from: one tileset / objset of the original and its maps */
+export interface Biome {
+  /** the objset (cmf_oN) its maps use */
+  objset: number;
+  /** battle zone templates: the stage's big field maps */
+  battle: readonly number[];
+  /** rest zone templates: small clearings */
+  rest: readonly number[];
+  /** the maps whose tile meetings a grown zone may use (the templates and the other field maps of the tileset) */
+  sources: readonly number[];
+  /** the boss room, as it is: entered at start (tiles), its exit stone at exit */
+  boss: { map: number; start: [number, number]; exit: [number, number] };
+  /** tiles drawn on the plain ground (pebbles) that a seam may repeat as freely as the ground */
+  decals: readonly number[];
+  /** the inside of a pond (open water, or a chasm), or null: rises only */
+  water: number | null;
+  /** a tile is plain ground when walkable this many times (and most of the times it is used) in the sources (400) */
+  grassMin?: number;
+  /** where a seam steps sideways, any two tiles that meet in the sources may be brought together (not only plain
+   *  ground): for tilesets whose walkable land is narrow ways between walls, lava or chasms */
+  shearAny?: boolean;
+}
+
+/** stage 1, 셀마 초원 (t3, 초원·호수): the big t3 field maps; the boss room 초원 - 깊숙한곳 (m124) */
+export const BIOME_T3: Biome = {
+  objset: 3,
+  battle: [116, 119, 120],
+  rest: [112, 113],
+  sources: [112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 125, 377, 378, 379, 380, 381, 382, 383, 384, 385],
+  boss: { map: 124, start: [16.5, 34], exit: [15, 4] },
+  decals: [22, 23, 24, 30, 31, 32, 37, 38, 39, 40],
+  water: 92,
+};
+export const BATTLE_TEMPLATES = BIOME_T3.battle, REST_TEMPLATES = BIOME_T3.rest, PAIR_SOURCES = BIOME_T3.sources;
 /** warp stone of cmf_oc (35 unlit, 36 lit): the zone exit */
 export const EXIT_OBJ = -35, EXIT_LIT = -36;
 /** the blue light over the exit: cmf_oc frames 128..135, the 8-frame portal marker loop the original shows at the t3
  *  field maps' exits (portal marker kind 2) */
 export const EXIT_MARKER = 128;
-/** t3 tiles of pebbles drawn on grass (2×2 and single decals) */
-const DECALS = [22, 23, 24, 30, 31, 32, 37, 38, 39, 40];
 /** a template grows to at most this many times its size each way */
 const MAX_GROW = 2.2;
 
@@ -67,14 +93,16 @@ export interface Zone {
   middle?: { cells: number; terrain: number };
   /** a battle zone's chests, in tucked-away spots off the way through (§6.2) */
   chests?: ZoneChest[];
+  /** a grown zone is crossed from west to east, or (a tall one) from north to south */
+  exitSide?: 'east' | 'south';
 }
 
-/** the zone objects (cmf_o3) and the common ones (cmf_oc) for the walk stamping and the drawing */
-export interface ZoneSets { obj: Cmf; oc: Cmf }
+/** the zone objects (cmf_oN of the biome) and the common ones (cmf_oc) for the walk stamping and the drawing */
+export interface ZoneSets { obj: Cmf; oc: Cmf; /** cmf_oN */ objName: string }
 
-export async function zoneSets(a: Assets): Promise<ZoneSets> {
-  const [obj, oc] = await Promise.all([a.cmf('cmf_o3'), a.cmf('cmf_oc')]);
-  return { obj, oc };
+export async function zoneSets(a: Assets, objset = 3): Promise<ZoneSets> {
+  const objName = `cmf_o${objset}`, [obj, oc] = await Promise.all([a.cmf(objName), a.cmf('cmf_oc')]);
+  return { obj, oc, objName };
 }
 
 export function objCmf(sets: ZoneSets, id: number): [Cmf, number] {
@@ -152,13 +180,13 @@ export function tilePairs(maps: GameMap[]): Pairs {
 }
 
 /** the plain grass: tiles used often and walkable most of the times they are used, with how often */
-export function grassOf(maps: GameMap[]): { tiles: number[]; weights: number[] } {
+export function grassOf(maps: GameMap[], min = 400): { tiles: number[]; weights: number[] } {
   const used = new Map<number, number>(), walkable = new Map<number, number>();
   for (const m of maps) m.tiles.forEach((row, r) => row.forEach((v, c) => {
     used.set(v, (used.get(v) ?? 0) + 1);
     if (m.walk[r]?.[c]) walkable.set(v, (walkable.get(v) ?? 0) + 1);
   }));
-  const g = [...walkable.entries()].filter(([v, n]) => v > 0 && n > 400 && n / used.get(v)! > 0.55).sort((p, q) => q[1] - p[1]);
+  const g = [...walkable.entries()].filter(([v, n]) => v > 0 && n > min && n / used.get(v)! > 0.55).sort((p, q) => q[1] - p[1]);
   return { tiles: g.map(([v]) => v), weights: g.map(([, n]) => n) };
 }
 
@@ -174,21 +202,27 @@ interface Source {
   /** tile meetings for rises (seen 3 times or more) and for ponds (twice or more: shores are rarer) */
   adj: Adjacency;
   adjPond: Adjacency;
+  /** the biome's pond inside (Biome.water) */
+  water: number | null;
+  shearAny: boolean;
 }
 
-let sourceCache: { a: Assets; p: Promise<Source> } | null = null;
+let sourceCache: { a: Assets; b: Biome; p: Promise<Source> }[] = [];
 
-async function source(a: Assets, sets: ZoneSets): Promise<Source> {
-  if (sourceCache?.a !== a) {
-    sourceCache = {
-      a, p: Promise.all(PAIR_SOURCES.map((id) => a.map(id))).then((maps) => {
-        const g = grassOf(maps), grass = new Set(g.tiles), soft = new Set([...grass, ...DECALS]);
+async function source(a: Assets, sets: ZoneSets, b: Biome): Promise<Source> {
+  if (sourceCache[0]?.a !== a) sourceCache = [];
+  let hit = sourceCache.find((x) => x.b === b);
+  if (!hit) {
+    hit = {
+      a, b, p: Promise.all(b.sources.map((id) => a.map(id))).then((maps) => {
+        const g = grassOf(maps, b.grassMin), grass = new Set(g.tiles), soft = new Set([...grass, ...b.decals]);
         const isles = maps.map((m) => { const t = gridOf(m, sets, grass); return { t, list: islandsOf(t, { grass, soft } as Source) }; }).filter((x) => x.list.length);
-        return { pairs: tilePairs(maps), grass, grassList: g.tiles, grassWeights: g.weights, soft, isles, adj: buildAdjacency(maps, grass, 2, 3), adjPond: buildAdjacency(maps, grass, 2, 2) };
+        return { pairs: tilePairs(maps), grass, grassList: g.tiles, grassWeights: g.weights, soft, isles, adj: buildAdjacency(maps, grass, 2, 3), adjPond: buildAdjacency(maps, grass, 2, 2), water: b.water, shearAny: !!b.shearAny };
       }),
     };
+    sourceCache.push(hit);
   }
-  return sourceCache.p;
+  return hit.p;
 }
 
 const LAYERS = ['objBg', 'objLow', 'objMid', 'objTop'] as const;
@@ -294,7 +328,7 @@ function insertSeam(g: Grid, k: number, h: Set<number>, v: Set<number>, src: Sou
   // T[r-1][y] over T[r][y + k] (down) or T[r-1][y + k] over T[r][y] (up) unless one of the rows repeats every k
   // there (then the shear changes nothing) or both are grass that meets in the sources
   const W1 = W + 1, pin = new Int32Array(W1 * H), down = new Int32Array(W1 * H), up = new Int32Array(W1 * H);
-  const meets = (t: number, u: number): boolean => grass.has(t) && grass.has(u) && v.has(pairKey(t, u));
+  const meets = (t: number, u: number): boolean => (src.shearAny || (grass.has(t) && grass.has(u))) && v.has(pairKey(t, u));
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
     const i = r * W1 + c;
     pin[i + 1] = pin[i] + (blocked(r * W + c) ? 1 : 0);
@@ -560,12 +594,12 @@ function raise(g: Grid, src: Source, rng: Rng): { cells: number; terrain: number
       if (near) mask[i] = 1;
       if (deep) inner[i] = 1;
     }
-    const pond = rng.chance(POND_SHARE);
+    const pond = src.water !== null && rng.chance(POND_SHARE);
     fills--;
     const kept: [number, number, number][] = [];
     for (let i = 0; i < N; i++) if (mask[i]) kept.push([i, g.tiles[(i / W) | 0][i % W], g.walk[(i / W) | 0][i % W]]);
     const ok = fill(g.tiles, g.walk, W, H, mask, pond ? src.adjPond : src.adj, rng, {
-      allow: (i, st) => !inner[i] || (pond ? st >> 1 === WATER : (st & 1) === 0 && src.grass.has(st >> 1)),
+      allow: (i, st) => !inner[i] || (pond ? st >> 1 === src.water : (st & 1) === 0 && src.grass.has(st >> 1)),
       weigh: (i, st, n) => (!inner[i] && ground(st) ? n * GROUND_BIAS : n),
       tries: 2,
     });
@@ -588,8 +622,6 @@ function raise(g: Grid, src: Source, rng: Rng): { cells: number; terrain: number
   return { cells: open, terrain };
 }
 
-/** open water (t3), the inside of a pond */
-const WATER = 92;
 /** the share of rises that are ponds instead */
 const POND_SHARE = 0.35;
 /** the room kept around a rise for its edges and cliffs */
@@ -691,13 +723,15 @@ export interface BattleZoneOpts {
   /** enemy groups placed */
   groups: number;
   /** species indices the groups are drawn from */
-  species: number[];
+  species: readonly number[];
   /** a template map to grow (one of the kind's templates by the seed otherwise) */
   template?: number;
   /** the battle zone's number (1..3): its chests are rolled for it */
   zoneNo?: number;
   /** the chance of a rare creature */
   rare?: number;
+  /** the stage's maps (stage 1's t3 when left out) */
+  biome?: Biome;
 }
 
 /** walk steps from (c, r) over the reached cells (-1: not reached) */
@@ -750,8 +784,8 @@ function placeChests(seen: Uint8Array, W: number, H: number, start: [number, num
 
 /** a battle zone (or a rest clearing with groups = 0) */
 export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 'battle' | 'rest', o: BattleZoneOpts): Promise<Zone> {
-  const rng = new Rng(seed), src = await source(a, sets);
-  const id = o.template ?? rng.pick(kind === 'rest' ? REST_TEMPLATES : BATTLE_TEMPLATES), tpl = await a.map(id);
+  const b = o.biome ?? BIOME_T3, rng = new Rng(seed), src = await source(a, sets, b);
+  const id = o.template ?? rng.pick(kind === 'rest' ? b.rest : b.battle), tpl = await a.map(id);
   const tw = Math.min(o.w, Math.round(tpl.header.width * MAX_GROW)), th = Math.min(o.h, Math.round(tpl.header.height * MAX_GROW));
   const g = grow(gridOf(tpl, sets, src.grass), tw, th, src, rng);
   const middle = kind === 'battle' ? raise(g, src, rng) : undefined;
@@ -767,19 +801,22 @@ export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 
   for (let i = 0; i < W * H; i++) if (region[i]) probe.push(i);
   for (let i = probe.length - 1; i > 0; i--) { const j = rng.int(0, i); [probe[i], probe[j]] = [probe[j], probe[i]]; }
   probe.length = Math.min(probe.length, 400);
-  const ends = (east: boolean): [number, number] => {
+  // a zone much taller than wide (a narrow volcano gorge grows only that way) is crossed from north to south instead
+  const tall = H > W * 1.2, N = tall ? H : W, M = tall ? W : H, along = (cell: [number, number]) => (tall ? cell[1] : cell[0]);
+  const ends = (far: boolean): [number, number] => {
     const cells: [number, number][] = [];
-    for (let c = east ? W - 1 : 0; east ? c >= 0 : c < W; c += east ? -1 : 1) {
-      for (let r = 0; r < H; r++) {
-        if (east ? openBlock(region, W, H, c, r, 1, 1, 4, 3) : openBlock(region, W, H, c, r, 2, 2)) cells.push([c, r]);
+    for (let a = far ? N - 1 : 0; far ? a >= 0 : a < N; a += far ? -1 : 1) {
+      for (let b = 0; b < M; b++) {
+        const [c, r] = tall ? [b, a] : [a, b];
+        if (far ? openBlock(region, W, H, c, r, 1, 1, 4, 3) : openBlock(region, W, H, c, r, 2, 2)) cells.push([c, r]);
       }
-      if (cells.length && Math.abs(cells[0][0] - c) >= Math.min(END_SPAN, Math.round(W / 8))) break;
+      if (cells.length && Math.abs(along(cells[0]) - a) >= Math.min(END_SPAN, Math.round(N / 8))) break;
     }
     if (!cells.length) return [W >> 1, H >> 1];
     for (let i = cells.length - 1; i > 0; i--) { const j = rng.int(0, i); [cells[i], cells[j]] = [cells[j], cells[i]]; }
     let best = cells[0], bestS = Infinity;
     for (const cell of cells.slice(0, 40)) {
-      const s = detour(region, W, H, cell[0], cell[1], probe) + Math.abs(cell[0] - cells[0][0]) * 0.004;
+      const s = detour(region, W, H, cell[0], cell[1], probe) + Math.abs(along(cell) - along(cells[0])) * 0.004;
       if (s < bestS) { bestS = s; best = cell; }
     }
     return best;
@@ -809,17 +846,17 @@ export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 
     }
   }
   const chests = kind === 'battle' && o.zoneNo ? placeChests(seen, W, H, start, exit, taken, chestRoll(o.zoneNo, rng), rng) : undefined;
-  return { kind, map, walk, start: { x: start[0] * TILE + 8, y: start[1] * TILE + 8 }, exit: { x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 }, spawns, template: id, middle, chests };
+  return { kind, map, walk, start: { x: start[0] * TILE + 8, y: start[1] * TILE + 8 }, exit: { x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 }, spawns, template: id, middle, chests, exitSide: tall ? 'south' : 'east' };
 }
 
-/** the boss room: m124 as it is, entered from its south passage, the boss where the original places it */
-export async function buildBoss(a: Assets, sets: ZoneSets, bossSpecies: number): Promise<Zone> {
-  const src = await a.map(BOSS_MAP);
+/** the boss room as it is (stage 1: m124, entered from its south passage), the boss where the original places it */
+export async function buildBoss(a: Assets, sets: ZoneSets, bossSpecies: number, biome: Biome = BIOME_T3): Promise<Zone> {
+  const src = await a.map(biome.boss.map), [sx, sy] = biome.boss.start, [ex, ey] = biome.boss.exit;
   const map: GameMap = { ...src, actors: [], portals: [], objBg: [...src.objBg], objLow: [...src.objLow], objMid: [...src.objMid], objTop: [...src.objTop] };
   const boss = src.actors[0];
   return {
     kind: 'boss', map, walk: zoneWalk(map, sets),
-    start: { x: 16.5 * TILE, y: 34 * TILE }, exit: { x: 15 * TILE, y: 4 * TILE },
+    start: { x: sx * TILE, y: sy * TILE }, exit: { x: ex * TILE, y: ey * TILE },
     spawns: [{ x: boss?.x ?? 256, y: boss?.y ?? 224, species: bossSpecies }],
   };
 }

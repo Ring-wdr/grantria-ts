@@ -82,7 +82,7 @@ export class BattleView {
     const ea = b.enemyAct;
     let rec = cmf.anims[animRec(sp, sp.anim.idle, 0, 3)], k = Math.floor(b.t * 8);
     if (ea && ea.actor === u) {
-      rec = cmf.anims[animRec(sp, sp.anim.attack, 0, 3)] ?? rec;
+      rec = cmf.anims[animRec(sp, ea.move.anim ?? sp.anim.attack, 0, 3)] ?? rec;
       k = b.now < ea.strikeAt ? 0 : Math.floor((b.now - ea.strikeAt) / 60);
       k = Math.min(rec.n - 1, k);
     } else if (b.act && this.acting(b, u)) {

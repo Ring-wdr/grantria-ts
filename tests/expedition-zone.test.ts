@@ -8,9 +8,10 @@ import { test } from 'node:test';
 import type { Assets, Cmf, GameMap, MapObject } from '../src/core/data/assets.ts';
 import { bodyBox } from '../src/core/world/world.ts';
 import {
-  BATTLE_TEMPLATES, EXIT_LIT, EXIT_OBJ, PAIR_SOURCES, REST_TEMPLATES, TILE, boxCells, buildField, detour, grassOf, objCmf, reachable, zoneSets,
+  BATTLE_TEMPLATES, EXIT_LIT, EXIT_OBJ, PAIR_SOURCES, REST_TEMPLATES, TILE, boxCells, buildBoss, buildField, detour, grassOf, objCmf, reachable, zoneSets,
   type Zone, type ZoneSets,
 } from '../src/core/expedition/zone.ts';
+import { STAGES } from '../src/core/expedition/stages.ts';
 
 const asset = (p: string) => new URL(`../public/assets/${p}`, import.meta.url);
 const have = existsSync(asset('maps/m120.json')) && existsSync(asset('cmf/cmf_o3.json'));
@@ -98,5 +99,34 @@ test('grown zones: the exit is reached from the start and every group stands on 
       assert.ok(z.middle && z.middle.terrain >= 0.02 * z.middle.cells, `${name}: ${z.middle?.terrain} of ${z.middle?.cells} middle cells raised`);
       assert.ok(z.spawns.length >= 10, `${name}: ${z.spawns.length} groups`);
     }
+  }
+});
+
+test('stages 2 and 3 (§17): their zones keep the tile meetings of their own tileset, are crossed end to end, and their boss rooms are entered on walkable ground', { skip: !(have && existsSync(asset('cmf/cmf_o4.json')) && existsSync(asset('cmf/cmf_o6.json'))) && 'no generated assets' }, async () => {
+  for (const st of STAGES.slice(1)) {
+    const b = st.biome, sets = await zoneSets(assets, b.objset), sources = b.sources.map((id) => json<GameMap>(mapFile(id)));
+    const h = new Set<string>(), v = new Set<string>();
+    for (const m of sources) m.tiles.forEach((row, r) => row.forEach((t, c) => {
+      if (c + 1 < row.length) h.add(`${t},${row[c + 1]}`);
+      if (r + 1 < m.tiles.length) v.add(`${t},${m.tiles[r + 1][c]}`);
+    }));
+    const list: [string, Zone][] = [];
+    for (const t of b.battle) list.push([`${st.name} m${t}`, await buildField(assets, sets, 40 + t, 'battle', { w: 190, h: 160, groups: 14, species: st.species, template: t, biome: b, zoneNo: 4 })]);
+    for (const t of b.rest) list.push([`${st.name} rest m${t}`, await buildField(assets, sets, 90 + t, 'rest', { w: 60, h: 44, groups: 0, species: [], template: t, biome: b })]);
+    for (const [name, z] of list) {
+      const m = z.map, W = m.header.width, H = m.header.height;
+      assert.equal(m.header.tileset, sources[0].header.tileset, name);
+      for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+        if (c + 1 < W) assert.ok(h.has(`${m.tiles[r][c]},${m.tiles[r][c + 1]}`), `${name}: ${m.tiles[r][c]} left of ${m.tiles[r][c + 1]} at ${c},${r}`);
+        if (r + 1 < H) assert.ok(v.has(`${m.tiles[r][c]},${m.tiles[r + 1][c]}`), `${name}: ${m.tiles[r][c]} over ${m.tiles[r + 1][c]} at ${c},${r}`);
+      }
+      const cell = (p: { x: number; y: number }) => Math.floor(p.y / TILE) * W + Math.floor(p.x / TILE);
+      const seen = reachable(z.walk, W, H, Math.floor(z.start.x / TILE), Math.floor(z.start.y / TILE));
+      assert.ok(seen[cell(z.exit)], `${name}: exit reached`);
+      for (const s of z.spawns) assert.ok(seen[cell(s)], `${name}: group at ${s.x},${s.y} reached`);
+      if (z.kind === 'battle') assert.ok(W * H >= 6000, `${name}: grown (${W}x${H})`);
+    }
+    const boss = await buildBoss(assets, sets, st.boss, b), BW = boss.map.header.width;
+    assert.equal(boss.walk[Math.floor(boss.start.y / TILE) * BW + Math.floor(boss.start.x / TILE)], 1, `${st.name}: boss room entered on walkable ground`);
   }
 });

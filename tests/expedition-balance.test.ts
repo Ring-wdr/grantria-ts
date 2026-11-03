@@ -231,10 +231,11 @@ test("gear names: the main game's equipment names from d.dat and text.json", { s
   assert.equal(name(15, 0), '별장식 목걸이');
 });
 
-test('combat scale (§15): a creature hits ×2.5 / ×3.5 / ×4 by its zone, the boss as it is; crits ×1.8 either way', () => {
+test('combat scale (§15, §17): a creature hits ×2.5 / ×3.5 / ×4 .. ×6.5 by its zone power 0..8, a boss as it is; crits ×1.8 either way', () => {
   const at = (power: number) => ({ species: 1, sp: SPECIES[1], stats: zoneStats(SPECIES[1].stats, power), hp: 1, hpMax: 1 }) as unknown as FieldEnemy;
-  const b = new Battle(new Run(), [at(0), at(1), at(2), foe(4)], 'none', () => 0.5);
-  assert.deepEqual(b.enemies.map((e) => e.hitMul), [...ENEMY_HIT, 1]);
+  const b = new Battle(new Run(), [...ENEMY_HIT.map((_, p) => at(p)), foe(4), foe(9), foe(13)], 'none', () => 0.5);
+  assert.deepEqual(b.enemies.map((e) => e.hitMul), [...ENEMY_HIT, 1, 1, 1]);
+  assert.deepEqual(ENEMY_HIT.slice(0, 3), [2.5, 3.5, 4], 'stage 1 as before');
   assert.equal(b.party[0].hitMul, 1);
   const hit = (rnd: number) => {
     const x = new Battle(new Run(), [at(2)], 'none', () => rnd);

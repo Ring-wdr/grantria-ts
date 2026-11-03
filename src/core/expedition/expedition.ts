@@ -1,14 +1,15 @@
 // 원정(가제) (not in the original): a standalone roguelike extra mode, reached from the title's 엑스트라 submenu.
 // It stands apart from main play: no save slot (a run lives in memory only), and nothing here imports the field game,
-// combat, rules or saves (tests/boundary.test.ts). The run (stage 1): three battle zones on t3, one after another,
-// with a rest zone between them half the time and always one before the boss room (초원 - 깊숙한곳, m124). The hero
+// combat, rules or saves (tests/boundary.test.ts). The run is three stages (stages.ts: 셀마 초원 t3, 카라스 사막 t4,
+// 벨루카 화산 t6), each three battle zones grown from its maps, one after another, with a rest zone between them half the
+// time and always one before its boss room. Beating a stage's boss heals the party fully and goes on to the next stage
+// with everything the party has; beating the third clears the run. The hero
 // walks 360° and fights in the field; an encounter becomes a turn battle. Growth and rewards follow
 // web/docs/expedition-balance.md: creatures drop gold and now and then a piece of the main game's equipment (four
 // slots, each piece on the whole party, for the run; a piece for a slot already filled is compared with the worn one and
 // either put on or thrown away), chests hold gold, potions and equipment, a battle zone may hold a rare creature, and a battle zone grows dark the longer the party stays (§8): at night the
 // party takes ×1.2 damage, gold is ×1.3 and the dark merchant appears (§9). Leaving a battle zone by its exit stone heals
-// 60% and shows what the zone gave; a rest zone heals fully. Beating the boss clears the stage; a party wipe ends the
-// run. Each zone has its BGM (REST_BGM, BOSS_BGM). Either way it is back to the title: nothing is kept (the host gets the run log, §12.1).
+// 60% and shows what the zone gave; a rest zone heals fully. A party wipe ends the run. Each zone has its BGM (REST_BGM, BOSS_BGM). Either way it is back to the title: nothing is kept (the host gets the run log, §12.1).
 // State and keys; the host draws it (web/expedition/expedition.ts) and steps it every animation frame (frame()).
 // Plain fields, no constructor parameter properties: node's type stripping loads core/ in tests.
 import { AVK } from '../keys';
@@ -19,7 +20,7 @@ import { FieldSim, type Advantage, type FieldChest, type FieldEnemy, type Press 
 import { Battle, talkExp } from './battle';
 import { Run, recruit, type Member } from './run';
 import { Talk } from './talk';
-import { BOSS_SPECIES, FIELD_SPECIES } from './species';
+import { STAGES, STAGE_ZONES, type Stage } from './stages';
 import { Rng } from './rng';
 import { CHEST_NAME, DROP_CHANCE, FIELD_DROP_CHANCE, FIELD_SKILL_DROP, RARE_SKILL, SKILL_DROP, rollSkill, GRADE_NAME, RARE_CHANCE, SLOT_NAME, creatureDrop, gearDesc, gearNamer, merchantStock, openChest, rareDrop,
   type Gear, type Namer, type Ware } from './loot';
@@ -44,7 +45,8 @@ export interface GearOffer { gear: Gear; from: string }
 
 /** the zone heal on leaving a battle zone */
 export const EXIT_HEAL = 0.6;
-export const BATTLE_ZONES = 3;
+/** battle zones in a stage */
+export const BATTLE_ZONES = STAGE_ZONES;
 
 /** BGM (0-based, s0..s18; the music room's track N is BGM N − 1): a battle zone plays its template map's own (stage 1's
  *  t3 maps: 4 = track 5), a rest zone track 17, the boss battle track 13 (0x0c, the original's boss and danger BGM) */
@@ -64,14 +66,20 @@ export const TINT_BASE: Record<DayPhase, number> = { day: 0, dusk: 11, night: 26
 export const TINT_STEPS: Record<DayPhase, number> = { day: 11, dusk: 15, night: 14 };
 export const TINT_TICK = 0.05;
 
-/** a stage-1 plan: battle zones in order, a rest zone between them about half the time, always one before the boss */
-export function stagePlan(seed: number): ZoneKind[] {
-  const rng = new Rng(seed ^ 0x9e3779b9), plan: ZoneKind[] = [];
-  for (let i = 0; i < BATTLE_ZONES; i++) {
-    plan.push('battle');
-    if (i < BATTLE_ZONES - 1 && rng.chance(0.5)) plan.push('rest');
+/** a zone of the run: its stage (0..) and kind */
+export interface PlanStep { stage: number; kind: ZoneKind }
+
+/** the run's plan: per stage its battle zones in order, a rest zone between them about half the time, always one
+ *  before the boss */
+export function stagePlan(seed: number, stages = STAGES.length): PlanStep[] {
+  const rng = new Rng(seed ^ 0x9e3779b9), plan: PlanStep[] = [];
+  for (let stage = 0; stage < stages; stage++) {
+    for (let i = 0; i < BATTLE_ZONES; i++) {
+      plan.push({ stage, kind: 'battle' });
+      if (i < BATTLE_ZONES - 1 && rng.chance(0.5)) plan.push({ stage, kind: 'rest' });
+    }
+    plan.push({ stage, kind: 'rest' }, { stage, kind: 'boss' });
   }
-  plan.push('rest', 'boss');
   return plan;
 }
 
@@ -107,6 +115,7 @@ export interface ZoneLog {
 
 /** the boss fight in the run log */
 export interface BossLog {
+  stage: string;
   party: string[];
   equip: string[];
   potions: number;
@@ -139,8 +148,10 @@ export class ExpeditionLogic {
   /** the encounter being opened: its banner shows this long before the battle */
   encounter: { enemies: FieldEnemy[]; advantage: Advantage; t: number } | null = null;
   /** the zones of this run and the one being played */
-  readonly plan: ZoneKind[];
+  readonly plan: PlanStep[];
   step = 0;
+  /** the zone objects of each stage's objset, loaded when the stage begins */
+  private readonly setsBy = new Map<number, ZoneSets>();
   /** the lines shown on leaving a battle zone */
   summary: string[] = [];
   /** the battle zone's clock (s of its own time) and its phase (§8) */
@@ -151,7 +162,7 @@ export class ExpeditionLogic {
   shopSel = 0;
   shopLine = '';
   /** the run log (§12.1) */
-  readonly log: { zones: ZoneLog[]; boss: BossLog | null } = { zones: [], boss: null };
+  readonly log: { zones: ZoneLog[]; bosses: BossLog[] } = { zones: [], bosses: [] };
   /** this battle zone's entry in the log */
   zlog: ZoneLog | null = null;
   /** loot rolls (drops, chests, the merchant), from the run seed */
@@ -175,17 +186,23 @@ export class ExpeditionLogic {
     void this.enterZone();
   }
 
-  /** the number of the battle zone being played (1..), or 0 */
-  get battleNo(): number { return this.plan.slice(0, this.step + 1).filter((k) => k === 'battle').length; }
+  /** the stage being played (STAGES) and its number (0..) */
+  get stageNo(): number { return this.plan[this.step].stage; }
+  get stage(): Stage { return STAGES[this.stageNo]; }
+
+  /** the number of the battle zone being played in the whole run (1..9; zone power and loot row), or the last one */
+  get battleNo(): number { return this.plan.slice(0, this.step + 1).filter((p) => p.kind === 'battle').length; }
+  /** ... and in its stage (1..3) */
+  get stageBattleNo(): number { return this.plan.slice(0, this.step + 1).filter((p) => p.kind === 'battle' && p.stage === this.stageNo).length; }
 
   /** what the HUD calls the zone */
   get zoneName(): string {
-    const k = this.plan[this.step];
-    return k === 'battle' ? `초원 ${this.battleNo} / ${BATTLE_ZONES}` : k === 'rest' ? '쉼터' : '초원 - 깊숙한곳';
+    const k = this.plan[this.step].kind, s = this.stage;
+    return k === 'battle' ? `${s.area} ${this.stageBattleNo} / ${BATTLE_ZONES}` : k === 'rest' ? `${s.area} 쉼터` : s.bossArea;
   }
 
   /** a battle zone is being played (its clock runs) */
-  get inBattleZone(): boolean { return this.plan[this.step] === 'battle'; }
+  get inBattleZone(): boolean { return this.plan[this.step].kind === 'battle'; }
   get night(): boolean { return this.inBattleZone && this.dayPhase === 'night'; }
   get goldMul(): number { return this.night ? NIGHT_GOLD : 1; }
   get takenMul(): number { return this.night ? NIGHT_TAKEN : 1; }
@@ -202,11 +219,13 @@ export class ExpeditionLogic {
   /** build the zone of this step and put the hero at its start (the host prepares its drawing in onZone) */
   protected async enterZone(): Promise<void> {
     this.mode = 'loading';
-    const a = this.ctx.assets, kind = this.plan[this.step], seed = (this.seed + this.step * 7919) >>> 0;
-    this.sets ??= await zoneSets(a);
-    const zone = kind === 'boss' ? await buildBoss(a, this.sets, BOSS_SPECIES)
-      : kind === 'rest' ? await buildField(a, this.sets, seed, 'rest', { w: 60, h: 44, groups: 0, species: [] })
-      : await buildField(a, this.sets, seed, 'battle', { w: 190, h: 160, groups: 10 + this.battleNo * 2, species: FIELD_SPECIES, zoneNo: this.battleNo, rare: RARE_CHANCE });
+    const a = this.ctx.assets, { kind } = this.plan[this.step], seed = (this.seed + this.step * 7919) >>> 0, st = this.stage, biome = st.biome;
+    let sets = this.setsBy.get(biome.objset);
+    if (!sets) this.setsBy.set(biome.objset, (sets = await zoneSets(a, biome.objset)));
+    this.sets = sets;
+    const zone = kind === 'boss' ? await buildBoss(a, sets, st.boss, biome)
+      : kind === 'rest' ? await buildField(a, sets, seed, 'rest', { w: 60, h: 44, groups: 0, species: [], biome })
+      : await buildField(a, sets, seed, 'battle', { w: 190, h: 160, groups: 10 + this.stageBattleNo * 2, species: st.species, zoneNo: this.battleNo, rare: RARE_CHANCE, biome });
     await this.onZone(zone);
     this.zone = zone;
     this.field = new FieldSim(zone, seed ^ 0x5bd1e995, kind === 'battle' ? this.battleNo - 1 : 0);
@@ -229,12 +248,15 @@ export class ExpeditionLogic {
     }
     if (kind === 'rest') { this.run.heal(1); this.toast('쉼터: 파티가 모두 회복했다'); this.toast('출구의 돌에서 상호작용으로 다음 지역으로'); }
     else if (kind === 'boss') this.toast('깊은 곳에서 무언가가 노려보고 있다...');
-    else this.toast(`${this.zoneName} · 동쪽 끝의 돌이 출구다`);
+    else {
+      if (this.stageBattleNo === 1) this.toast(st.intro);
+      this.toast(`${this.zoneName} · ${zone.exitSide === 'south' ? '남쪽' : '동쪽'} 끝의 돌이 출구다`);
+    }
   }
 
   /** the exit stone: a battle zone shows what it gave first, a rest zone goes straight on */
   private leaveZone(): void {
-    if (this.plan[this.step] === 'battle') {
+    if (this.plan[this.step].kind === 'battle') {
       const z = this.zlog!, opened = z.chests.opened.reduce((s, n) => s + n, 0), placed = z.chests.placed.reduce((s, n) => s + n, 0);
       this.run.cleared++;
       this.run.heal(EXIT_HEAL);
@@ -496,7 +518,7 @@ export class ExpeditionLogic {
     if (out === 'joined') {
       const gone = t.released !== null ? this.releasable[t.released] : null;
       if (gone) b.release(gone);
-      const m = recruit(t.enemy.species!, t.enemy.rare);
+      const m = recruit(t.enemy.species!, t.enemy.rare, t.enemy.lv);
       m.hp = Math.max(1, Math.round(m.hpMax * Math.max(0.3, t.enemy.hp / t.enemy.hpMax)));
       this.run.join(m);
       this.run.recruits++;
@@ -540,7 +562,7 @@ export class ExpeditionLogic {
       this.gainGold(b.gold);
       if (this.zlog) { this.zlog.kills.battle += beaten; this.zlog.exp += b.exp; }
       this.field!.resume(enc.enemies, []);
-      if (b.isBoss) { this.logBoss(b, 'won'); this.battle = null; this.encounter = null; this.mode = 'clear'; this.finishLog(); return; }
+      if (b.isBoss) { this.logBoss(b, 'won'); this.battle = null; this.encounter = null; this.stageCleared(b); return; }
       const first = b.enemies.find((e) => !e.gone);                // one roll for the won battle (§4.3)
       if (first && this.lootRng.chance(DROP_CHANCE)) this.gainGear(creatureDrop(this.battleNo, this.lootRng, this.names), first.name);
       if (first && this.lootRng.chance(SKILL_DROP)) this.gainSkill(rollSkill(this.battleNo, this.lootRng), first.name);
@@ -562,16 +584,28 @@ export class ExpeditionLogic {
     this.openOffer();
   }
 
+  /** a stage's boss beaten: the last one clears the run; any other heals the party fully and the next stage begins
+   *  after its summary (§17) */
+  private stageCleared(b: Battle): void {
+    if (this.stageNo >= STAGES.length - 1) { this.mode = 'clear'; this.finishLog(); return; }
+    const boss = b.enemies.find((e) => e.sp?.boss), next = STAGES[this.stageNo + 1];
+    this.run.heal(1);
+    this.summary = [`${this.stage.name} 돌파!`, `${boss?.name ?? '보스'}을(를) 쓰러뜨렸다`, `EXP +${b.exp}`, '파티 HP 모두 회복',
+      `다음 스테이지: ${next.name}`, '레벨·장비·스킬·동료·골드는 그대로 이어진다'];
+    this.mode = 'summary';
+  }
+
   // --- the run log (§12.1) --------------------------------------------------------------------------------------
 
   private logBoss(b: Battle, result: 'won' | 'lost'): void {
     const boss = b.enemies.find((e) => e.sp?.boss);
-    this.log.boss = {
+    this.log.bosses.push({
+      stage: this.stage.name,
       party: this.run.party.map((m) => `${m.shiny ? '빛나는 ' : ''}${m.name} Lv.${m.lv}`),
       equip: this.run.equip.flatMap((g) => g ? [`[${GRADE_NAME[g.grade]}] ${g.name}`] : []), potions: this.run.potions, gold: this.run.gold,
       advantage: b.advantage, result, turns: boss?.turns ?? 0, parries: this.run.parries - this.parriesAtBoss, hitsTaken: b.hitsTaken,
       roarDmg: b.roarDmg, enraged: !!boss?.enraged,
-    };
+    });
   }
 
   /** the run is over: the host keeps its log (the web host prints it to the console) */

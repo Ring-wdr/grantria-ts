@@ -99,16 +99,20 @@ export function rollGear(tiers: readonly number[], grades: readonly number[], rn
   return makeGear(slot, rng.weighted(tiers) + tierUp, rng.weighted(grades) as Grade, rng, name);
 }
 
-const zi = (n: number) => Math.max(0, Math.min(2, n - 1));
+/** the run's battle zones (three stages of three): loot tables have a row for each (§17) */
+export const LOOT_ZONES = 9;
+const zi = (n: number) => Math.max(0, Math.min(LOOT_ZONES - 1, n - 1));
 
 // --- creatures ------------------------------------------------------------------------------------------------------
 
 /** a won battle drops a piece this often (one roll however many fell); a field kill half as often (like its EXP) */
 export const DROP_CHANCE = 0.3, FIELD_DROP_CHANCE = 0.15;
-/** tier weights 1..4 of a creature's drop in battle zone 1..3 */
-export const DROP_TIERS = [[75, 22, 3, 0], [40, 42, 15, 3], [20, 40, 30, 10]] as const;
-/** grade weights 일반..전설 of a creature's drop in battle zone 1..3 */
-export const DROP_GRADES = [[75, 20, 5, 0, 0], [62, 27, 9, 2, 0], [50, 32, 14, 4, 0]] as const;
+/** tier weights 1..4 of a creature's drop in battle zone 1..9 of the run (stage 1: 1..3) */
+export const DROP_TIERS = [[75, 22, 3, 0], [40, 42, 15, 3], [20, 40, 30, 10],
+  [10, 35, 40, 15], [5, 25, 45, 25], [0, 20, 45, 35], [0, 10, 45, 45], [0, 5, 40, 55], [0, 0, 35, 65]] as const;
+/** grade weights 일반..전설 of a creature's drop in battle zone 1..9 */
+export const DROP_GRADES = [[75, 20, 5, 0, 0], [62, 27, 9, 2, 0], [50, 32, 14, 4, 0],
+  [45, 33, 16, 6, 0], [40, 34, 18, 7, 1], [35, 35, 20, 8, 2], [30, 35, 22, 10, 3], [26, 35, 24, 12, 3], [22, 35, 26, 13, 4]] as const;
 
 /** what a creature of battle zone n drops */
 export function creatureDrop(n: number, rng: Rng, name: Namer): Gear {
@@ -119,8 +123,8 @@ export function creatureDrop(n: number, rng: Rng, name: Namer): Gear {
 
 /** a won battle teaches a skill this often (rolled apart from its piece), a field kill half as often */
 export const SKILL_DROP = 0.08, FIELD_SKILL_DROP = 0.04;
-/** tier weights (1·2·3단계) of a skill found in battle zone 1..3 */
-export const SKILL_TIERS = [[80, 20, 0], [50, 40, 10], [30, 40, 30]] as const;
+/** tier weights (1·2·3단계) of a skill found in battle zone 1..9 */
+export const SKILL_TIERS = [[80, 20, 0], [50, 40, 10], [30, 40, 30], [25, 40, 35], [20, 40, 40], [15, 40, 45], [15, 35, 50], [10, 35, 55], [10, 30, 60]] as const;
 /** the share of chests holding a skill instead (나무, 녹슨, 은, 황금), and of rare creatures dropping one instead of a piece */
 export const CHEST_SKILL: Record<ChestKind, number> = { 0: 0.05, 1: 0.15, 2: 0.25, 3: 0.3 };
 export const RARE_SKILL = 0.3;
@@ -141,11 +145,12 @@ export const CHEST_FRAME = [14, 15, 16, 17] as const;
 /** off-path walk distance (tiles) a chest of the kind wants: the better the deeper */
 export const CHEST_DEPTH = [10, 20, 30, 30] as const;
 
-/** the chests of battle zone n (1..3): two wooden plus one at 50%, the others by chance */
+/** the chests of battle zone n (1..9): two wooden plus one at 50%, the others by chance (gold 5% more, silver 5% more
+ *  a zone, to 30% and 50%) */
 export function chestRoll(n: number, rng: Rng): ChestKind[] {
   const i = zi(n), out: ChestKind[] = [];
-  if (rng.chance([0.05, 0.1, 0.15][i])) out.push(3);
-  if (rng.chance([0.2, 0.25, 0.3][i])) out.push(2);
+  if (rng.chance(Math.min(0.3, 0.05 * (i + 1)))) out.push(3);
+  if (rng.chance(Math.min(0.5, 0.2 + 0.05 * i))) out.push(2);
   if (rng.chance(0.5)) out.push(1);
   out.push(0, 0);
   if (rng.chance(0.5)) out.push(0);
@@ -164,12 +169,12 @@ export const CHEST_TIER_UP: Record<ChestKind, number> = { 0: 0, 1: 0, 2: 1, 3: 1
 
 export type Loot = { kind: 'gold'; gold: number } | { kind: 'potion'; n: number } | { kind: 'gear'; gear: Gear } | { kind: 'skill'; id: number };
 
-/** what a chest of battle zone n holds: a wooden one gold 50%, a potion 25%, a piece 25%; the others a piece */
+/** what a chest of battle zone n holds: a wooden one gold 50% (15 + 10·n), a potion 25%, a piece 25%; the others a piece */
 export function openChest(kind: ChestKind, n: number, rng: Rng, name: Namer): Loot {
   if (rng.chance(CHEST_SKILL[kind])) return { kind: 'skill', id: rollSkill(n, rng, CHEST_TIER_UP[kind]) };
   if (kind === 0) {
     const r = rng.next();
-    if (r < 0.5) return { kind: 'gold', gold: 15 + 10 * Math.max(1, Math.min(3, n)) };
+    if (r < 0.5) return { kind: 'gold', gold: 15 + 10 * (zi(n) + 1) };
     if (r < 0.75) return { kind: 'potion', n: 1 };
   }
   return { kind: 'gear', gear: rollGear(DROP_TIERS[zi(n)], CHEST_GRADES[kind], rng, name, CHEST_TIER_UP[kind]) };
@@ -192,8 +197,9 @@ export function rareDrop(n: number, rng: Rng, name: Namer): Gear {
 export const POTION_PRICE = 30;
 /** a piece's price: 120G, +100G a tier step, +100G a grade step (전설 is not sold) */
 export function gearPrice(g: Pick<Gear, 'sub' | 'grade'>): number { return 120 + 100 * g.sub + 100 * g.grade; }
-/** grade weights 일반..영웅 of the merchant's pieces in battle zone 1..3 (one tier above the zone's creature drop) */
-export const MERCHANT_GRADES = [[60, 35, 5, 0], [40, 40, 17, 3], [25, 40, 28, 7]] as const;
+/** grade weights 일반..영웅 of the merchant's pieces in battle zone 1..9 (one tier above the zone's creature drop) */
+export const MERCHANT_GRADES = [[60, 35, 5, 0], [40, 40, 17, 3], [25, 40, 28, 7],
+  [20, 40, 30, 10], [15, 40, 33, 12], [10, 38, 37, 15], [10, 35, 38, 17], [8, 32, 40, 20], [5, 30, 42, 23]] as const;
 
 export interface Ware { gear: Gear | null; /** potions left (the potion slot) */ n: number; price: number; sold: boolean }
 

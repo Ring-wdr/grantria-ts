@@ -6,6 +6,7 @@
 // the projectile drawn and the line under the menu. Passives and traits are left out.
 import type { Assets } from '../data/assets';
 import type { Skill } from './battle';
+import type { AtkType, Effect } from './species';
 
 export interface SkillDef {
   /** the original skill number s (0..8) */
@@ -23,6 +24,9 @@ export interface SkillDef {
   all: boolean;
   /** a projectile drawn on the target (cmf_c0 frames): skill 5's circling sword, skill 6's sword mark */
   proj?: 'boomerang' | 'slider';
+  /** its attack type and what it does besides damage (web/docs/expedition-balance.md §18.5) */
+  type: AtkType;
+  effect?: Effect;
   desc: string;
 }
 
@@ -35,17 +39,17 @@ export const SKILL_MAX_GOLD = [60, 120, 200] as const;
 const TICK = 0.05;
 
 export const SKILLBOOK: SkillDef[] = [
-  { id: 0, name: '', dmg: [100, 0], tier: 0, ticks: 16, hits: [9], act: 3, all: false, desc: '돌진해 어깨로 들이받는다' },
-  { id: 1, name: '', dmg: [100, 0], tier: 0, ticks: 22, hits: [15], act: 6, all: true, desc: '검을 크게 휘둘러 주위를 벤다' },
-  { id: 2, name: '', dmg: [100, 0], tier: 0, ticks: 19, hits: [5, 7, 10, 12, 15, 17], act: 9, all: false, desc: '검을 비틀어 여섯 번 찌른다' },
-  { id: 3, name: '', dmg: [100, 0], tier: 1, ticks: 16, hits: [8], act: 4, all: false, desc: '빠르게 파고들어 벤다' },
-  { id: 4, name: '', dmg: [100, 0], tier: 1, ticks: 18, hits: [11, 12, 13, 14], act: 7, all: true, desc: '바람의 칼날로 앞을 네 번 가른다' },
+  { id: 0, name: '', dmg: [100, 0], tier: 0, ticks: 16, hits: [9], act: 3, all: false, type: 'blunt', effect: { delay: true }, desc: '돌진해 어깨로 들이받는다' },
+  { id: 1, name: '', dmg: [100, 0], tier: 0, ticks: 22, hits: [15], act: 6, all: true, type: 'slash', effect: { bleed: 1 }, desc: '검을 크게 휘둘러 주위를 벤다' },
+  { id: 2, name: '', dmg: [100, 0], tier: 0, ticks: 19, hits: [5, 7, 10, 12, 15, 17], act: 9, all: false, type: 'pierce', desc: '검을 비틀어 여섯 번 찌른다' },
+  { id: 3, name: '', dmg: [100, 0], tier: 1, ticks: 16, hits: [8], act: 4, all: false, type: 'pierce', effect: { mark: true }, desc: '빠르게 파고들어 벤다' },
+  { id: 4, name: '', dmg: [100, 0], tier: 1, ticks: 18, hits: [11, 12, 13, 14], act: 7, all: true, type: 'magic', effect: { weak: 2 }, desc: '바람의 칼날로 앞을 네 번 가른다' },
   // the boomerang circles for 17 ticks from tick 10 and hits whatever it passes: about three times on one standing foe
-  { id: 5, name: '', dmg: [100, 0], tier: 1, ticks: 31, hits: [12, 17, 22], act: 10, all: true, proj: 'boomerang', desc: '검을 던져 주위를 돌게 한다' },
-  { id: 6, name: '', dmg: [100, 0], tier: 2, ticks: 15, hits: [8], act: 5, all: false, proj: 'slider', desc: '미끄러지듯 베고 지나가 검흔을 남긴다' },
-  { id: 7, name: '', dmg: [100, 0], tier: 2, ticks: 27, hits: [7, 11, 15, 19, 23], act: 8, all: true, desc: '회오리처럼 돌며 다섯 번 벤다' },
+  { id: 5, name: '', dmg: [100, 0], tier: 1, ticks: 31, hits: [12, 17, 22], act: 10, all: true, proj: 'boomerang', type: 'slash', desc: '검을 던져 주위를 돌게 한다' },
+  { id: 6, name: '', dmg: [100, 0], tier: 2, ticks: 15, hits: [8], act: 5, all: false, proj: 'slider', type: 'pierce', effect: { rupture: true }, desc: '미끄러지듯 베고 지나가 검흔을 남긴다' },
+  { id: 7, name: '', dmg: [100, 0], tier: 2, ticks: 27, hits: [7, 11, 15, 19, 23], act: 8, all: true, type: 'magic', effect: { delay: true }, desc: '회오리처럼 돌며 다섯 번 벤다' },
   // seen from the side the hammer's box is redrawn and lands four times (skills.md §2.2)
-  { id: 8, name: '', dmg: [100, 0], tier: 2, ticks: 22, hits: [12, 14, 16, 18], act: 11, all: false, desc: '검을 내리찍어 땅을 울린다' },
+  { id: 8, name: '', dmg: [100, 0], tier: 2, ticks: 22, hits: [12, 14, 16, 18], act: 11, all: false, type: 'blunt', effect: { brkMul: 1.5 }, desc: '검을 내리찍어 땅을 울린다' },
 ];
 
 /** the 검사's (class 0) skill records: 13 × u16 each, [0] damage %, [3] its step per level */
@@ -70,6 +74,6 @@ export function skillAt(d: SkillDef, lv: number): Skill {
   return {
     name: d.name, ap: SKILL_AP[d.tier], power, brk: Math.round(10 * power), all: d.all, act: d.act, fx: [0, 5],
     desc: `${d.desc} · ${d.all ? '적 전원' : '적 하나'}에 ${n > 1 ? `${n}번 ` : ''}${skillPct(d, lv)}%`,
-    hits: d.hits.map((t) => t * TICK), dur: d.ticks * TICK, lv, proj: d.proj,
+    hits: d.hits.map((t) => t * TICK), dur: d.ticks * TICK, lv, proj: d.proj, type: d.type, effect: d.effect,
   };
 }

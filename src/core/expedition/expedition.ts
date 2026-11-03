@@ -85,6 +85,8 @@ export function stagePlan(seed: number, stages = STAGES.length): PlanStep[] {
 
 /** the pause menu rows */
 export const PAUSE_ITEMS = ['계속하기', '원정 포기 (타이틀로)'] as const;
+/** the defense window scales the pause menu cycles through (web/docs/expedition-balance.md §18.6) */
+export const TIMING_STEPS = [1, 1.3, 1.6];
 
 export const ADVANTAGE_LABEL: Record<Advantage, string> = { party: '선제 공격!', none: '전투 개시', enemy: '기습당했다!' };
 
@@ -613,12 +615,18 @@ export class ExpeditionLogic {
 
   protected onRunEnd(_log: ExpeditionLogic['log']): void {}
 
+  /** the pause menu rows (the timing row shows the window scale chosen) */
+  get pauseItems(): string[] { return [PAUSE_ITEMS[0], `판정 창 ×${this.run.timing.toFixed(1)}`, PAUSE_ITEMS[1]]; }
+
   protected pauseKeys(keys: number[]): void {
+    const n = this.pauseItems.length;
     for (const k of keys) {
-      if (k === AVK.UP || k === AVK.DOWN) this.pauseSel = (this.pauseSel + 1) % PAUSE_ITEMS.length;
+      if (k === AVK.UP) this.pauseSel = (this.pauseSel + n - 1) % n;
+      else if (k === AVK.DOWN) this.pauseSel = (this.pauseSel + 1) % n;
       else if (k === AVK.CLR) { this.mode = 'field'; return; }
       else if (k === AVK.OK) {
         if (this.pauseSel === 0) this.mode = 'field';
+        else if (this.pauseSel === 1) this.run.timing = TIMING_STEPS[(TIMING_STEPS.indexOf(this.run.timing) + 1) % TIMING_STEPS.length];
         else this.ctx.screens.title();
         return;
       }

@@ -7,6 +7,59 @@
 export type Personality = 'timid' | 'childish' | 'proud' | 'curious' | 'honorable';
 export type Tier = 'weak' | 'normal' | 'boss';
 
+/** attack types (web/docs/expedition-balance.md §18.3): a hit of a type the target is weak to breaks it twice as fast */
+export type AtkType = 'slash' | 'pierce' | 'blunt' | 'magic';
+export const TYPE_NAME: Record<AtkType, string> = { slash: '베기', pierce: '찌르기', blunt: '타격', magic: '마법' };
+
+/** the statuses (§18.2); 절개 is an effect, not a status */
+export type StatusKey = 'mark' | 'bleed' | 'delay' | 'weak' | 'shield' | 'taunt';
+
+/** what an action does besides its damage (§18.2, §18.5): on each target it hits (self / ally ones on the user's side) */
+export interface Effect {
+  /** bleed stacks put on */
+  bleed?: number;
+  mark?: boolean;
+  delay?: boolean;
+  /** 약화 for this many of its turns */
+  weak?: number;
+  /** 절개: the remaining bleed at once */
+  rupture?: boolean;
+  /** ×this on a marked target (a harvester's skill), on top of the mark */
+  markBonus?: number;
+  /** break ×this */
+  brkMul?: number;
+  /** shields on every standing member of the user's side */
+  allyShield?: number;
+  /** the user taunts (enemy single-target moves go to it) */
+  taunt?: boolean;
+}
+
+export const STATUS_NAME: Record<StatusKey, string> = { mark: '표식', bleed: '출혈', delay: '지연', weak: '약화', shield: '방어막', taunt: '도발' };
+export const STATUS_DESC: Record<StatusKey, string> = {
+  mark: '다음 단일 공격의 모든 타격 ×1.5', bleed: '자기 턴마다 스택만큼 피해, 스택 −1', delay: '순서가 뒤로 밀린다',
+  weak: '주는 피해 −30%', shield: '맞을 때마다 하나씩 깎이고 그 타격은 0', taunt: '적의 단일 공격을 끌어온다',
+};
+
+/** an effect as short words (skill lines, intents) */
+export function effectText(e: Effect | undefined): string[] {
+  if (!e) return [];
+  const out: string[] = [];
+  if (e.bleed) out.push(`출혈 ${e.bleed}`);
+  if (e.mark) out.push('표식');
+  if (e.delay) out.push('지연');
+  if (e.weak) out.push(`약화 ${e.weak}턴`);
+  if (e.rupture) out.push('절개(출혈 폭발)');
+  if (e.markBonus) out.push(`표식이면 ×${e.markBonus}`);
+  if (e.brkMul) out.push(`브레이크 ×${e.brkMul}`);
+  if (e.allyShield) out.push(`아군 방어막 ${e.allyShield}`);
+  if (e.taunt) out.push('도발');
+  return out;
+}
+
+/** how a hit may be defended (§18.6): any (parry or dodge), dodge only (a red flash), parry only (black and white, a
+ *  narrower window, a big counter) */
+export type Cue = 'any' | 'dodge' | 'parry';
+
 /** a battle move: hits land at these seconds after the windup ends (a ring closes on each), power × attack */
 export interface Move {
   name: string;
@@ -16,20 +69,56 @@ export interface Move {
   power: number;
   /** fired from where it stands (the species' field shot flies at the target for each hit) */
   shot?: boolean;
-  /** hits the whole party and cannot be parried or dodged (the boss's 왕의 포효) */
-  roar?: boolean;
+  /** every hit lands on the whole party (one defense for all) */
+  all?: boolean;
+  /** how each hit may be defended (missing: 'any') */
+  cues?: Cue[];
+  /** a status the move puts on whoever a hit lands on (a defended hit puts nothing) */
+  apply?: Effect;
+  /** the first hit comes late: it glows (and holds) before it */
+  late?: boolean;
   /** the anim record it plays in battle (the species' attack otherwise) */
   anim?: number;
+  /** a boss's last-ditch move: used once, on its first turn under 30% */
+  once?: boolean;
 }
 
-/** a boss's growth check (web/docs/expedition-balance.md §10): an unblockable roar on every roarEvery-th turn it acts,
- *  and after enrageAt such turns attack ×enrageAtk and the roar (at enragePow) every turn */
+/** a boss phase (§18.6): from this share of HP down, moves added and a rule */
+export interface BossPhase {
+  at: number;
+  line: string;
+  add: Move[];
+  /** charge turns from here on */
+  chargeTurns?: number;
+  /** calls these species in, at this zone power */
+  summon?: number[];
+  summonPower?: number;
+  /** gets this many shields (a golem's stone armour; heads: each head) */
+  shield?: number;
+  /** a shield more every this many turns */
+  shieldEvery?: number;
+  /** broken heads stand again */
+  reviveHeads?: boolean;
+  /** each standing head acts in a turn */
+  allHeads?: boolean;
+}
+
+/** a boss's pattern (§18.6, §18.7): a charge move announced chargeTurns ahead and every chargeEvery of its turns, phases
+ *  at HP shares, enrage after enrageAt turns (pushed back by breaks), heads (separate break gauges, one move each) */
 export interface BossPattern {
-  roar: Move;
-  roarEvery: number;
+  charge: Move;
+  chargeTurns: number;
+  chargeEvery: number;
   enrageAt: number;
   enrageAtk: number;
-  enragePow: number;
+  phases: BossPhase[];
+  /** shields at the start (stone armour) */
+  shield?: number;
+  /** a charge is called off when this many heads are broken (heads), else by breaking the boss */
+  heads?: { name: string; move: Move }[];
+  headsToCancel?: number;
+  /** while summoned creatures stand, its bleed damage is halved */
+  guardedBleed?: boolean;
 }
 
 /** a creature's ranged attack in the field: the projectile frames of its own sprite (as the original fires them) */
@@ -75,6 +164,11 @@ export interface Species {
   stats: { hp: number; atk: number; def: number; spd: number; exp: number; lv: number; gold: number };
   moves: Move[];
   boss?: BossPattern;
+  /** its weaknesses (§18.3) and the statuses it ignores */
+  weak?: AtkType[];
+  immune?: StatusKey[];
+  /** the type of its basic attack when it fights for the party (blunt otherwise) */
+  atkType?: AtkType;
   desc: string;
 }
 
@@ -105,6 +199,7 @@ export const SPECIES: Species[] = [
     field: { speed: 38, detect: 90, windup: 0.75, breakMax: 30, poise: 0, radius: 9 },
     stats: { hp: 34, atk: 7, def: 2, spd: 8, exp: 10, lv: 1, gold: 5 },
     moves: [{ name: '덩굴 채찍', windup: 0.9, hits: [0], power: 1 }],
+    weak: ['slash', 'magic'],
     desc: '풀숲에 숨어 지나가는 것을 덥석 무는 덩굴. 겁이 많다.',
   },
   {
@@ -114,9 +209,10 @@ export const SPECIES: Species[] = [
     stats: { hp: 70, atk: 11, def: 4, spd: 12, exp: 24, lv: 2, gold: 12 },
     moves: [
       { name: '할퀴기', windup: 0.8, hits: [0], power: 1 },
-      { name: '연속 할퀴기', windup: 1.0, hits: [0, 0.5], power: 0.75 },
+      { name: '연속 할퀴기', windup: 1.0, hits: [0, 0.5], power: 0.75, apply: { bleed: 1 } },
       { name: '사격', windup: 0.9, hits: [0], power: 1.0, shot: true },
     ],
+    weak: ['pierce'], atkType: 'slash',
     desc: '초원을 떠돌며 사냥감을 쫓는 짐승. 정면으로 맞서는 자를 인정한다.',
   },
   {
@@ -126,8 +222,9 @@ export const SPECIES: Species[] = [
     stats: { hp: 58, atk: 10, def: 3, spd: 14, exp: 20, lv: 2, gold: 10 },
     moves: [
       { name: '물보라', windup: 0.9, hits: [0], power: 1.1, shot: true },
-      { name: '물결 노래', windup: 1.2, hits: [0, 0.45, 0.9], power: 0.55, shot: true },
+      { name: '물결 노래', windup: 1.2, hits: [0, 0.45, 0.9], power: 0.55, shot: true, apply: { weak: 2 } },
     ],
+    weak: ['blunt'], atkType: 'magic',
     desc: '호숫가에서 노래하는 반인반어. 모르는 것을 보면 못 참는다.',
   },
   {
@@ -135,19 +232,30 @@ export const SPECIES: Species[] = [
     field: { speed: 48, detect: 100, windup: 0.8, breakMax: 28, poise: 0, radius: 8 },
     stats: { hp: 30, atk: 8, def: 2, spd: 11, exp: 9, lv: 1, gold: 5 },
     moves: [{ name: '물방울 튀기기', windup: 0.8, hits: [0, 0.5], power: 0.6 }],
+    weak: ['blunt'], atkType: 'magic',
     desc: '맑은 물에서 태어난 작은 정령. 노는 것을 좋아한다.',
   },
   {
     name: '초원의 왕 흑표', cmf: 14, fourDir: true, anim: { idle: 0, move: 3, attack: 6 }, tier: 'boss', personality: 'proud',
     talk: 'locked', talkReason: '초원의 왕은 말로 꺾이지 않는다',
     field: { speed: 90, detect: 260, windup: 0.55, breakMax: 160, poise: 2, radius: 16, noKill: true },
-    stats: { hp: 1030, atk: 32, def: 14, spd: 16, exp: 120, lv: 10, gold: 0 },
+    stats: { hp: 1350, atk: 42, def: 14, spd: 16, exp: 120, lv: 10, gold: 0 },
     moves: [
       { name: '발톱', windup: 0.75, hits: [0], power: 1.1 },
-      { name: '삼연격', windup: 1.0, hits: [0, 0.45, 0.9], power: 0.7 },
-      { name: '포효 돌진', windup: 1.4, hits: [0], power: 1.8 },
+      { name: '삼연격', windup: 1.0, hits: [0, 0.35, 0.7], power: 0.7 },
+      { name: '사냥감 지정', windup: 0.8, hits: [0], power: 0.6, apply: { mark: true } },
     ],
-    boss: { roar: { name: '왕의 포효', windup: 1.2, hits: [0], power: 1.0, roar: true }, roarEvery: 3, enrageAt: 12, enrageAtk: 1.3, enragePow: 1.6 },
+    weak: ['pierce'],
+    boss: {
+      charge: { name: '포효 돌진', windup: 1.0, hits: [0, 0.4, 0.75, 1.1, 1.45], power: 0.75, all: true, cues: ['dodge'] },
+      chargeTurns: 2, chargeEvery: 4, enrageAt: 14, enrageAtk: 1.3, guardedBleed: true,
+      phases: [
+        { at: 0.6, line: '흑표가 울부짖자 초원의 사냥꾼들이 모여든다!', add: [], summon: [1, 1], summonPower: 2 },
+        { at: 0.3, line: '흑표의 눈빛이 바뀌었다. 초원의 왕이 마지막 질주를 준비한다!', chargeTurns: 1,
+          add: [{ name: '왕의 질주', windup: 1.2, hits: [0, 0.3, 0.6, 0.9, 1.2, 1.5, 2.1], power: 0.6, once: true,
+            cues: ['any', 'any', 'any', 'any', 'any', 'any', 'parry'] }] },
+      ],
+    },
     desc: '깊은 초원의 주인. 쓰러뜨려야만 지나갈 수 있다.',
   },
   // --- stage 2, 카라스 사막 (t4) ---
@@ -158,8 +266,9 @@ export const SPECIES: Species[] = [
     stats: { hp: 36, atk: 8, def: 3, spd: 8, exp: 11, lv: 1, gold: 6 },
     moves: [
       { name: '가시 찌르기', windup: 0.8, hits: [0], power: 1 },
-      { name: '가시 세례', windup: 1.0, hits: [0, 0.35, 0.7], power: 0.45, shot: true },
+      { name: '가시 세례', windup: 1.0, hits: [0, 0.35, 0.7], power: 0.45, shot: true, apply: { bleed: 1 } },
     ],
+    weak: ['blunt'], atkType: 'pierce',
     desc: '모래 속에 뿌리를 내린 채 걸어 다니는 선인장. 가시만큼 자존심이 세다.',
   },
   {
@@ -167,9 +276,10 @@ export const SPECIES: Species[] = [
     field: { speed: 40, detect: 140, windup: 0.9, breakMax: 70, poise: 1, radius: 11 },
     stats: { hp: 86, atk: 11, def: 7, spd: 8, exp: 26, lv: 2, gold: 14 },
     moves: [
-      { name: '내려찍기', windup: 1.2, hits: [0], power: 1.3 },
-      { name: '돌의 응시', windup: 0.9, hits: [0, 0.6], power: 0.75 },
+      { name: '내려찍기', windup: 1.2, hits: [0], power: 1.3, late: true },
+      { name: '돌의 응시', windup: 0.9, hits: [0, 0.6], power: 0.75, apply: { delay: true } },
     ],
+    weak: ['blunt'],
     desc: '모래에 묻힌 유적을 지키는 석상. 느리지만 맞서는 자를 똑바로 본다.',
   },
   {
@@ -178,8 +288,9 @@ export const SPECIES: Species[] = [
     stats: { hp: 54, atk: 11, def: 3, spd: 17, exp: 22, lv: 2, gold: 12 },
     moves: [
       { name: '급강하', windup: 0.6, hits: [0], power: 1.1 },
-      { name: '연속 쪼기', windup: 0.8, hits: [0, 0.3, 0.6], power: 0.5 },
+      { name: '연속 쪼기', windup: 0.8, hits: [0, 0.3, 0.6], power: 0.5, apply: { mark: true } },
     ],
+    weak: ['pierce', 'magic'], atkType: 'pierce',
     desc: '사막 위를 맴도는 커다란 독수리. 반짝이는 것이라면 뭐든 들여다본다.',
   },
   {
@@ -187,19 +298,29 @@ export const SPECIES: Species[] = [
     field: { speed: 50, detect: 100, windup: 0.8, breakMax: 28, poise: 0, radius: 9 },
     stats: { hp: 32, atk: 8, def: 2, spd: 12, exp: 10, lv: 1, gold: 5 },
     moves: [{ name: '모래 뿌리기', windup: 0.8, hits: [0, 0.4], power: 0.6 }],
+    weak: ['magic'], atkType: 'magic',
     desc: '바람에 날린 모래가 뭉쳐 생긴 정령. 장난을 좋아한다.',
   },
   {
     name: '봉인의 골렘', cmf: 20, fourDir: false, anim: { idle: 0, move: 0, attack: 2 }, tier: 'boss', personality: 'honorable',
     talk: 'locked', talkReason: '봉인을 지키는 골렘에게는 말이 닿지 않는다',
     field: { speed: 60, detect: 260, windup: 0.8, breakMax: 220, poise: 2, radius: 18, noKill: true },
-    stats: { hp: 1900, atk: 52, def: 18, spd: 17, exp: 260, lv: 20, gold: 0 },
+    stats: { hp: 2600, atk: 62, def: 18, spd: 17, exp: 260, lv: 20, gold: 0 },
     moves: [
-      { name: '철퇴 휘두르기', windup: 0.9, hits: [0], power: 1.1, anim: 2 },
+      { name: '철퇴 휘두르기', windup: 0.9, hits: [0], power: 1.2, late: true, anim: 2 },
       { name: '연타', windup: 1.1, hits: [0, 0.5], power: 0.8, anim: 4 },
-      { name: '대지 강타', windup: 1.5, hits: [0], power: 1.8, anim: 4 },
     ],
-    boss: { roar: { name: '대지의 가시', windup: 1.3, hits: [0], power: 1.0, roar: true, anim: 8 }, roarEvery: 3, enrageAt: 12, enrageAtk: 1.3, enragePow: 1.6 },
+    weak: ['blunt'], immune: ['bleed'],
+    boss: {
+      charge: { name: '대지의 가시', windup: 1.3, hits: [0, 0.35, 0.7, 1.05, 1.4, 2.0], power: 0.7, all: true, anim: 8,
+        cues: ['any', 'any', 'any', 'any', 'any', 'parry'] },
+      chargeTurns: 3, chargeEvery: 5, enrageAt: 14, enrageAtk: 1.3, shield: 3,
+      phases: [
+        { at: 0.6, line: '골렘의 돌 갑옷이 다시 차오른다!', shield: 3, shieldEvery: 3,
+          add: [{ name: '대지 강타', windup: 1.4, hits: [0], power: 1.7, cues: ['dodge'], anim: 4 }] },
+        { at: 0.3, line: '봉인이 흔들린다. 골렘이 대지를 깨우려 한다!', chargeTurns: 2, add: [] },
+      ],
+    },
     desc: '사막의 봉인을 지키는 돌 골렘. 쓰러뜨려야만 봉인 너머로 갈 수 있다.',
   },
   // --- stage 3, 벨루카 화산 (t6) ---
@@ -208,6 +329,7 @@ export const SPECIES: Species[] = [
     field: { speed: 42, detect: 100, windup: 0.75, breakMax: 34, poise: 0, radius: 10 },
     stats: { hp: 38, atk: 8, def: 3, spd: 9, exp: 11, lv: 1, gold: 6 },
     moves: [{ name: '용암 튀기기', windup: 0.9, hits: [0, 0.5], power: 0.65 }],
+    weak: ['blunt'], atkType: 'magic',
     desc: '뜨거운 용암이 엉겨 생긴 정령. 차가운 것을 무서워한다.',
   },
   {
@@ -217,8 +339,9 @@ export const SPECIES: Species[] = [
     stats: { hp: 58, atk: 11, def: 3, spd: 14, exp: 21, lv: 2, gold: 11 },
     moves: [
       { name: '불덩이', windup: 0.9, hits: [0], power: 1.1, shot: true },
-      { name: '불꽃 춤', windup: 1.1, hits: [0, 0.4, 0.8], power: 0.5, shot: true },
+      { name: '불꽃 춤', windup: 1.1, hits: [0, 0.4, 0.8], power: 0.5, shot: true, apply: { bleed: 1 } },
     ],
+    weak: ['magic', 'pierce'], atkType: 'magic',
     desc: '용암 속에 숨어 있다가 지나가는 이에게 불을 던지는 정령. 놀이인 줄 안다.',
   },
   {
@@ -227,21 +350,32 @@ export const SPECIES: Species[] = [
     stats: { hp: 66, atk: 11, def: 4, spd: 15, exp: 25, lv: 2, gold: 13 },
     moves: [
       { name: '물어뜯기', windup: 0.7, hits: [0], power: 1.15 },
-      { name: '날개 후려치기', windup: 0.9, hits: [0, 0.45], power: 0.75 },
+      { name: '날개 후려치기', windup: 0.9, hits: [0, 0.45], power: 0.75, apply: { delay: true } },
     ],
+    weak: ['pierce'], atkType: 'pierce',
     desc: '협곡에서 화산까지 날아든 와이번. 제 날개를 무엇보다 자랑스러워한다.',
   },
   {
     name: '화염의 지옥견', cmf: 32, fourDir: false, fixed: true, anim: { idle: 0, move: 0, attack: 1 }, tier: 'boss', personality: 'proud',
     talk: 'locked', talkReason: '지옥견의 세 머리는 누구의 말도 듣지 않는다',
     field: { speed: 80, detect: 260, windup: 0.6, breakMax: 260, poise: 2, radius: 22, noKill: true },
-    stats: { hp: 3100, atk: 70, def: 22, spd: 19, exp: 400, lv: 30, gold: 0 },
-    moves: [
-      { name: '할퀴기', windup: 0.75, hits: [0], power: 1.1, anim: 1 },
-      { name: '세 머리 물기', windup: 1.0, hits: [0, 0.4, 0.8], power: 0.7, anim: 2 },
-      { name: '화염 돌진', windup: 1.4, hits: [0], power: 1.8, anim: 2 },
-    ],
-    boss: { roar: { name: '지옥의 불길', windup: 1.3, hits: [0], power: 1.0, roar: true, anim: 3 }, roarEvery: 3, enrageAt: 12, enrageAtk: 1.3, enragePow: 1.6 },
+    stats: { hp: 4000, atk: 82, def: 22, spd: 19, exp: 400, lv: 30, gold: 0 },
+    moves: [{ name: '할퀴기', windup: 0.75, hits: [0], power: 1.1, anim: 1 }],
+    weak: ['pierce'],
+    boss: {
+      charge: { name: '지옥의 불길', windup: 1.4, hits: [0, 0.35, 0.7, 1.05, 1.4, 1.75], power: 0.7, all: true, anim: 3,
+        cues: ['any', 'dodge', 'any', 'dodge', 'any', 'parry'] },
+      chargeTurns: 3, chargeEvery: 4, enrageAt: 14, enrageAtk: 1.3, headsToCancel: 2,
+      heads: [
+        { name: '왼쪽 머리', move: { name: '화염 숨결', windup: 1.0, hits: [0], power: 0.9, all: true, cues: ['dodge'], apply: { bleed: 2 }, anim: 3 } },
+        { name: '가운데 머리', move: { name: '세 번 물기', windup: 1.0, hits: [0, 0.35, 0.7], power: 0.75, cues: ['parry', 'parry', 'parry'], anim: 2 } },
+        { name: '오른쪽 머리', move: { name: '위협의 포효', windup: 1.1, hits: [0], power: 0.6, all: true, apply: { weak: 2 }, anim: 1 } },
+      ],
+      phases: [
+        { at: 0.6, line: '부러진 머리가 다시 고개를 든다! 세 머리가 불꽃을 두른다', add: [], reviveHeads: true, shield: 1 },
+        { at: 0.3, line: '지옥견이 날뛴다. 남은 머리가 모두 덤벼든다!', add: [], allHeads: true, chargeTurns: 2 },
+      ],
+    },
     desc: '지옥의 불에서 태어난 세 머리의 개. 화산 가장 깊은 곳을 지킨다.',
   },
 ];

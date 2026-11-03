@@ -18,7 +18,7 @@ import { ctrlAt } from '../input/touchLayout';
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { bodyBox } from '../../core/world/world';
-import { ADVANTAGE_LABEL, BATTLE_ZONES, CLOCK_SPEED, ExpeditionLogic, GEAR_CHOICES, NIGHT_AT, PAUSE_ITEMS } from '../../core/expedition/expedition';
+import { ADVANTAGE_LABEL, BATTLE_ZONES, CLOCK_SPEED, ExpeditionLogic, GEAR_CHOICES, NIGHT_AT } from '../../core/expedition/expedition';
 import { STAGES } from '../../core/expedition/stages';
 import { CHEST_FRAME, GRADE_NAME, SLOT_NAME, gearDesc, gearIcon, type Gear } from '../../core/expedition/loot';
 import { statsWith } from '../../core/expedition/run';
@@ -411,7 +411,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     this.ctx.ui.view('ex-pause', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
       h('div.v-col.ex-menu', null,
         h('div.ex-menu-title', null, '일시 정지'),
-        PAUSE_ITEMS.map((label, i) => h(`div.ex-item${i === this.pauseSel ? '.sel' : ''}`, { on: () => { this.pickPause(i); } }, label)),
+        this.pauseItems.map((label, i) => h(`div.ex-item${i === this.pauseSel ? '.sel' : ''}`, { on: () => { this.pickPause(i); } }, label)),
         h('div.ex-line.ex-dim', null, `골드 ${this.run.gold}G · 회복약 ${this.run.potions}`),
         this.run.equip.map((g, i) => h('div.v-col.ex-relic', null,
           h('div.v-row.ex-ware-top', null, h('span.ex-slot', null, SLOT_NAME[i]), g ? gearSprite(g) : null, g ? gearName(g) : h('span.ex-ware-name.ex-dim', null, '없음')),

@@ -2,13 +2,16 @@
 // with a night shift), the party on the right facing left, the enemies on the left mirrored to face right (the
 // original side frames), then the DOM: order bar, enemy gauges, party panel, AP, the command menu, the closing rings
 // of an enemy's hits and the damage popups. A shot move (Move.shot) is fired from where the enemy stands: its projectile
-// (the species' field shot frame) reaches the target on each hit's time. The boss's 왕의 포효 cannot be defended: no
-// closing ring, a red flash over the whole party instead; its tag counts down to the enrage. Rare creatures and shiny
-// recruits sparkle (cmf_status 0x5d..0x63). The backdrop carries the field's day / night shift.
+// (the species' field shot frame) reaches the target on each hit's time. The decision kit (expedition-balance.md §18):
+// status chips under every unit, an enemy's weaknesses (? till found) and its next action in a bubble over it, a boss's
+// charge count and enrage count, the hellhound's three heads as their own tags, the order bar previewing a delay, and
+// the defense cues: a red edge before a dodge-only hit, the screen in black and white while a parry-only one comes, a
+// "!" over the attacker before a late hit. Rare creatures and shiny recruits sparkle (cmf_status 0x5d..0x63). The
+// backdrop carries the field's day / night shift.
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
-import { ALL_OUT, AP_MAX, BK, DODGE_MS, PARRY_MS, type Battle, type BUnit } from '../../core/expedition/battle';
-import { animRec } from '../../core/expedition/species';
+import { ALL_OUT, AP_MAX, BK, DODGE_MS, LATE_CUE_MS, PARRY_MS, PARRY_NARROW_MS, type Battle, type BUnit } from '../../core/expedition/battle';
+import { STATUS_DESC, STATUS_NAME, TYPE_NAME, animRec } from '../../core/expedition/species';
 import type { FieldSim } from '../../core/expedition/field';
 import type { GameContext } from '../game/scene';
 import { h, type VNode } from '../render/view';
@@ -21,7 +24,11 @@ import { HERO_EQUIP } from './heroLook';
 
 // the party stands left of the command column docked at the right edge (x ≥ 360)
 const PARTY_AT: [number, number][] = [[300, 196], [334, 246], [266, 252]];
-const ENEMY_AT: [number, number][] = [[104, 196], [62, 246], [146, 252]];
+const ENEMY_AT: [number, number][] = [[104, 196], [62, 246], [146, 252], [40, 196], [168, 204]];
+/** a boss's heads, from its body (left, middle, right) */
+const HEAD_AT: [number, number][] = [[-56, -36], [0, -52], [56, -36]];
+/** the party's middle, where a whole-party move is aimed */
+const PARTY_MID: [number, number] = [300, 230];
 /** a shot flies this long to its hit (ms) */
 const SHOT_MS = 380;
 /** skill rows shown at once (the list scrolls with the cursor) */
@@ -38,6 +45,7 @@ export class BattleView {
 
   /** where a unit stands (screen px), stepping toward its target while it acts */
   private pos(b: Battle, u: BUnit): [number, number] {
+    if (u.body) return this.pos0(b, u);
     const list = u.side === 'party' ? b.party : b.enemies, i = list.indexOf(u);
     let [x, y] = (u.side === 'party' ? PARTY_AT : ENEMY_AT)[i] ?? [240, 200];
     const a = b.act;
@@ -48,7 +56,7 @@ export class BattleView {
     }
     const ea = b.enemyAct;
     if (ea && ea.actor === u && !ea.move.shot && b.now >= ea.strikeAt - 200) {
-      const [tx, ty] = this.pos0(b, ea.target), end = ea.hits[ea.hits.length - 1].t + 250;
+      const [tx, ty] = ea.target ? this.pos0(b, ea.target) : PARTY_MID, end = ea.hits[ea.hits.length - 1].t + 250;
       const k = b.now >= end ? Math.max(0, 1 - (b.now - end) / 300) : Math.min(1, (b.now - ea.strikeAt + 200) / 200);
       x += (tx - 40 - x) * k * 0.85;
       y += (ty - y) * k * 0.85;
@@ -57,6 +65,10 @@ export class BattleView {
   }
 
   private pos0(b: Battle, u: BUnit): [number, number] {
+    if (u.body) {
+      const [x, y] = this.pos0(b, u.body), [dx, dy] = HEAD_AT[u.body.heads.indexOf(u)] ?? [0, 0];
+      return [x + dx, y + dy];
+    }
     const list = u.side === 'party' ? b.party : b.enemies, i = list.indexOf(u);
     return (u.side === 'party' ? PARTY_AT : ENEMY_AT)[i] ?? [240, 200];
   }
@@ -141,7 +153,7 @@ export class BattleView {
     if (!ea || !ea.move.shot || !sp || !shot) return [];
     const name = `cmf_c${sp.cmf}`, cmf = this.cmfs.get(name);
     if (!cmf) return [];
-    const [ax, ay] = this.pos0(b, ea.actor), [tx, ty] = this.pos0(b, ea.target), out: Drawable[] = [];
+    const [ax, ay] = this.pos0(b, ea.actor), [tx, ty] = ea.target ? this.pos0(b, ea.target) : PARTY_MID, out: Drawable[] = [];
     const sx = ax + 22, sy = ay - shot.lift, ex = tx, ey = ty - shot.lift;
     for (const hit of ea.hits) {
       const k = (b.now - (hit.t - SHOT_MS)) / SHOT_MS;
@@ -181,26 +193,35 @@ export class BattleView {
   }
 
   private tree(b: Battle, talk: Talk | null): VNode {
-    const order = b.order(7);
+    const now0 = b.order(7), pv = b.preview(7), order = pv ?? now0;
     const kids: VNode[] = [];
-    kids.push(h('div.v-row.exb-order', null, h('span.exb-order-l', null, '순서'),
-      order.map((x, i) => h(`div.exb-chip.${x.side}${i === 0 && (b.phase === 'command' || b.phase === 'enemy') ? '.now' : ''}${x.broken ? '.broken' : ''}`, null, x.name.slice(0, 4)))));
+    kids.push(h('div.v-row.exb-order', null, h('span.exb-order-l', null, pv ? '순서 (예상)' : '순서'),
+      order.map((x, i) => h(`div.exb-chip.${x.side}${i === 0 && (b.phase === 'command' || b.phase === 'enemy') ? '.now' : ''}${x.broken ? '.broken' : ''}${pv && now0[i] !== x ? '.moved' : ''}`, null, x.name.slice(0, 4)))));
     kids.push(h('div.exb-line', null, b.line));
     // enemy gauges over their heads (the one being aimed at lit)
     const picking = b.phase === 'command' && b.menu === 'target', aimed = picking ? b.targets()[b.targetSel] : null;
     b.enemies.forEach((e) => {
       if (e.gone || e.hp <= 0) return;
-      const [x, y] = this.pos(b, e);
-      const ein = e.sp?.boss ? b.enrageIn : null;
-      kids.push(h(`div.v-col.exb-tag${e === aimed ? '.aimed' : ''}`, { style: `left:${x - 34}px;top:${y - 66}px` },
-        h('div.exb-name', null, `${e.rare ? '빛나는 ' : ''}${e.name}${e.broken ? ' · BREAK' : ''}`),
-        this.bar('hp', e.hp / e.hpMax), this.bar(`brk${e.broken ? '.full' : ''}`, e.brk / e.brkMax),
+      const [x, y] = this.pos(b, e), heads = e.heads.length > 0, big = !!e.sp?.boss;
+      const ein = big ? b.enrageIn : null, top = y - (big ? 118 : 74) - (heads ? 30 : 0);
+      kids.push(h(`div.v-col.exb-tag${e === aimed ? '.aimed' : ''}`, { style: `left:${x - 34}px;top:${top}px` },
+        h('div.exb-name', null, `${e.rare ? '빛나는 ' : ''}${e.summoned ? '(부하) ' : ''}${e.name}${e.broken ? ' · BREAK' : ''}`),
+        this.bar('hp', e.hp / e.hpMax), heads ? null : this.bar(`brk${e.broken ? '.full' : ''}`, e.brk / e.brkMax),
+        this.weakTree(b, e), heads ? null : this.stTree(b, e),
+        e.charge !== null && e.charge > 0 ? h('div.exb-charge', null, `차지 ${e.charge}`) : null,
         e.enraged ? h('div.exb-enrage.on', null, '광폭화!') : ein !== null ? h('div.exb-enrage', null, `광폭화까지 ${ein}턴`) : null));
+      const it = b.phase !== 'enemy' || b.enemyAct?.actor !== e ? b.intentText(e) : null;
+      if (it) kids.push(h(`div.exb-intent${e.intent?.charge ? '.charge' : ''}`, { style: `left:${x}px;top:${top - 14}px` }, it));
+      for (const hd of e.heads) {
+        const [hx, hy] = this.pos0(b, hd);
+        kids.push(h(`div.v-col.exb-tag.head${hd === aimed ? '.aimed' : ''}${hd.broken ? '.broken' : ''}`, { style: `left:${hx - 23}px;top:${hy - 34}px` },
+          h('div.exb-name', null, hd.name.replace(' 머리', '')), this.bar(`brk${hd.broken ? '.full' : ''}`, hd.brk / hd.brkMax), this.stTree(b, hd)));
+      }
     });
     // target cursor; each target is tapped or clicked to pick it at once
     if (picking) {
-      if (aimed) { const [x, y] = this.pos(b, aimed); kids.push(h('div.exb-cursor', { style: `left:${x - 6}px;top:${y - 80}px` }, '▼')); }
-      b.targets().forEach((t, i) => { const [x, y] = this.pos(b, t); kids.push(h('div.exb-pick', { style: `left:${x - 28}px;top:${y - 60}px`, on: () => { b.tap('target', i); } })); });
+      if (aimed) { const [x, y] = this.pos(b, aimed); kids.push(h('div.exb-cursor', { style: `left:${x - 6}px;top:${y - (aimed.body ? 46 : 80)}px` }, '▼')); }
+      b.targets().forEach((t, i) => { const [x, y] = this.pos(b, t); kids.push(h('div.exb-pick', { style: `left:${x - 28}px;top:${y - (t.body ? 30 : 60)}px${t.body ? ';width:50px;height:44px' : ''}`, on: () => { b.tap('target', i); } })); });
     }
     if (b.phase === 'command' && b.actor) { const [x, y] = this.pos(b, b.actor); kids.push(h('div.exb-me', { style: `left:${x - 6}px;top:${y - 62}px` }, '▼')); }
     // the party
@@ -208,7 +229,7 @@ export class BattleView {
       h('div.v-row.exb-ap', null, h('span', null, 'AP'), Array.from({ length: AP_MAX }, (_, i) => h(`i.exb-pip${i < b.ap ? '.on' : ''}`))),
       b.party.map((p) => h(`div.v-row.exb-member${b.actor === p ? '.turn' : ''}${p.hp <= 0 ? '.down' : ''}`, null,
         h('span.exb-mname', null, `${p.name} Lv.${p.member?.lv ?? p.lv}`),
-        this.bar('hp', p.hp / p.hpMax), h('span.exb-hpn', null, `${p.hp}/${p.hpMax}`)))));
+        this.bar('hp', p.hp / p.hpMax), h('span.exb-hpn', null, `${p.hp}/${p.hpMax}`), this.stTree(b, p)))));
     if (b.phase === 'command') { const m = this.menuTree(b); if (m) kids.push(m); const p = this.prompt(b); if (p) kids.push(h('div.exb-prompt', null, p)); }
     if (b.phase === 'enemy') kids.push(...this.defenseTree(b));
     for (const p of b.popups) {
@@ -247,10 +268,11 @@ export class BattleView {
   private prompt(b: Battle): string | null {
     if (b.menu === 'target') {
       const touch = this.ctx.input.device === 'touch', what = b.pending?.kind === 'talk' ? '누구와 대화할까?' : '누구를 칠까?';
-      return touch ? `${what} 적을 누르세요` : `${what}  ◀▶ 고르기 · ${this.glyph([AVK.OK])} 결정 · ${this.glyph([AVK.CLR])} 뒤로`;
+      const t = b.targets()[b.targetSel], sts = t ? b.statuses(t).map(([k]) => `${STATUS_NAME[k]}: ${STATUS_DESC[k]}`) : [];
+      return (touch ? `${what} 적을 누르세요` : `${what}  ◀▶ 고르기 · ${this.glyph([AVK.OK])} 결정 · ${this.glyph([AVK.CLR])} 뒤로`) + (sts.length ? ` — ${sts.join(' · ')}` : '');
     }
     if (b.menu === 'item') return `회복약 ×${b.run.potions} — 누구에게?`;
-    if (b.menu === 'skill') { const s = b.skills()[b.subSel]; return s ? `${s.name} · ${s.desc}` : null; }
+    if (b.menu === 'skill') { const s = b.skills()[b.subSel]; return s ? b.skillText(s) : null; }
     const c = b.commands()[b.sel];
     if (c === ALL_OUT) return '적이 모두 브레이크! 파티 전원이 모든 적을 친다 (이후 적은 일어난다)';
     if (c === '대화' && b.allBroken && !b.blocked(c)) return '적이 모두 무릎을 꿇었다. 검사가 말을 건다';
@@ -286,28 +308,48 @@ export class BattleView {
     return h('div.v-col.ex-menu.exb-menu', null, ...rows);
   }
 
-  /** the closing rings of the coming hits over the target and the defense keys */
+  /** a unit's status chips */
+  private stTree(b: Battle, u: BUnit): VNode | null {
+    const st = b.statuses(u);
+    return st.length ? h('div.v-row.exb-sts', null, st.slice(0, 4).map(([k, label]) => h(`span.exb-st.${k}`, null, label))) : null;
+  }
+
+  /** an enemy's weaknesses: the found ones by name, the others "?" */
+  private weakTree(b: Battle, e: BUnit): VNode | null {
+    const w = e.sp?.weak ?? [];
+    if (!w.length) return null;
+    return h('div.exb-weak', null, '약점 ', ...w.flatMap((t, i) => [i ? '·' : '', b.run.seenWeak.has(`${e.species}:${t}`) ? h('b', null, TYPE_NAME[t]) : '?']));
+  }
+
+  /** the closing rings of the coming hits over the target (each member for a whole-party move), the cues and the
+   *  defense keys the next hit allows */
   private defenseTree(b: Battle): VNode[] {
-    const ea = b.enemyAct!, out: VNode[] = [];
-    const [x, y] = this.pos0(b, ea.target), now = b.now;
-    const next = ea.hits.find((hh) => !hh.result);
-    if (ea.move.roar) {                                              // no ring: nothing defends against it
-      const k = next ? Math.max(0, Math.min(1, 1 - (next.t - now) / Math.max(600, ea.move.windup * 1000))) : 1;
-      out.push(h('div.exb-roar', { style: `opacity:${(0.25 + 0.55 * k).toFixed(2)}` }));
-      out.push(h('div.exb-roar-t', null, `${ea.move.name}: 막을 수 없다!`));
-      return out;
+    const ea = b.enemyAct!, out: VNode[] = [], now = b.now;
+    const next = ea.hits.find((hh) => !hh.result), timing = b.run.timing;
+    if (next?.cue === 'parry') out.push(h('div.exb-cue-parry'));
+    if (next?.cue === 'dodge' && next.t - now <= LATE_CUE_MS + 150) out.push(h('div.exb-cue-dodge'));
+    if (next?.late && next.t - now <= LATE_CUE_MS && next.t - now > -80) {
+      const [ax, ay] = this.pos(b, ea.by);
+      out.push(h('div.exb-late', { style: `left:${ax - 10}px;top:${ay - 70}px` }, '!'));
     }
+    const on = ea.target ? [ea.target] : b.liveParty;
     if (next) {
       const span = Math.max(600, ea.move.windup * 1000), k = Math.max(0, (next.t - now) / span);
-      const r = 14 + k * 46, good = Math.abs(next.t - now) <= PARRY_MS;
-      out.push(h(`div.exb-ring${good ? '.good' : ''}`, { style: `left:${x - r}px;top:${y - 18 - r}px;width:${2 * r}px;height:${2 * r}px` }));
-      out.push(h('div.exb-ring.core', { style: `left:${x - 14}px;top:${y - 32}px;width:28px;height:28px` }));
+      const r = 14 + k * 46, win = (next.cue === 'parry' ? PARRY_NARROW_MS : PARRY_MS) * timing, good = Math.abs(next.t - now) <= win;
+      for (const t of on) {
+        const [x, y] = this.pos0(b, t);
+        out.push(h(`div.exb-ring.${next.cue}${good && next.cue !== 'dodge' ? '.good' : ''}`, { style: `left:${x - r}px;top:${y - 18 - r}px;width:${2 * r}px;height:${2 * r}px` }));
+        out.push(h('div.exb-ring.core', { style: `left:${x - 14}px;top:${y - 32}px;width:28px;height:28px` }));
+      }
     }
-    const late = ea.hits.filter((hh) => hh.result).length;
+    if (ea.charge) out.push(h('div.exb-roar-t', null, `${ea.move.name}! 전원 ${ea.hits.length}연타`));
+    const done = ea.hits.filter((hh) => hh.result).length, cue = next?.cue ?? 'any';
+    const pw = Math.round((cue === 'parry' ? PARRY_NARROW_MS : PARRY_MS) * timing), dw = Math.round(DODGE_MS * timing);
     out.push(h('div.v-row.exb-defkeys', null,
-      h('span', null, `${this.glyph(BK.PARRY)} 패링 ±${PARRY_MS}ms`), h('span', null, `${this.glyph(BK.DODGE)} 회피 ±${DODGE_MS}ms`),
-      h('span.exb-dim', null, `${late}/${ea.hits.length}`)));
-    if (ea.whiff && now - ea.whiff.t < 380) out.push(h('div.exb-whiff', { style: `left:${x - 30}px;top:${y - 84}px` }, '헛손질!'));
+      h(`span${cue === 'dodge' ? '.off' : cue === 'parry' ? '.only' : ''}`, null, `${this.glyph(BK.PARRY)} 패링 ±${pw}ms${cue === 'parry' ? ' 만!' : ''}`),
+      h(`span${cue === 'parry' ? '.off' : cue === 'dodge' ? '.only' : ''}`, null, `${this.glyph(BK.DODGE)} 회피 ±${dw}ms${cue === 'dodge' ? ' 만!' : ''}`),
+      h('span.exb-dim', null, `${done}/${ea.hits.length}`)));
+    if (ea.whiff && now - ea.whiff.t < 380) { const [x, y] = this.pos0(b, on[0] ?? ea.actor); out.push(h('div.exb-whiff', { style: `left:${x - 30}px;top:${y - 84}px` }, '헛손질!')); }
     return out;
   }
 }

@@ -177,6 +177,31 @@
 .exb-gold { color: #ffd34a; }
 .exb-enrage { color: #ffb070; font-size: 8px; text-shadow: 0 0 2px #000, 0 0 2px #000; white-space: nowrap; }
 .exb-enrage.on { color: #ff5a4a; font-weight: bold; }
-.exb-roar { position: absolute; left: 230px; top: 150px; width: 150px; height: 130px; border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(255, 50, 30, 0.75), rgba(255, 50, 30, 0)); }
-.exb-roar-t { position: absolute; left: 0; right: 0; top: 40px; text-align: center; font-size: 12px; color: #ff6a50; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+.exb-roar-t { position: absolute; left: 0; right: 0; top: 52px; text-align: center; font-size: 12px; color: #ff6a50; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+/* §18 decision kit: statuses, weaknesses, intents, the charge count, the defense cues and the order preview */
+.exb-sts { gap: 1px; justify-content: center; }
+.exb-st { padding: 0 2px; font-size: 7px; line-height: 9px; border-radius: 2px; color: #fff; background: #3a4660; }
+.exb-st.mark { background: #b0306a; }
+.exb-st.bleed { background: #a0281e; }
+.exb-st.weak { background: #6a4aa0; }
+.exb-st.shield { background: #2f7aa8; }
+.exb-st.taunt { background: #a07a20; }
+.exb-member .exb-sts { width: 54px; justify-content: flex-start; }
+.exb-weak { font-size: 7px; color: #c8d0e0; text-shadow: 0 0 2px #000, 0 0 2px #000; white-space: nowrap; }
+.exb-weak b { color: #ffe066; font-weight: normal; }
+.exb-intent { position: absolute; transform: translateX(-50%); padding: 1px 5px; font-size: 8px; color: #ffe2d0; white-space: nowrap;
+  background: rgba(40, 10, 10, 0.82); border: 1px solid #a0483a; border-radius: 6px; }
+.exb-intent.charge { color: #fff2a0; border-color: #ffd34a; background: rgba(70, 40, 0, 0.9); font-size: 9px; }
+.exb-charge { color: #ffd34a; font-size: 10px; font-weight: bold; text-shadow: 0 0 3px #000, 0 0 3px #000; animation: ex-blink 0.6s steps(2) infinite; }
+.exb-tag.head { width: 46px; }
+.exb-tag.head .exb-bar { width: 40px; }
+.exb-tag.head.broken .exb-name { color: #8a8a8a; text-decoration: line-through; }
+.exb-chip.moved { box-shadow: 0 0 0 1px #8fd8ff; background-image: linear-gradient(#ffffff22, #ffffff22); }
+.exb-cue-dodge { position: absolute; inset: 0; box-shadow: inset 0 0 40px 10px rgba(255, 40, 30, 0.75); }
+.exb-cue-parry { position: absolute; inset: 0; backdrop-filter: grayscale(1) contrast(1.15); -webkit-backdrop-filter: grayscale(1) contrast(1.15); }
+.exb-ring.dodge { border-color: #ff3a2a; box-shadow: 0 0 10px #ff3a2a; }
+.exb-ring.parry { border-color: #ffffff; box-shadow: 0 0 10px #ffffff; }
+.exb-late { position: absolute; width: 20px; text-align: center; color: #ffe066; font-size: 16px; font-weight: bold; text-shadow: 0 0 6px #ffb000, 0 0 3px #000; }
+.exb-defkeys .off { opacity: 0.3; text-decoration: line-through; }
+.exb-defkeys .only { color: #ffe066; }
+.exb-pop.status { color: #e0b8ff; font-size: 9px; }

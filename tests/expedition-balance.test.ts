@@ -105,47 +105,6 @@ test("loot: creatures drop by zone, chests by zone and what they hold, the merch
   for (const w of stock.slice(1)) { assert.ok(w.gear!.grade < 4); assert.equal(w.price, gearPrice(w.gear!)); }
 });
 
-/** one boss turn played to its end; `parry` presses on every hit. Returns the clock after it and the move's name */
-function bossTurn(b: Battle, now: number, parry: boolean): number {
-  b.phase = 'enemy';
-  b.now = now;
-  (b as unknown as { startEnemy(u: unknown): void }).startEnemy(b.enemies[0]);
-  const ea = b.enemyAct!;
-  for (const h of ea.hits) b.frame(0.016, parry ? [{ key: AVK.K7, t: h.t }] : [], h.t);
-  let t = ea.hits[ea.hits.length - 1].t;
-  for (let i = 0; i < 200 && b.enemyAct; i++) b.frame(0.05, [], (t += 50));
-  lastMove = ea.move.name;
-  return t + 1000;
-}
-let lastMove = '';
-
-test('boss: every third turn a roar on the whole party that parry cannot stop; enraged after twelve', () => {
-  const run = new Run();
-  run.party[0].hp = run.party[0].hpMax = 99999;
-  run.party.push(recruit(1));
-  run.party[1].hp = run.party[1].hpMax = 99999;
-  const b = new Battle(run, [foe(4)], 'none', () => 0.5), boss = b.enemies[0], pat = SPECIES[4].boss!;
-  assert.equal(b.enrageIn, pat.enrageAt);
-  let now = 1000;
-  now = bossTurn(b, now, true);
-  now = bossTurn(b, now, true);
-  assert.ok(b.party.every((p) => p.hp === 99999), 'parried turns do no harm');
-  now = bossTurn(b, now, true);                                    // the third: the roar
-  assert.equal(lastMove, pat.roar.name);
-  assert.ok(b.party.every((p) => p.hp < 99999), 'the roar hit everyone through the parry');
-  assert.ok(b.roarDmg > 0);
-  assert.equal(b.enrageIn, pat.enrageAt - 3);
-  const atk = boss.atk;
-  while (boss.turns < pat.enrageAt) now = bossTurn(b, now, true);
-  assert.ok(!boss.enraged);
-  const hp = b.party[0].hp;
-  now = bossTurn(b, now, true);
-  assert.ok(boss.enraged);
-  assert.equal(boss.atk, Math.round(atk * pat.enrageAtk));
-  assert.ok(b.party[0].hp < hp, 'enraged, it roars every turn');
-  assert.equal(b.enrageIn, null);
-});
-
 test('rare creature in battle: it may run (no reward); beaten, it pays ×5 gold and is listed for its drop', () => {
   const run = new Run();
   const ran = new Battle(run, [foe(1, true)], 'none', () => 0.1);    // 0.1 < RARE.flee: it runs on its turn

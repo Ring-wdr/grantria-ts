@@ -35,7 +35,8 @@ function defending(): Battle {
   const b = new Battle(new Run(), [foe(1)], 'none', () => 0.5);
   b.phase = 'enemy';
   b.now = 0;
-  b.enemyAct = { actor: b.enemies[0], move: SPECIES[1].moves[0], target: b.party[0], strikeAt: 1000, hits: [{ t: 1000, result: null }], lockUntil: 0, whiff: null, endAt: Infinity, countered: false };
+  b.enemyAct = { actor: b.enemies[0], by: b.enemies[0], move: SPECIES[1].moves[0], target: b.party[0], strikeAt: 1000, hits: [{ t: 1000, result: null, cue: 'any', late: false }],
+    lockUntil: 0, whiff: null, endAt: Infinity, countered: false, charge: false };
   return b;
 }
 

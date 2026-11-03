@@ -89,6 +89,10 @@ export class Run {
   kills = 0;
   recruits = 0;
   parries = 0;
+  /** weaknesses found in this run ("species:type"): shown instead of "?" (web/docs/expedition-balance.md §18.3) */
+  seenWeak = new Set<string>();
+  /** the defense windows ×this (the pause menu's 판정 창, §18.6) */
+  timing = 1;
 
   get alive(): Member[] { return this.party.filter((m) => m.hp > 0); }
 

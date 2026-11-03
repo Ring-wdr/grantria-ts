@@ -108,6 +108,17 @@ export function makeGear(slot: Slot, tier: number, grade: Grade, rng: Rng, name:
   return { ...st, slot, type, sub, grade, ilv, name: name(type, sub) };
 }
 
+/** a piece tempered at a rest zone's camp (§20.3): its item level up by `by` (to TEMPER_MAX), its main effect grown to
+ *  match; its grade lines stay as rolled */
+export const TEMPER_MAX = 10;
+export function temper(g: Gear, by: number): Gear {
+  const ilv = Math.min(TEMPER_MAX, g.ilv + by), was = mainStats(g.slot, g.sub, g.ilv), now = mainStats(g.slot, g.sub, ilv);
+  const neg: Stats = {};
+  for (const k of KEYS) if (was[k]) neg[k] = -was[k]!;
+  const { slot, type, sub, grade, name } = g;
+  return { ...addStats(addStats(g, neg), now), slot, type, sub, grade, ilv, name };
+}
+
 /** a piece of any slot: the tier by weight (moved up `tierUp` steps), the grade by weight, at item level ilv */
 export function rollGear(tiers: readonly number[], grades: readonly number[], rng: Rng, name: Namer, tierUp = 0, ilv = 1): Gear {
   const slot = rng.int(0, SLOTS - 1) as Slot;

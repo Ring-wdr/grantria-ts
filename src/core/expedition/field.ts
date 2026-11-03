@@ -196,6 +196,8 @@ export class FieldEnemy {
   readonly id = nextId++;
   readonly sp: Species;
   readonly species: number;
+  /** one of the gatekeeper group by the exit stone (§20.4): beating it drops a piece for sure */
+  gate = false;
   x: number;
   y: number;
   readonly homeX: number;
@@ -505,12 +507,18 @@ export class FieldSim {
     this.hero.face(zone.kind === 'boss' ? -Math.PI / 2 : 0);
     this.chests = (zone.chests ?? []).map((c) => ({ ...c, opened: false, t: 0 }));
     for (const s of zone.spawns) {
-      this.enemies.push(new FieldEnemy(s.species, s.x, s.y, this, !!s.rare));
+      const head = new FieldEnemy(s.species, s.x, s.y, this, !!s.rare);
+      head.gate = s.beat === 'gate';
+      this.enemies.push(head);
       if (SPECIES[s.species].tier === 'boss' || s.rare) continue;
-      const n = Math.floor(this.rng() * 2.4);                       // a pack: up to two more of the kind nearby
-      for (let i = 0; i < n; i++) {
+      const n = s.pack ?? Math.floor(this.rng() * 2.4);             // a pack: more of the kind nearby (§20.4)
+      for (let i = 0, tries = 0; i < n && tries < 12; tries++) {
         const a = this.rng() * Math.PI * 2, x = s.x + Math.cos(a) * 30, y = s.y + Math.sin(a) * 30;
-        if (this.ground.fits(x, y, 9)) this.enemies.push(new FieldEnemy(s.species, x, y, this));
+        if (!this.ground.fits(x, y, 9)) continue;
+        const e = new FieldEnemy(s.species, x, y, this);
+        e.gate = head.gate;
+        this.enemies.push(e);
+        i++;
       }
     }
     this.follow(1);
@@ -675,7 +683,7 @@ export class FieldSim {
     if (this.enemies.some((x) => x.stunned && x.alive && Math.hypot(x.x - h.x, x.y - h.y) < 44)) return '선제 공격';
     if (this.nearChest()) return '상자 열기';
     if (this.nearMerchant()) return '암흑상인과 거래';
-    if (this.nearExit() && this.zone.kind !== 'boss') return '다음 지역으로';
+    if (this.nearExit() && this.zone.kind !== 'boss') return this.zone.kind === 'rest' ? '쉼터에서 정비' : '다음 지역으로';
     return null;
   }
 

@@ -9,7 +9,8 @@
 // slots, each piece on the whole party, for the run; a piece for a slot already filled is compared with the worn one and
 // either put on or thrown away), chests hold gold, potions and equipment, a battle zone may hold a rare creature, and a battle zone grows dark the longer the party stays (§8): at night the
 // party takes ×1.2 damage, gold is ×1.3 and the dark merchant appears (§9). Leaving a battle zone by its exit stone heals
-// 60% and shows what the zone gave; a rest zone heals fully. A party wipe ends the run. Each zone has its BGM (REST_BGM, BOSS_BGM). Either way it is back to the title: nothing is kept (the host gets the run log, §12.1).
+// 25% and shows what the zone gave; at a rest zone's stone the party picks one of rest (50%), temper (a worn piece's
+// item level +2) or search (2 potions) before it goes on (§20.3). A party wipe ends the run. Each zone has its BGM (REST_BGM, BOSS_BGM). Either way it is back to the title: nothing is kept (the host gets the run log, §12.1).
 // State and keys; the host draws it (web/expedition/expedition.ts) and steps it every animation frame (frame()).
 // Plain fields, no constructor parameter properties: node's type stripping loads core/ in tests.
 import { AVK } from '../keys';
@@ -22,7 +23,7 @@ import { Run, recruit, type Member } from './run';
 import { Talk } from './talk';
 import { STAGES, STAGE_ZONES, type Stage } from './stages';
 import { Rng } from './rng';
-import { CHEST_NAME, DROP_CHANCE, FIELD_DROP_CHANCE, FIELD_SKILL_DROP, RARE_SKILL, SKILL_DROP, rollSkill, GRADE_NAME, RARE_CHANCE, SLOT_NAME, creatureDrop, gearDesc, gearNamer, merchantStock, openChest, rareDrop,
+import { CHEST_NAME, DROP_CHANCE, TEMPER_MAX, temper, FIELD_DROP_CHANCE, FIELD_SKILL_DROP, RARE_SKILL, SKILL_DROP, rollSkill, GRADE_NAME, RARE_CHANCE, SLOT_NAME, creatureDrop, gearDesc, gearNamer, merchantStock, openChest, rareDrop,
   type Gear, type Namer, type Ware } from './loot';
 import { SKILLBOOK, SKILL_MAX_GOLD, loadSkills } from './skillbook';
 import { buildBoss, buildField, zoneSets, type Zone, type ZoneKind, type ZoneSets } from './zone';
@@ -35,7 +36,7 @@ export interface ExpeditionHost {
   readonly screens: { title(): void };
 }
 
-export type Mode = 'loading' | 'field' | 'pause' | 'encounter' | 'battle' | 'summary' | 'shop' | 'gear' | 'over' | 'clear';
+export type Mode = 'loading' | 'field' | 'pause' | 'encounter' | 'battle' | 'summary' | 'shop' | 'gear' | 'camp' | 'over' | 'clear';
 
 /** the rows of the equipment comparison */
 export const GEAR_CHOICES = ['교체', '버리기'] as const;
@@ -43,8 +44,15 @@ export const GEAR_CHOICES = ['교체', '버리기'] as const;
 /** a piece found for a slot already filled, waiting for the comparison: where it came from */
 export interface GearOffer { gear: Gear; from: string }
 
-/** the zone heal on leaving a battle zone */
-export const EXIT_HEAL = 0.6;
+/** the zone heal on leaving a battle zone (§20.3) */
+export const EXIT_HEAL = 0.25;
+/** a rest zone's choice (§20.3): one of them, then on to the next zone */
+export const CAMP_CHOICES = [
+  { name: '휴식', desc: '파티 HP 50% 회복 (쓰러진 동료도 일어난다)' },
+  { name: '단련', desc: '입은 장비 하나의 아이템 레벨 +2' },
+  { name: '수색', desc: '회복약 +2' },
+] as const;
+export const CAMP_HEAL = 0.5, CAMP_TEMPER = 2, CAMP_POTIONS = 2;
 /** battle zones in a stage */
 export const BATTLE_ZONES = STAGE_ZONES;
 
@@ -164,7 +172,7 @@ export class ExpeditionLogic {
   shopSel = 0;
   shopLine = '';
   /** the run log (§12.1) */
-  readonly log: { zones: ZoneLog[]; bosses: BossLog[] } = { zones: [], bosses: [] };
+  readonly log: { zones: ZoneLog[]; bosses: BossLog[]; camps: string[] } = { zones: [], bosses: [], camps: [] };
   /** this battle zone's entry in the log */
   zlog: ZoneLog | null = null;
   /** loot rolls (drops, chests, the merchant), from the run seed */
@@ -177,6 +185,10 @@ export class ExpeditionLogic {
   private gearBack: 'field' | 'shop' = 'field';
   /** parries before the boss battle began */
   private parriesAtBoss = 0;
+  /** the rest zone's choice: its cursor, and (picking the piece to temper) the worn slots and that cursor */
+  campSel = 0;
+  campTemper: number[] | null = null;
+  campLine = '';
 
   constructor(ctx: ExpeditionHost, seed = Date.now() >>> 0) {
     this.ctx = ctx;
@@ -227,7 +239,7 @@ export class ExpeditionLogic {
     this.sets = sets;
     const zone = kind === 'boss' ? await buildBoss(a, sets, st.boss, biome)
       : kind === 'rest' ? await buildField(a, sets, seed, 'rest', { w: 60, h: 44, groups: 0, species: [], biome })
-      : await buildField(a, sets, seed, 'battle', { w: 190, h: 160, groups: 10 + this.stageBattleNo * 2, species: st.species, zoneNo: this.battleNo, rare: RARE_CHANCE, biome });
+      : await buildField(a, sets, seed, 'battle', { w: 190, h: 160, groups: 8 + this.stageBattleNo, species: st.species, zoneNo: this.battleNo, rare: RARE_CHANCE, biome });
     await this.onZone(zone);
     this.zone = zone;
     this.field = new FieldSim(zone, seed ^ 0x5bd1e995, kind === 'battle' ? this.battleNo - 1 : 0);
@@ -248,7 +260,7 @@ export class ExpeditionLogic {
         merchant: { met: false, bought: [] }, gear: { found: [], worn: 0, dropped: 0 }, skills: [] };
       this.log.zones.push(this.zlog);
     }
-    if (kind === 'rest') { this.run.heal(1); this.toast('쉼터: 파티가 모두 회복했다'); this.toast('출구의 돌에서 상호작용으로 다음 지역으로'); }
+    if (kind === 'rest') { this.toast('쉼터: 출구의 돌에서 쉴지, 장비를 단련할지, 주변을 뒤질지 고른다'); }
     else if (kind === 'boss') this.toast('깊은 곳에서 무언가가 노려보고 있다...');
     else {
       if (this.stageBattleNo === 1) this.toast(st.intro);
@@ -325,6 +337,7 @@ export class ExpeditionLogic {
     if (this.mode === 'summary') { if (keys.includes(AVK.OK)) this.nextZone(); return; }
     if (this.mode === 'shop') { this.shopKeys(keys); return; }
     if (this.mode === 'gear') { this.gearKeys(keys); return; }
+    if (this.mode === 'camp') { this.campKeys(keys); return; }
     if (this.mode === 'battle') { this.tickClock(dt); this.battleFrame(dt, presses, now, keys); return; }
     if (!this.field) return;
     if (this.mode === 'encounter') {
@@ -363,7 +376,7 @@ export class ExpeditionLogic {
           this.encounter = { enemies: e.enemies, advantage: e.advantage, t: 0 };
           this.mode = 'encounter';
           break;
-        case 'exit': this.leaveZone(); return;
+        case 'exit': if (this.plan[this.step].kind === 'rest') this.openCamp(); else this.leaveZone(); return;
         default: break;
       }
     }
@@ -440,6 +453,76 @@ export class ExpeditionLogic {
       if (k === AVK.UP || k === AVK.DOWN) this.gearSel = (this.gearSel + 1) % GEAR_CHOICES.length;
       else if (k === AVK.CLR) { this.chooseGear(false); return; }
       else if (k === AVK.OK) { this.chooseGear(this.gearSel === 0); return; }
+    }
+  }
+
+  // --- the rest zone's choice (§20.3) ----------------------------------------------------------------------------
+
+  private openCamp(): void {
+    this.mode = 'camp';
+    this.campSel = 0;
+    this.campTemper = null;
+    this.campLine = '하나만 고를 수 있다. 고르면 다음 지역으로 떠난다';
+  }
+
+  /** the worn slots a temper can still raise */
+  get temperable(): number[] { return this.run.equip.flatMap((g, i) => (g && g.ilv < TEMPER_MAX ? [i] : [])); }
+
+  /** pick choice i (0 휴식, 1 단련: then the piece, 2 수색) */
+  chooseCamp(i: number): void {
+    if (this.mode !== 'camp') return;
+    this.campSel = i;
+    if (i === 1) {
+      const slots = this.temperable;
+      if (!slots.length) { this.campLine = '단련할 장비가 없다'; return; }
+      this.campTemper = slots;
+      this.campSel = 0;
+      this.campLine = '어느 장비를 단련할까?';
+      return;
+    }
+    if (i === 0) { this.run.heal(CAMP_HEAL); this.toast(`휴식: 파티 HP ${CAMP_HEAL * 100}% 회복`); }
+    else { this.run.potions += CAMP_POTIONS; this.toast(`수색: 회복약 +${CAMP_POTIONS}`); }
+    this.log.camps.push(CAMP_CHOICES[i].name);
+    this.leaveCamp();
+  }
+
+  /** temper the worn piece of slot `slot` */
+  temperSlot(slot: number): void {
+    const g = this.run.equip[slot];
+    if (this.mode !== 'camp' || !g || g.ilv >= TEMPER_MAX) return;
+    const t = temper(g, CAMP_TEMPER);
+    this.run.wear(t);
+    this.toast(`단련: ${t.name} Lv.${g.ilv} → Lv.${t.ilv}`);
+    this.toast(gearDesc(t));
+    this.log.camps.push(`단련 ${SLOT_NAME[slot]}`);
+    this.leaveCamp();
+  }
+
+  /** back to the field without picking */
+  closeCamp(): void {
+    if (this.mode !== 'camp') return;
+    if (this.campTemper) { this.campTemper = null; this.campSel = 1; this.campLine = '하나만 고를 수 있다. 고르면 다음 지역으로 떠난다'; return; }
+    this.mode = 'field';
+  }
+
+  private leaveCamp(): void {
+    this.campTemper = null;
+    this.mode = 'field';
+    this.leaveZone();
+  }
+
+  private campKeys(keys: number[]): void {
+    for (const k of keys) {
+      const n = this.campTemper ? this.campTemper.length + 1 : CAMP_CHOICES.length + 1;   // the rows, then 뒤로
+      if (k === AVK.UP) this.campSel = (this.campSel + n - 1) % n;
+      else if (k === AVK.DOWN) this.campSel = (this.campSel + 1) % n;
+      else if (k === AVK.CLR) { this.closeCamp(); if (this.mode !== 'camp') return; }
+      else if (k === AVK.OK) {
+        if (this.campSel >= n - 1) { this.closeCamp(); if (this.mode !== 'camp') return; continue; }
+        if (this.campTemper) this.temperSlot(this.campTemper[this.campSel]);
+        else this.chooseCamp(this.campSel);
+        if (this.mode !== 'camp') return;
+      }
     }
   }
 
@@ -565,8 +648,8 @@ export class ExpeditionLogic {
       if (this.zlog) { this.zlog.kills.battle += beaten; this.zlog.exp += b.exp; }
       this.field!.resume(enc.enemies, []);
       if (b.isBoss) { this.logBoss(b, 'won'); this.battle = null; this.encounter = null; this.stageCleared(b); return; }
-      const first = b.enemies.find((e) => !e.gone);                // one roll for the won battle (§4.3)
-      if (first && this.lootRng.chance(DROP_CHANCE)) this.gainGear(creatureDrop(this.battleNo, this.lootRng, this.names), first.name);
+      const first = b.enemies.find((e) => !e.gone);                // one roll for the won battle (§4.3), sure for the gatekeeper (§20.4)
+      if (first && (enc.enemies.some((e) => e.gate) || this.lootRng.chance(DROP_CHANCE))) this.gainGear(creatureDrop(this.battleNo, this.lootRng, this.names), first.name);
       if (first && this.lootRng.chance(SKILL_DROP)) this.gainSkill(rollSkill(this.battleNo, this.lootRng), first.name);
       for (const r of b.rares) {                                   // a beaten rare creature drops a piece of its own (§7)
         if (this.zlog) this.zlog.rare.caught++;

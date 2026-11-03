@@ -18,6 +18,7 @@ import type { Assets, Cmf, GameMap, MapObject } from '../data/assets';
 import { bodyBox, buildWalk } from '../world/world';
 import { Rng } from './rng';
 import { CHEST_DEPTH, chestRoll, type ChestKind } from './loot';
+import { SPECIES } from './species';
 import { buildAdjacency, fill, type Adjacency } from './synth';
 
 export const TILE = 16;
@@ -76,6 +77,11 @@ export interface Spawn {
   species: number;
   /** the zone's rare creature: alone, sparkling, it runs (web/docs/expedition-balance.md §7) */
   rare?: boolean;
+  /** how many more of the kind stand with it (a group is 1 + pack; unset: 0..2 by chance) */
+  pack?: number;
+  /** the beat of the way through it was placed in (a BEATS index), the gatekeeper by the exit, or the best chest's
+   *  guard (§20.4) */
+  beat?: number | 'gate' | 'guard';
 }
 
 /** a treasure chest (center of its cell) */
@@ -787,12 +793,28 @@ export function walkDist(seen: Uint8Array, W: number, H: number, c: number, r: n
   return d;
 }
 
+/** the beats of a battle zone's way through (web/docs/expedition-balance.md §20.4): t = walk steps from the start /
+ *  those to the exit stone. Each beat takes a share of the groups, gives each `pack` more of the kind (min, max), and
+ *  weighs the stage's weak kinds `weak` against its normal ones. The breather holds no group but the first chest */
+export const BEATS = [
+  { name: '도입', t: [0, 0.2], share: 0.1, pack: [0, 0], weak: 3 },
+  { name: '전개', t: [0.2, 0.55], share: 0.45, pack: [0, 1], weak: 1 },
+  { name: '숨돌림', t: [0.55, 0.7], share: 0, pack: [0, 0], weak: 1 },
+  { name: '정점', t: [0.7, 0.95], share: 0.45, pack: [1, 2], weak: 1 / 3 },
+] as const;
+/** the gatekeeper: three of a normal kind, this many walk steps from the exit stone on a shortest way to it (at most
+ *  `slack` steps longer, the least that has room) */
+export const GATE = { from: 12, to: 20, pack: 2, slack: [2, 6, 12] } as const;
+/** the best chest's guard stands within this many tiles of it */
+export const CHEST_GUARD = 6;
+
 /** chests stay this far (tiles) from the start, the exit, the groups and each other */
 const CHEST_GAP = 12, CHEST_APART = 25;
 
 /** the chests of a battle zone (§6.2): each kind wants cells at least CHEST_DEPTH off the shortest way through (half the
  *  extra walk a visit costs), and of those the most tucked-away (fewest open cells around) are preferred */
-function placeChests(seen: Uint8Array, W: number, H: number, start: [number, number], exit: [number, number], taken: [number, number][], kinds: ChestKind[], rng: Rng): ZoneChest[] {
+function placeChests(seen: Uint8Array, W: number, H: number, start: [number, number], exit: [number, number], taken: [number, number][], kinds: ChestKind[], rng: Rng,
+  prefer?: (i: number) => boolean): ZoneChest[] {
   const dS = walkDist(seen, W, H, start[0], start[1]), dE = walkDist(seen, W, H, exit[0], exit[1]), L = dS[exit[1] * W + exit[0]];
   const out: ZoneChest[] = [], at: [number, number][] = [];
   if (L < 0) return out;
@@ -809,6 +831,8 @@ function placeChests(seen: Uint8Array, W: number, H: number, start: [number, num
       cands.push([i, n]);
     }
     if (!cands.length) continue;
+    // the first chest goes where `prefer` says if it can (the breather of the way through, §20.4)
+    if (prefer && !out.length && cands.some(([i]) => prefer(i))) cands.splice(0, cands.length, ...cands.filter(([i]) => prefer(i)));
     cands.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
     const [i] = cands[rng.int(0, Math.min(cands.length, Math.max(12, Math.round(cands.length * 0.15))) - 1)];
     const c = i % W, r = (i / W) | 0;
@@ -862,27 +886,80 @@ export async function buildField(a: Assets, sets: ZoneSets, seed: number, kind: 
   map.objLow.push({ obj: EXIT_LIT, x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 });
   const walk = zoneWalk(map, sets);
   const seen = reachable(walk, W, H, start[0], start[1]);
-  // enemy groups: open reached cells away from the start and from each other
   const spawns: Spawn[] = [];
   const taken: [number, number][] = [start, exit];
-  for (let g2 = 0, tries = 0; g2 < o.groups && tries < 6000; tries++) {
-    const c = rng.int(2, W - 3), r = rng.int(2, H - 3), gap = tries < 3000 ? 22 : 16;
-    if (!openCell(seen, W, H, c, r) || taken.some(([tc, tr]) => (tc - c) ** 2 + (tr - r) ** 2 < gap * gap)) continue;
+  // the chests first, the first of them in the breather of the way through (§20.4)
+  const dS = walkDist(seen, W, H, start[0], start[1]), dE = walkDist(seen, W, H, exit[0], exit[1]);
+  let L = dS[exit[1] * W + exit[0]];
+  if (L <= 0) for (let i = 0; i < W * H; i++) L = Math.max(L, dS[i]);
+  const tOf = (i: number) => Math.min(1, dS[i] / Math.max(1, L));
+  const beatOf = (i: number) => BEATS.findIndex((bt) => tOf(i) >= bt.t[0] && tOf(i) < bt.t[1]);
+  const chests = kind === 'battle' && o.zoneNo
+    ? placeChests(seen, W, H, start, exit, taken, chestRoll(o.zoneNo, rng), rng, (i) => BEATS[beatOf(i)]?.share === 0) : undefined;
+  const chestAt = (chests ?? []).map((c): [number, number] => [Math.floor(c.x / TILE), Math.floor(c.y / TILE)]);
+  // enemy groups (§20.4), paced along the way through by t: a quiet way in, a building middle, a breather, a peak
+  // before the exit; then the gatekeeper on a shortest way to the exit stone and a guard by the best chest. Each keeps
+  // away from the start, the exit, the other groups and the chests.
+  const free = (c: number, r: number, gap: number) => !taken.some(([tc, tr]) => (tc - c) ** 2 + (tr - r) ** 2 < gap * gap)
+    && !chestAt.some(([tc, tr]) => (tc - c) ** 2 + (tr - r) ** 2 < CHEST_GAP * CHEST_GAP);
+  const kindOf = (weak: number) => o.species[rng.weighted(o.species.map((s) => (SPECIES[s]?.tier === 'weak' ? weak : 1)))];
+  const put = (i: number, species: number, pack: number, beat: Spawn['beat']) => {
+    const c = i % W, r = (i / W) | 0;
     taken.push([c, r]);
-    spawns.push({ x: c * TILE + 8, y: r * TILE + 8, species: rng.pick(o.species) });
-    g2++;
+    spawns.push({ x: c * TILE + 8, y: r * TILE + 8, species, pack, beat });
+  };
+  const pick = (cells: number[], gap: (tries: number) => number, tries = 2000): number => {
+    for (let k = 0; k < tries && cells.length; k++) {
+      const i = cells[rng.int(0, cells.length - 1)];
+      if (free(i % W, (i / W) | 0, gap(k))) return i;
+    }
+    return -1;
+  };
+  if (o.groups > 0 && o.species.length) {
+    const cells: number[][] = BEATS.map(() => []), gateCells: number[][] = GATE.slack.map(() => []);
+    for (let i = 0; i < W * H; i++) {
+      if (dS[i] < 0 || !openCell(seen, W, H, i % W, (i / W) | 0)) continue;
+      const k = beatOf(i);
+      if (k >= 0) cells[k].push(i);
+      const off = GATE.slack.findIndex((sl) => dS[i] + dE[i] <= L + sl);
+      if (dE[i] >= GATE.from && dE[i] <= GATE.to && off >= 0) gateCells[off].push(i);
+    }
+    // the gatekeeper: on a shortest way if it has room there (a narrow way may not), else a little off it
+    for (const list of gateCells) {
+      const gate = pick(list, () => 0, 400);
+      if (gate >= 0) { put(gate, kindOf(0), GATE.pack, 'gate'); break; }
+    }
+    let guarded = 0;
+    const best = (chests ?? []).reduce<ZoneChest | null>((m, c) => (!m || c.kind > m.kind ? c : m), null);
+    if (best) {
+      const bc = Math.floor(best.x / TILE), br = Math.floor(best.y / TILE), near: number[] = [];
+      for (let r = br - CHEST_GUARD; r <= br + CHEST_GUARD; r++) for (let c = bc - CHEST_GUARD; c <= bc + CHEST_GUARD; c++) {
+        const d2 = (c - bc) ** 2 + (r - br) ** 2;
+        if (d2 < 9 || d2 > CHEST_GUARD ** 2 || !openCell(seen, W, H, c, r) || dS[r * W + c] < 0) continue;
+        if (!taken.some(([tc, tr]) => (tc - c) ** 2 + (tr - r) ** 2 < 16 * 16)) near.push(r * W + c);
+      }
+      if (near.length) { put(near[rng.int(0, near.length - 1)], kindOf(1 / 3), rng.int(1, 2), 'guard'); guarded = 1; }
+    }
+    const want = BEATS.map((bt) => Math.round(o.groups * bt.share));
+    want[want.length - 1] = Math.max(0, o.groups - want.slice(0, -1).reduce((x, n) => x + n, 0) - guarded);
+    BEATS.forEach((bt, k) => {
+      for (let n = 0; n < want[k]; n++) {
+        const i = pick(cells[k], (t) => (t < 800 ? 22 : t < 1400 ? 16 : 12));
+        if (i < 0) break;
+        put(i, kindOf(bt.weak), rng.int(bt.pack[0], bt.pack[1]), k);
+      }
+    });
   }
   // the rare creature: one more spot, well away from the start
   if (kind === 'battle' && o.species.length && rng.chance(o.rare ?? 0)) {
     for (let tries = 0; tries < 4000; tries++) {
       const c = rng.int(2, W - 3), r = rng.int(2, H - 3);
-      if (!openCell(seen, W, H, c, r) || (c - start[0]) ** 2 + (r - start[1]) ** 2 < 40 * 40 || taken.some(([tc, tr]) => (tc - c) ** 2 + (tr - r) ** 2 < 16 * 16)) continue;
+      if (!openCell(seen, W, H, c, r) || (c - start[0]) ** 2 + (r - start[1]) ** 2 < 40 * 40 || !free(c, r, 16)) continue;
       taken.push([c, r]);
       spawns.push({ x: c * TILE + 8, y: r * TILE + 8, species: rng.pick(o.species), rare: true });
       break;
     }
   }
-  const chests = kind === 'battle' && o.zoneNo ? placeChests(seen, W, H, start, exit, taken, chestRoll(o.zoneNo, rng), rng) : undefined;
   return { kind, map, walk, start: { x: start[0] * TILE + 8, y: start[1] * TILE + 8 }, exit: { x: exit[0] * TILE + 8, y: exit[1] * TILE + 8 }, spawns, template: id, middle, chests, exitSide: tall ? 'south' : 'east' };
 }
 

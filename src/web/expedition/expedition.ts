@@ -18,9 +18,9 @@ import { ctrlAt } from '../input/touchLayout';
 import type { Cmf } from '../../core/data/assets';
 import type { Drawable } from '../../core/render';
 import { bodyBox } from '../../core/world/world';
-import { ADVANTAGE_LABEL, BATTLE_ZONES, CLOCK_SPEED, ExpeditionLogic, GEAR_CHOICES, NIGHT_AT } from '../../core/expedition/expedition';
+import { ADVANTAGE_LABEL, BATTLE_ZONES, CAMP_CHOICES, CAMP_TEMPER, CLOCK_SPEED, ExpeditionLogic, GEAR_CHOICES, NIGHT_AT } from '../../core/expedition/expedition';
 import { STAGES } from '../../core/expedition/stages';
-import { CHEST_FRAME, GRADE_NAME, SLOT_NAME, gearDesc, gearIcon, type Gear } from '../../core/expedition/loot';
+import { CHEST_FRAME, GRADE_NAME, SLOT_NAME, gearDesc, gearIcon, temper, type Gear } from '../../core/expedition/loot';
 import { statsWith } from '../../core/expedition/run';
 import { DEFAULT_EQUIP, setDayShift, type SpriteLayer } from '../render/sprites';
 import { FK, type FieldEnemy, type Press } from '../../core/expedition/field';
@@ -184,6 +184,7 @@ export class ExpeditionScene extends ExpeditionLogic {
     if (this.mode === 'summary') this.drawSummary();
     if (this.mode === 'shop') this.drawShop();
     if (this.mode === 'gear') this.drawGear();
+    if (this.mode === 'camp') this.drawCamp();
     if (this.mode === 'pause') this.drawPause();
     u.end();
     this.drawTouch();
@@ -353,6 +354,31 @@ export class ExpeditionScene extends ExpeditionLogic {
         ...rows,
         h(`div.ex-item${this.shopSel >= this.stock.length ? '.sel' : ''}`, { on: () => { this.closeShop(); } }, '떠나기'),
         h('div.ex-line.ex-dim', null, this.shopLine))));
+  }
+
+  /** a rest zone's choice (§20.3): 휴식 / 단련 / 수색, or the worn pieces to temper */
+  private drawCamp(): void {
+    const t = this.campTemper, hp = this.run.party.map((m) => `${m.name} ${m.hp}/${m.hpMax}`).join(' · ');
+    const rows = t
+      ? t.map((slot, i) => {
+        const g = this.run.equip[slot]!, up = temper(g, CAMP_TEMPER);
+        return h(`div.v-col.ex-item.ex-ware${i === this.campSel ? '.sel' : ''}`, { on: () => { this.temperSlot(slot); } },
+          h('div.v-row.ex-ware-top', null, gearSprite(g), gearName(g), h('span.ex-ware-price', null, `Lv.${g.ilv} → ${up.ilv}`)),
+          h('span.ex-ware-desc', null, `${SLOT_NAME[slot]} · ${gearDesc(up)}`),
+          h('span.ex-ware-desc.ex-dim', null, `지금: ${gearDesc(g)}`));
+      })
+      : CAMP_CHOICES.map((c, i) => h(`div.v-col.ex-item.ex-ware${i === this.campSel ? '.sel' : ''}${i === 1 && !this.temperable.length ? '.off' : ''}`,
+        { on: () => { this.chooseCamp(i); } },
+        h('div.v-row.ex-ware-top', null, h('span.ex-ware-name', null, c.name)),
+        h('span.ex-ware-desc', null, i === 2 ? `${c.desc} (보유 ${this.run.potions})` : c.desc)));
+    const n = rows.length;
+    this.ctx.ui.view('ex-camp', 0, 0, 480, 320, h('div.v-fill.v-col.ex-modal', null,
+      h('div.v-col.ex-menu.ex-shop', null,
+        h('div.ex-menu-title', null, t ? '단련' : '쉼터'),
+        h('div.ex-line.ex-dim', null, hp),
+        ...rows,
+        h(`div.ex-item${this.campSel >= n ? '.sel' : ''}`, { on: () => { this.closeCamp(); } }, '뒤로'),
+        h('div.ex-line.ex-dim', null, this.campLine))));
   }
 
   /** a piece for a filled slot: the worn one and the new one side by side, the hero's stats before and after, 교체 / 버리기 */

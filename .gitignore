@@ -12,3 +12,5 @@ apk/
 *.apk
 *.so
 *.dat
+*.jks
+*.keystore

@@ -24,6 +24,13 @@ test('core imports nothing from web, tauri or rendering libraries', () => {
   assert.deepEqual(bad, []);
 });
 
+// The APK extractor (src/extract) turns the player's APK into the asset files: plain bytes in, files out. It runs in a
+// page, a Tauri webview and node tests alike, so it reaches no game code, renderer, host or node module.
+test('extract imports only its own files', () => {
+  const bad = files(join(root, 'extract')).flatMap((f) => imports(f).filter((s) => !s.startsWith('./')).map((s) => `${relative(root, f)}: ${s}`));
+  assert.deepEqual(bad, []);
+});
+
 test('web does not import the tauri host', () => {
   const bad = files(join(root, 'web')).flatMap((f) => imports(f).filter((s) => /(^|\/)tauri\//.test(s) || s.startsWith('@tauri-apps')).map((s) => `${relative(root, f)}: ${s}`));
   assert.deepEqual(bad, []);

@@ -1,0 +1,47 @@
+# Public web build on GitHub Pages: the game code and the in-page APK extractor only. No game data is in the
+# repository or in this build (vite --mode pages has no public/ folder and fails on game data in the bundle);
+# players import their own grantria.apk in the page.
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:pages
+      - name: no game data in dist
+        run: |
+          if find dist -type f | grep -E '\.(apk|so|dat|pal|pxl|ogg)$|/(images|cmf|maps|sound|items|ref)/|/(images|text|tables|boss_boxes)\.json$'; then
+            echo "game data found in dist"; exit 1
+          fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

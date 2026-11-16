@@ -38,6 +38,13 @@ async function extract(apk: Uint8Array, screen: Screen | null, confirmUnknown: b
   return { out, known };
 }
 
+/** iPhone / iPad Safari not yet installed to the home screen (navigator.standalone exists only there): no
+ *  fullscreen for a page, and Safari clears a site's storage after 7 days of use without a visit */
+function iosBrowser(): boolean {
+  const nav = navigator as Navigator & { standalone?: boolean };
+  return nav.standalone === false;
+}
+
 export async function installAssets(p: Platform): Promise<void> {
   const force = location.hash === '#apk';             // game.html#apk: pick the APK again
   if (!force && await bundled()) return;              // p.assets already reads assets/ next to the page
@@ -65,7 +72,11 @@ export async function installAssets(p: Platform): Promise<void> {
   }
   const screen = new Screen(p);
   for (;;) {
-    const picked = await screen.pick(db ? null : '이 브라우저는 저장소를 쓸 수 없어 다음 방문 때 APK를 다시 골라야 합니다.');
+    const picked = await screen.pick([
+      db ? '' : '이 브라우저는 저장소를 쓸 수 없어 다음 방문 때 APK를 다시 골라야 합니다.',
+      iosBrowser() ? 'iPhone·iPad는 공유 → 홈 화면에 추가로 설치해 실행하면 화면을 꽉 채우고, 오래 쉬어도 에셋과 세이브가 지워지지 않습니다. '
+        + '설치한 앱은 Safari와 저장소가 따로라 그 안에서 APK를 다시 골라야 합니다.' : '',
+    ].filter(Boolean).join('\n\n') || null);
     try {
       const r = await extract(picked, screen, true);
       if (!r) continue;

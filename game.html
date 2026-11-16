@@ -10,9 +10,14 @@
       canvas { image-rendering: pixelated; display: block; }
       #frame { position: relative; overflow: hidden; }
       #hud { height: 24px; line-height: 24px; color: #8a8; }
+      /* a phone held upright: the game is landscape (a phone browser in fullscreen turns by itself, webFullscreen) */
+      #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #000; color: #ddd;
+        font: 15px/1.6 system-ui, sans-serif; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+      @media (orientation: portrait) and (pointer: coarse) { #rotate { display: flex; } }
     </style>
   </head>
   <body>
+    <div id="rotate">화면을 가로로 돌려 주세요</div>
     <div id="hud"></div>
     <div id="frame">
       <div id="stage">

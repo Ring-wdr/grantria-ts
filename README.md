@@ -2,7 +2,7 @@
 
 Enerve의 안드로이드 액션 RPG "그란트리아(Grantria)"를 리버스 엔지니어링 분석을 바탕으로 TypeScript + three.js로 옮긴 브라우저 포트입니다. 원본 엔진의 20 FPS 고정 틱, 480×320 화면, 전투·몬스터 AI·이벤트 스크립트·퀘스트·상점·보스·하드 모드·어둠의 정원·차원의 문 등을 원본 규칙대로 재현합니다.
 
-**이 저장소에는 원본 게임 파일이 들어 있지 않습니다.** APK, smali, 네이티브 라이브러리, 디컴파일 결과, 이미지·사운드·맵·텍스트 등 게임 에셋, 그리고 원본에서 추출한 데이터 표는 커밋하지 않습니다. 실행하려면 직접 가진 `grantria.apk`에서 에셋을 만들어야 합니다.
+**이 저장소에는 원본 게임 파일이 들어 있지 않습니다.** APK, smali, 네이티브 라이브러리, 디컴파일 결과, 이미지·사운드·맵·텍스트 등 게임 에셋, 그리고 원본에서 추출한 데이터 표는 커밋하지 않습니다. 실행하려면 직접 가진 `grantria.apk`에서 에셋을 만들어야 합니다. 웹 버전(GitHub Pages)과 앱은 처음 실행할 때 APK를 고르면 그 기기 안에서 에셋을 추출해 저장하고(`src/extract/`, 외부 전송 없음), 개발할 때는 아래처럼 Python 도구로 `public/assets`를 만들 수 있습니다.
 
 ## 요구 사항
 - Node.js 22 이상 (테스트는 Node의 TypeScript 타입 제거 실행을 씁니다)
@@ -18,6 +18,7 @@ npm run assets                        # apk/ -> public/assets (이미지·cmf·�
 npm run dev                           # http://localhost:5173/game.html
 ```
 - `npm run assets -- <APK의 assets 폴더> [출력 폴더]`로 경로를 바꿀 수 있습니다. 규칙 표(아이템·보스 박스)는 같은 APK의 `libGrantria.so`를 내장 Thumb 에뮬레이터로 실행해 `work/data/`에 만듭니다.
+- `public/assets`가 없으면 게임 페이지가 APK 가져오기 화면을 띄웁니다. `game.html#apk`로 열면 저장된 에셋을 두고 APK를 다시 고릅니다.
 - `npm run ref`는 맵 뷰어(`index.html`)의 픽셀 비교용 참조 이미지를 만듭니다.
 
 ## 스크립트
@@ -25,6 +26,7 @@ npm run dev                           # http://localhost:5173/game.html
 |---|---|
 | `npm run dev` | 개발 서버 (`game.html` 게임, `index.html` 맵 뷰어) |
 | `npm run build` | 타입 검사 + 정적 빌드 (`dist/`) |
+| `npm run build:pages` | 공개 웹 빌드 (`dist/`): 게임 페이지만, `public/` 제외, 게임 데이터가 섞이면 실패. `.github/workflows/pages.yml`이 main에 push될 때 GitHub Pages로 배포 |
 | `npm test` | 단위 테스트 (규칙 공식, 원본 세이브 XTEA·변환 등). 에셋이나 픽스처가 필요한 테스트는 없으면 건너뜁니다 |
 | `npm run fixtures` | 상점 공식·스킬 상세 테스트용 픽스처를 원본 코드 실행으로 생성 (`tests/fixtures/`, 커밋하지 않음) |
 | `npm run tauri:dev` / `npm run tauri:build` | Tauri 데스크톱 앱 실행 / 설치 파일(msi, setup.exe) 빌드 |
@@ -75,6 +77,7 @@ UI는 HTML/CSS(`src/web/render/domUi.ts`, `view.ts`, `src/web/styles/`)로 그�
 ```
 src/core/       플랫폼 무관 게임 로직 (규칙, 전투, 맵·통행, 세이브). DOM·three.js·Tauri를 쓰지 않는다
 src/web/        브라우저 실행 환경: 공용 부트스트랩(app.ts), WebGL 렌더러, DOM UI, 입력, 오디오, 화면(game/)
+src/extract/    APK → 웹 에셋 변환 (tools/build_web_assets.py와 같은 결과). 페이지·웹뷰·node 테스트에서 함께 쓴다
 src/tauri/      Tauri 호스트 플랫폼. 네이티브 쪽과는 Tauri(invoke·이벤트·플러그인)로만 통신한다
 src-tauri/      Tauri 2 셸 (Rust: 세이브 명령, 인라인 플러그인 native), Android 프로젝트(gen/android)
 tests/          node --test 단위 테스트 (계층 경계와 셸 전역·스크립트 평가 금지도 검사)
@@ -84,4 +87,4 @@ docs/           설계 문서 (구조: architecture.md, 데스크톱 배포 비�
 소스 주석의 `analysis/features/*.md`, `FUN_xxxxxxxx` 표기는 이 포트를 만들 때 쓴 분석 노트(이 저장소에 없음)와 원본 함수 주소를 가리킵니다.
 
 ## 배포
-웹 서비스로 배포하지 않습니다. 같은 코드를 Tauri로 묶어 Windows 설치 파일과 Android APK를 만듭니다(구조와 빌드: [docs/architecture.md](docs/architecture.md), 검토: [docs/desktop-electron-vs-tauri.md](docs/desktop-electron-vs-tauri.md)). 빌드 결과물에는 직접 만든 게임 에셋이 들어가므로 개인용으로만 쓰세요. 버전별 변경 사항은 [docs/release-notes.md](docs/release-notes.md)에 있습니다.
+웹 버전은 GitHub Pages에 게임 코드와 APK 추출 로직만 올립니다(`npm run build:pages`). 원본 파일과 추출한 에셋은 올리지 않으며, 플레이어가 자기 APK를 페이지에서 골라 브라우저 안에서 에셋을 만듭니다(IndexedDB에 저장). 같은 코드를 Tauri로 묶어 Windows 설치 파일과 Android APK를 만듭니다(구조와 빌드: [docs/architecture.md](docs/architecture.md), 검토: [docs/desktop-electron-vs-tauri.md](docs/desktop-electron-vs-tauri.md)). `public/assets`가 있는 상태로 앱을 빌드하면 결과물에 직접 만든 게임 에셋이 들어가므로 개인용으로만 쓰세요. `public/assets` 없이 빌드한 앱은 웹 버전처럼 첫 실행 때 APK를 고릅니다. 버전별 변경 사항은 [docs/release-notes.md](docs/release-notes.md)에 있습니다.

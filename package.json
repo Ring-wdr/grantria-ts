@@ -7,6 +7,7 @@
     "assets": "python -I tools/build_web_assets.py",
     "dev": "vite",
     "build": "npm run typecheck && vite build",
+    "build:pages": "npm run typecheck && vite build --mode pages",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.core.json",
     "ref": "python -I tools/build_ref_maps.py",
     "fixtures": "python -I tools/grantria_shop.py --assets apk/assets --so apk/lib/armeabi/libGrantria.so --out tests/fixtures/shop && python -I tools/grantria_skilldetail.py",

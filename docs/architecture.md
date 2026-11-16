@@ -105,7 +105,7 @@ web/
 - Tauri 빌드에는 Rust 툴체인(rustup, stable)과 Windows의 MSVC 빌드 도구·WebView2가 필요하다.
 - 세이브는 Tauri에서 앱 데이터 폴더의 `saves/<키>.json`에 키마다 한 파일로 둔다(`src-tauri/src/saves.rs`). 쓰기는 임시 파일에 쓰고 sync한 뒤 rename하므로 쓰다가 죽어도 이전 값이 남고, 파일 하나가 깨져도 그 키만 잃는다. 값은 쓰는 즉시 나간다(디바운스 없음). `saves/`가 비어 있으면 처음 한 번 이전 빌드의 `grantria.json`(plugin-store)을 옮기고 `grantria.json.migrated`로 이름을 바꿔 둔다. 그것도 없으면 웹뷰 localStorage의 `grantria.*`를 옮긴다.
 - Claude 데스크톱 앱(MSIX) 안에서 띄운 `tauri dev`는 `%APPDATA%` 쓰기가 `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming`으로 가상화된다. 그 안에서 확인한 세이브 상태는 실제 `%APPDATA%\dev.ringwdr.grantria`와 다를 수 있다.
-- 게임 데이터(`public/assets`, 원본 APK에서 생성)는 지금 프론트엔드 번들에 같이 들어간다. 개인 빌드용이다. 배포용으로는 APK 가져오기로 앱 데이터 폴더에 에셋을 만들고 `AssetSource`를 바꿔 끼워야 한다(`desktop-electron-vs-tauri.md` §4).
+- 게임 데이터는 부팅 때 `web/assetGate.ts`의 `installAssets`가 정한다(웹·Tauri 공통, 게임 앱을 불러오기 전). 페이지 옆 `assets/`가 있으면(`public/assets`로 만든 개인 빌드) 그것을, 없으면 IndexedDB에 저장된 추출본을, 그것도 없으면 APK 가져오기 화면을 띄워 플레이어의 APK를 `src/extract/`로 그 자리에서 변환한다. 추출본은 blob URL로 읽는 `AssetSource`로 `platform().assets`에 끼운다. 공개 웹 빌드(`npm run build:pages`)는 `public/`을 빼고 빌드한다.
 - 권한은 `src-tauri/capabilities/default.json`: 앱 명령(`saves_*`, `touch_first`), native 플러그인, 열기·저장·질문 대화상자, 대화상자로 고른 파일의 읽기·쓰기, 앱 종료만 연다. 앱 명령도 `build.rs`의 AppManifest로 권한을 만들어 기본 허용이 아니다.
 - 배포 CSP는 `tauri.conf.json`에 있다. Tauri는 빌드할 때 `style-src`에 nonce를 넣는데, 그러면 `'unsafe-inline'`이 무시되어 DOM UI의 런타임 스타일시트와 인라인 스타일이 막힌다. 그래서 `dangerousDisableAssetCspModification: ["style-src"]`로 `style-src`만 손대지 않게 했다. 스크립트는 `'self'`만 허용한다.
 - Rust 크레이트(`tauri`, `tauri-plugin-*`)는 npm 패키지와 같은 버전으로 고정한다(`Cargo.toml`의 `=x.y.z`). minor가 어긋나면 `tauri dev`가 버전 불일치 오류를 낸다.

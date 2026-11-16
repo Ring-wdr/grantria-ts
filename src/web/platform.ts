@@ -1,10 +1,11 @@
 // Browser platform: localStorage, file input / download, fetch from the Vite base, navigator.vibrate.
-// The webview pieces other hosts reuse (asset fetch, pad rumble, page lifecycle, the HTML prompt) are exported
+// The webview pieces other hosts reuse (asset fetch, the APK import gate, pad rumble, page lifecycle, the HTML prompt) are exported
 // from here; a host imports them from this file only, not from the rest of src/web.
 import { MemoryStore, type AssetSource, type FilePort, type FullscreenPort, type HostLifecycle, type KeyValueStore, type Platform } from '../core/platform';
+import { installAssets } from './assetGate';
 import { promptDialog } from './render/promptDialog';
 
-export { promptDialog };
+export { installAssets, promptDialog };
 
 /** localStorage, or memory when it is blocked (private mode, disabled site data) */
 function webStorage(): KeyValueStore {

@@ -110,8 +110,8 @@ export async function createTauriPlatform(): Promise<Platform> {
     storage,
     saveLocation: '세이브는 앱 데이터 폴더에 저장됩니다.',
     files: tauriFiles,
-    // the game data ships in the frontend bundle for now (public/assets); an APK import into the
-    // app data folder would swap this source
+    // the game data in the frontend bundle (public/assets) when the app was built with it; otherwise
+    // installAssets (src/web/assetGate.ts) swaps in the build made from the player's APK in the webview's storage
     assets: webAssetSource(),
     now: () => performance.now(),
     vibrate(ms) {

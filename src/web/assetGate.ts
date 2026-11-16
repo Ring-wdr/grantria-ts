@@ -27,7 +27,7 @@ async function extract(apk: Uint8Array, screen: Screen | null, confirmUnknown: b
   screen?.busy('APK 읽는 중…', 0);
   const { files, known } = await openApk(apk);
   if (!known && confirmUnknown && screen && !(await screen.confirm(
-    '알려진 그랜트리아 버전과 다른 APK입니다. 데이터 위치가 달라 게임이 제대로 돌지 않을 수 있습니다. 계속할까요?'))) {
+    '알려진 그란트리아 버전과 다른 APK입니다. 데이터 위치가 달라 게임이 제대로 돌지 않을 수 있습니다. 계속할까요?'))) {
     return null;
   }
   const out = new Map<string, Blob>();
@@ -109,7 +109,7 @@ class Screen {
       + 'justify-content:center;gap:14px;padding:24px;box-sizing:border-box;background:#0b0d14;color:#ddd;'
       + 'font:14px/1.6 system-ui,sans-serif;text-align:center;';
     const h = document.createElement('h1');
-    h.textContent = '그랜트리아';
+    h.textContent = '그란트리아';
     h.style.cssText = 'margin:0;font-size:22px;color:#f0d67a;letter-spacing:2px;';
     this.msg.style.cssText = 'margin:0;max-width:420px;white-space:pre-line;';
     this.bar.style.cssText = 'width:min(320px,80vw);height:6px;background:#222;border-radius:3px;overflow:hidden;display:none;';

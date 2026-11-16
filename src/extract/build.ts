@@ -35,7 +35,7 @@ export interface ApkCheck {
 export async function openApk(apk: Uint8Array): Promise<ApkCheck> {
   const files = await readZip(apk, needed);
   const d = files.get(DDAT), so = files.get(SO);
-  if (!d || !so) throw new Error('그랜트리아 APK가 아닙니다 (assets/d.dat, libGrantria.so가 없습니다)');
+  if (!d || !so) throw new Error('그란트리아 APK가 아닙니다 (assets/d.dat, libGrantria.so가 없습니다)');
   const [hd, hs] = await Promise.all([sha256(d), sha256(so)]);
   return { files, known: hd === KNOWN_RELEASE.ddat && hs === KNOWN_RELEASE.so };
 }

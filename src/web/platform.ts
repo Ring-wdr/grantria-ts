@@ -101,12 +101,15 @@ export class PageLifecycle implements HostLifecycle {
 }
 
 /** The page in browser fullscreen (Fullscreen API), null where the browser has none (iPhone: the home screen app is
- *  the full screen there, pwa/manifest.webmanifest). Entering needs a key
+ *  the full screen there, pwa/manifest.webmanifest) or the page already runs as a fullscreen app. Entering needs a key
  *  press or a click first: a refused request (the saved option at boot) is made again on the next one. Esc stays the
  *  game's cancel key where the browser allows it (Keyboard Lock, Chromium: hold Esc to leave fullscreen). */
 export function webFullscreen(): FullscreenPort | null {
   const el = document.documentElement;
   if (!document.fullscreenEnabled || !el.requestFullscreen) return null;
+  // the installed app (manifest display: fullscreen) already fills the screen: asking again changes nothing on
+  // screen but makes the browser show its "swipe to leave fullscreen" notice on every first tap
+  if (matchMedia('(display-mode: fullscreen)').matches) return null;
   let want = false, waiting = false;
   const lockEsc = () => {
     const kb = (navigator as Navigator & { keyboard?: { lock?: (codes: string[]) => Promise<void> } }).keyboard;

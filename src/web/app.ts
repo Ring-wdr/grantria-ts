@@ -232,10 +232,11 @@ platform().onTouchFirstChange(() => { applyFullscreen(); fit(); });
 addEventListener('resize', fit);
 fit();
 
-/** 풀스크린 on a desktop is OS fullscreen too; a touch-first screen is already full (Android) or keeps the page as
- *  it is (a phone browser), the option there is the layout only */
+/** 풀스크린 is OS fullscreen too wherever the host has it: a desktop window, and a phone browser (the page fills the
+ *  screen without the address and navigation bars and turns landscape, from the first tap: webFullscreen). A host
+ *  without it (the Android app, always full; iPhone Safari) keeps the layout part only. */
 function applyFullscreen(): void {
-  const fs = platform().fullscreen, on = !platform().touchFirst() && ctx.options.fullscreen === 1;
+  const fs = platform().fullscreen, on = ctx.options.fullscreen === 1;
   if (fs && on !== osFullscreen) fs.set(osFullscreen = on);
 }
 /** the player's choice from now on (not the touch-first default), kept at once */
@@ -245,10 +246,13 @@ function setFullscreen(on: boolean): void {
   saveOptions(ctx.options);
   ctx.applyOptions();
 }
-// left or entered outside the game (browser Esc, the window manager): the option follows
+// left or entered outside the game (browser Esc, the window manager): the option follows. On a touch screen the
+// system back gesture leaves it without meaning to change the option: fullscreen comes back on the next tap.
 platform().fullscreen?.onChange((on) => {
   osFullscreen = on;
-  if (!platform().touchFirst() && on !== (ctx.options.fullscreen === 1)) setFullscreen(on);
+  if (on === (ctx.options.fullscreen === 1)) return;
+  if (!platform().touchFirst()) setFullscreen(on);
+  else if (!on) platform().fullscreen!.set(osFullscreen = true);
 });
 ctx.input.onFullscreenKey = () => setFullscreen(ctx.options.fullscreen !== 1);
 

@@ -100,7 +100,8 @@ export class PageLifecycle implements HostLifecycle {
   }
 }
 
-/** The page in browser fullscreen (Fullscreen API), null where the browser has none (iPhone). Entering needs a key
+/** The page in browser fullscreen (Fullscreen API), null where the browser has none (iPhone: the home screen app is
+ *  the full screen there, pwa/manifest.webmanifest). Entering needs a key
  *  press or a click first: a refused request (the saved option at boot) is made again on the next one. Esc stays the
  *  game's cancel key where the browser allows it (Keyboard Lock, Chromium: hold Esc to leave fullscreen). */
 export function webFullscreen(): FullscreenPort | null {
@@ -118,8 +119,13 @@ export function webFullscreen(): FullscreenPort | null {
     waiting = false;
     if (want && !document.fullscreenElement) enter();
   };
+  // a phone turns landscape with it (Android Chrome allows the lock only in fullscreen); a desktop refuses, fine
+  const lockLandscape = () => {
+    const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+    o?.lock?.('landscape').catch(() => {});
+  };
   const enter = () => {
-    el.requestFullscreen({ navigationUI: 'hide' }).then(lockEsc, () => {
+    el.requestFullscreen({ navigationUI: 'hide' }).then(() => { lockEsc(); lockLandscape(); }, () => {
       if (waiting) return;
       waiting = true;
       for (const t of events) addEventListener(t, retry, true);

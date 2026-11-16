@@ -108,8 +108,9 @@ export function webFullscreen(): FullscreenPort | null {
   const el = document.documentElement;
   if (!document.fullscreenEnabled || !el.requestFullscreen) return null;
   // the installed app (manifest display: fullscreen) already fills the screen: asking again changes nothing on
-  // screen but makes the browser show its "swipe to leave fullscreen" notice on every first tap
-  if (matchMedia('(display-mode: fullscreen)').matches) return null;
+  // screen but makes the browser show its "swipe to leave fullscreen" notice on every first tap. A touch screen only:
+  // a desktop browser in F11 fullscreen matches the same query and keeps the game's own fullscreen
+  if (matchMedia('(display-mode: fullscreen) and (pointer: coarse)').matches) return null;
   let want = false, waiting = false;
   const lockEsc = () => {
     const kb = (navigator as Navigator & { keyboard?: { lock?: (codes: string[]) => Promise<void> } }).keyboard;

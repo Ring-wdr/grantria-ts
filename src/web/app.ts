@@ -40,6 +40,8 @@ loadBindings();                                                  // key / pad bi
 const stage = document.getElementById('stage')!;
 const canvas = document.getElementById('screen') as HTMLCanvasElement;
 const debug = document.getElementById('hud')!;
+// the debug line is the dev server's only: a build drops it, so it neither pushes the stage down nor shrinks it (fit)
+if (!import.meta.env.DEV) debug.hidden = true;
 const options = loadOptions();
 /** 절전 모드 on: the current way, off: the 0.1.7 way (power.ts), fixed at launch */
 const power = powerProfile(options);

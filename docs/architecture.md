@@ -1,6 +1,38 @@
 # 소스 구조: core / web / tauri
 
+[← README](../README.md) · [문서 목록](README.md)
+
 게임 규칙과 전투는 플랫폼과 무관한 `src/core`에 두고, 브라우저 렌더러와 호스트 셸은 그 위에 얹는다. 브라우저 버전은 그대로 돌고, 다른 호스트(Tauri, 이후 모바일이나 네이티브 렌더러)는 `Platform` 구현과 엔트리만 새로 만들면 된다.
+
+```mermaid
+flowchart TB
+  subgraph HOSTS["호스트 엔트리"]
+    direction LR
+    GH["game.html<br/>src/web/main.ts"]
+    TH["tauri.html<br/>src/tauri/main.ts"]
+  end
+  subgraph WEB["src/web — 브라우저 실행 환경"]
+    direction LR
+    APP["app.ts<br/>20 Hz 루프 · 씬"] --- RENDER["render/<br/>WebGL · DOM UI"]
+    APP --- INPUT["input/<br/>키보드 · 터치 · 패드"]
+    APP --- GAMEV["game/<br/>화면 · 탭 · HUD 그리기"]
+  end
+  subgraph CORE["src/core — 플랫폼 무관 로직 (DOM · three.js 금지)"]
+    direction LR
+    RULES["rules/ · combat/"] --- WORLD["world/ · field/"]
+    WORLD --- MENU["menu/ · ui/ · scenes/"]
+    MENU --- SAVE["save/ · data/"]
+  end
+  EXTRACT["src/extract<br/>APK → 에셋"]
+  RUST["src-tauri<br/>Rust 셸 · Android 프로젝트"]
+
+  TH --> WEB
+  GH --> WEB
+  WEB --> CORE
+  WEB --> EXTRACT
+  TH -- "invoke · 이벤트" --> RUST
+  CORE -. "Platform 포트<br/>(저장소 · 파일 · 진동 · 생명주기)" .-> HOSTS
+```
 
 ```
 web/
@@ -89,6 +121,30 @@ web/
 - 로직이 만드는 팝업 내용은 뷰 대신 데이터다: 흐름 단계(`Step.model`), 강화 결과·쿠폰 카드(`Popup.card`), 아이템 행동 메뉴(`core/menu/actionPopup.ts`를 `web/game/tabs.ts`의 `drawAction` / `actionAnchor`가 그린다), 대사 로그(`BacklogReader`를 `drawBacklog`가 그린다).
 - 화면 흐름: `core/scenes`의 로직이 다음 화면을 고르면 `SceneHost.screens`(`Screens` 포트: `title()`, `slots()`, `play(slot, save)` …)를 부르고, `web/game/screens.ts`의 `WebScreens`가 해당 씬을 만들어 `ctx.go()`한다. 터치 영역·UI 모드·탭 전달(`input.zones`, `uiMode`, `takeTaps`)과 타이틀 메뉴의 페이드 같은 표시 타이밍은 웹 씬에 남는다. 필드 진행(`PlayLogic`)은 메뉴·상점·게임 오버 쿠폰 상점·보스 러시를, 회상 목록과 샌드박스는 재생할 필드와 돌아갈 씬을 추상 메서드로 호스트에게 받는다.
 - `tsconfig.core.json`(DOM 타입 없음)과 `tests/boundary.test.ts`가 `core`에 브라우저 API나 `web` 가져오기가 섞이지 않았는지 검사하고, `tests/scenes.test.ts`가 렌더러 없이 가짜 호스트로 타이틀 흐름을 돌린다(node 테스트는 타입만 지우므로 거기서 불러오는 파일은 생성자 매개변수 속성을 쓰지 않는다).
+
+## 그리기와 절전 모드
+
+UI는 HTML/CSS(`src/web/render/domUi.ts`, `view.ts`, `src/web/styles/`)로 그리고, 필드와 월드 이펙트만 WebGL로 그린다. 게임 로직은 20 FPS 틱 그대로이고 UI 애니메이션은 화면 주사율로 돈다. 글꼴은 Galmuri9(OFL)을 번들한다.
+
+```mermaid
+flowchart LR
+  TICK["게임 로직<br/>20 FPS 고정 틱"] --> DRAW{"src/web/power.ts"}
+  DRAW -- "절전 모드 켬" --> NEW["src/web/render<br/>배치 그리기 · 바뀐 HUD만"]
+  DRAW -- "절전 모드 끔 (기본)" --> OLD["src/web/legacy<br/>0.1.7 방식"]
+  NEW --> OUT["WebGL 필드 + DOM UI"]
+  OLD --> OUT
+```
+
+편의 설정의 「절전 모드」(기본 끔, 다시 시작하면 적용)를 켜면 발열을 줄이는 방식으로 그린다.
+
+- 스프라이트를 레이어마다 버텍스 버퍼 하나에 모아 머티리얼이 같은 연속 구간을 draw 한 번으로 그린다.
+- Android 앱은 60 Hz 이하 화면 모드를 요청한다.
+- 패드가 연결되지 않았으면 틱 사이를 타이머로 기다렸다가 틱 직전에만 애니메이션 프레임을 요청한다(CSS 애니메이션은 그대로 돈다).
+- HUD는 바뀐 요소와 캔버스만 다시 그린다.
+
+끄면 0.1.7의 방식(`src/web/legacy/`)으로 그린다. 소리와 미니맵은 두 방식이 같다: 오디오는 출력 버퍼를 키우고(`latencyHint: 'playback'`) 소리가 안 들릴 때 멈추며 배경음은 현재·직전 곡만 디코딩해 두고, 미니맵은 바뀐 프레임만 올린다.
+
+팝업·목록 같은 모달은 화면마다 오버레이 스택(`src/core/ui/overlays.ts`)에 쌓여 맨 위만 키를 받고, 수량 → 확인처럼 여러 단계인 흐름은 XState 머신(`src/core/ui/flow.ts`, `flows/`)으로 돈다.
 
 ## 문제 기록
 

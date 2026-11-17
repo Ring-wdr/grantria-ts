@@ -1,9 +1,13 @@
 // The installed web app's icon from the player's own APK: its launcher icon (72x72 in the known release) is made
-// into the PWA icon sizes here and kept in IndexedDB with the rest of the build. pwa/sw.js answers the manifest's
-// icons/*.png from there, so the manifest and its URLs stay fixed and the browser installs (or later updates) the app
-// with the original icon; without an APK it falls back to the placeholder icons shipped in pwa/icons. Safari reads
-// apple-touch-icon from the page when it is added to the home screen, so the page's links point at the icon too.
-// Nothing leaves the device, and the public build still carries no game art.
+// into the PWA icon sizes here and kept in IndexedDB with the rest of the build. Without an APK the placeholder icons
+// shipped in pwa/icons stay. Nothing leaves the device, and the public build still carries no game art.
+// - Chrome's install ("앱 설치", the WebAPK) takes the manifest's icons, downloaded by the browser itself and kept per
+//   manifest URL for the page: answering icons/*.png from the service worker was not enough (the page's first visit
+//   is not controlled yet, and the browser's download need not go through it). So the page's manifest link is swapped
+//   for a blob: copy of pwa/manifest.webmanifest whose icons are data: URLs. The new URL makes Chrome read it again,
+//   and the icons need no request at all. `id` stays as written, so the installed app is the same app.
+// - "홈 화면에 추가" shortcuts and Safari read the page's icon / apple-touch-icon links, pointed at the icon too.
+// pwa/sw.js still answers icons/*.png from the store for anything that requests those URLs.
 import { apkIcon, isIconPath } from '../extract/build';
 import { readZip } from '../extract/zip';
 import { readIcons, writeIcons, type AppIcons } from './assetStore';
@@ -49,11 +53,30 @@ const dataUrl = (b: Blob) => new Promise<string>((resolve, reject) => {
   r.readAsDataURL(b);
 });
 
-/** Point the page's apple-touch-icon and favicon at the icon (data: URLs, which Safari's home screen can read) */
+/** Swap the page's manifest (the public build's only) for a copy with the icons inline */
+async function inlineManifest(urls: Record<string, string>): Promise<void> {
+  const link = document.head.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+  if (!link) return;
+  // the shipped manifest, kept so a later call does not read the blob copy
+  const src = link.dataset.src ??= link.href;
+  const m = await (await fetch(src)).json() as Record<string, unknown>;
+  // a blob: URL is no base for relative URLs: make them absolute against the shipped manifest (id is resolved
+  // against start_url's origin by the browser, so it stays as written and the app keeps its identity)
+  for (const k of ['start_url', 'scope'] as const) if (typeof m[k] === 'string') m[k] = new URL(m[k] as string, src).href;
+  m.icons = [['icon-192.png', 192], ['icon-512.png', 512]].filter(([n]) => urls[n])
+    .map(([n, s]) => ({ src: urls[n], sizes: `${s}x${s}`, type: 'image/png', purpose: 'any' }));
+  const old = link.href;
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: 'application/manifest+json' }));
+  if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+}
+
+/** Point the page's manifest, apple-touch-icon and favicon at the icon (data: URLs) */
 async function showIcons(icons: AppIcons): Promise<void> {
+  const urls: Record<string, string> = {};
+  for (const [name, b] of Object.entries(icons)) urls[name] = await dataUrl(b);
+  if (urls['icon-192.png'] || urls['icon-512.png']) await inlineManifest(urls);
   for (const [rel, name] of [['apple-touch-icon', 'apple-touch-icon.png'], ['icon', 'icon-192.png']] as const) {
-    const b = icons[name];
-    if (!b) continue;
+    if (!urls[name]) continue;
     let link = document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
     if (!link) {
       link = document.createElement('link');
@@ -61,7 +84,7 @@ async function showIcons(icons: AppIcons): Promise<void> {
       document.head.append(link);
     }
     link.type = 'image/png';
-    link.href = await dataUrl(b);
+    link.href = urls[name];
   }
 }
 

@@ -50,6 +50,20 @@ export async function writeBuild(db: IDBDatabase, files: Map<string, Blob>, buil
   await done(tx);
 }
 
+/** The installed web app's icons made from the APK's launcher icon (src/web/appIcon.ts), by their file name under
+ *  icons/ ('icon-192.png'); pwa/sw.js reads this same record to answer those requests. */
+export type AppIcons = Record<string, Blob>;
+
+export async function readIcons(db: IDBDatabase): Promise<AppIcons | undefined> {
+  return await req(db.transaction(META, 'readonly').objectStore(META).get('icons')) as AppIcons | undefined;
+}
+
+export async function writeIcons(db: IDBDatabase, icons: AppIcons): Promise<void> {
+  const tx = db.transaction(META, 'readwrite');
+  tx.objectStore(META).put(icons, 'icons');
+  await done(tx);
+}
+
 export async function clearStore(db: IDBDatabase): Promise<void> {
   const tx = db.transaction([FILES, META], 'readwrite');
   tx.objectStore(FILES).clear();

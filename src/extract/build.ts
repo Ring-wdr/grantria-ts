@@ -18,7 +18,25 @@ export const KNOWN_RELEASE = {
 
 const DDAT = 'assets/d.dat', SO = 'lib/armeabi/libGrantria.so';
 
-const needed = (p: string) => p.startsWith('assets/') || p === SO || (p.startsWith('res/raw/') && p.endsWith('.ogg'));
+/** The launcher icon's PNGs, one per density (res/drawable-hdpi-v4/icon.png in the known release) */
+export const isIconPath = (p: string) => /^res\/(drawable|mipmap)[^/]*\/(icon|ic_launcher)\.png$/.test(p);
+
+const needed = (p: string) => p.startsWith('assets/') || p === SO || (p.startsWith('res/raw/') && p.endsWith('.ogg'))
+  || isIconPath(p);
+
+/** The largest launcher icon in the APK (PNG width from IHDR), or undefined. For the installed web app's icon only:
+ *  it stays on the device like the rest of the build (src/web/appIcon.ts). */
+export function apkIcon(files: ApkFiles): Uint8Array | undefined {
+  let best: Uint8Array | undefined, bestW = 0;
+  for (const p of files.list('res/')) {
+    if (!isIconPath(p)) continue;
+    const b = files.get(p)!;
+    if (b.length < 24 || b[1] !== 0x50 || b[2] !== 0x4e || b[3] !== 0x47) continue;   // '\x89PNG'
+    const w = new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(16);
+    if (w > bestW) { best = b; bestW = w; }
+  }
+  return best;
+}
 
 export async function sha256(b: Uint8Array): Promise<string> {
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', b as BufferSource));

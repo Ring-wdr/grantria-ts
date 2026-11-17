@@ -4,7 +4,8 @@
 // 3. otherwise the import screen: the player picks their own grantria.apk and it is extracted here, on the device.
 // The public web build ships no game data at all; it only ever has (2) and (3).
 import type { Platform } from '../core/platform';
-import { buildAssets, EXTRACT_VERSION, openApk } from '../extract/build';
+import { apkIcon, buildAssets, EXTRACT_VERSION, openApk } from '../extract/build';
+import { useAppIcon } from './appIcon';
 import { clearStore, memoryAssetSource, openStore, readMeta, storedAssetSource, writeBuild } from './assetStore';
 
 const MIME: Record<string, string> = { png: 'image/png', json: 'application/json', ogg: 'audio/ogg' };
@@ -35,7 +36,7 @@ async function extract(apk: Uint8Array, screen: Screen | null, confirmUnknown: b
     const ext = path.slice(path.lastIndexOf('.') + 1);
     out.set(path, new Blob([data as BlobPart], { type: MIME[ext] ?? 'application/octet-stream' }));
   }, (f, stage) => screen?.busy(`${stage} 추출 중…`, f));
-  return { out, known };
+  return { out, known, icon: apkIcon(files) };
 }
 
 /** iPhone / iPad Safari not yet installed to the home screen (navigator.standalone exists only there): no
@@ -52,7 +53,11 @@ export async function installAssets(p: Platform): Promise<void> {
   try { db = await openStore(); } catch { /* storage blocked (private mode): extract into memory each visit */ }
   if (db && !force) {
     const { build, apk } = await readMeta(db).catch(() => ({ build: undefined, apk: undefined }));
-    if (build?.version === EXTRACT_VERSION) { p.assets = await storedAssetSource(db); return; }
+    if (build?.version === EXTRACT_VERSION) {
+      p.assets = await storedAssetSource(db);
+      void useAppIcon(db, undefined, apk);            // in the background: the game does not wait for it
+      return;
+    }
     if (build && apk) {
       // made by an older extractor: make it again from the APK kept with it
       const screen = new Screen(p);
@@ -61,6 +66,7 @@ export async function installAssets(p: Platform): Promise<void> {
         if (r) {
           await writeBuild(db, r.out, { version: EXTRACT_VERSION, known: r.known, count: r.out.size, date: Date.now() }, null);
           p.assets = await storedAssetSource(db);
+          await useAppIcon(db, r.icon);
           screen.close();
           return;
         }
@@ -75,7 +81,10 @@ export async function installAssets(p: Platform): Promise<void> {
     const picked = await screen.pick([
       db ? '' : '이 브라우저는 저장소를 쓸 수 없어 다음 방문 때 APK를 다시 골라야 합니다.',
       iosBrowser() ? 'iPhone·iPad는 공유 → 홈 화면에 추가로 설치해 실행하면 화면을 꽉 채우고, 오래 쉬어도 에셋과 세이브가 지워지지 않습니다. '
-        + '설치한 앱은 Safari와 저장소가 따로라 그 안에서 APK를 다시 골라야 합니다.' : '',
+        + '설치한 앱은 Safari와 저장소가 따로라 그 안에서 APK를 다시 골라야 합니다. '
+        + 'APK를 먼저 고른 뒤 홈 화면에 추가하면 원본 게임 아이콘으로 설치됩니다.'
+        // only the public build is an installable app (pwa/)
+        : import.meta.env.MODE === 'pages' ? '앱으로 설치할 때는 APK를 먼저 고른 뒤 설치하면 원본 게임 아이콘으로 설치됩니다.' : '',
     ].filter(Boolean).join('\n\n') || null);
     try {
       const r = await extract(picked, screen, true);
@@ -87,6 +96,7 @@ export async function installAssets(p: Platform): Promise<void> {
           await writeBuild(db, r.out, { version: EXTRACT_VERSION, known: r.known, count: r.out.size, date: Date.now() },
             new Blob([picked as BlobPart], { type: 'application/vnd.android.package-archive' }));
           p.assets = await storedAssetSource(db);
+          await useAppIcon(db, r.icon);
         } catch (e) {
           console.error('asset store:', e);
           p.assets = memoryAssetSource(r.out);         // quota: play this visit from memory
@@ -94,6 +104,7 @@ export async function installAssets(p: Platform): Promise<void> {
         void navigator.storage?.persist?.().catch(() => false);
       } else {
         p.assets = memoryAssetSource(r.out);
+        await useAppIcon(null, r.icon);
       }
       if (force) history.replaceState(null, '', location.pathname + location.search);
       screen.close();

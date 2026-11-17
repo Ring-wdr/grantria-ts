@@ -1,13 +1,14 @@
 // The installed web app's icon from the player's own APK: its launcher icon (72x72 in the known release) is made
 // into the PWA icon sizes here and kept in IndexedDB with the rest of the build. Without an APK the placeholder icons
 // shipped in pwa/icons stay. Nothing leaves the device, and the public build still carries no game art.
-// - Chrome's install ("앱 설치", the WebAPK) takes the manifest's icons, downloaded by the browser itself and kept per
-//   manifest URL for the page: answering icons/*.png from the service worker was not enough (the page's first visit
-//   is not controlled yet, and the browser's download need not go through it). So the page's manifest link is swapped
-//   for a blob: copy of pwa/manifest.webmanifest whose icons are data: URLs. The new URL makes Chrome read it again,
-//   and the icons need no request at all. `id` stays as written, so the installed app is the same app.
-// - "홈 화면에 추가" shortcuts and Safari read the page's icon / apple-touch-icon links, pointed at the icon too.
-// pwa/sw.js still answers icons/*.png from the store for anything that requests those URLs.
+// - Chrome's install ("앱 설치", the WebAPK) reads the manifest's icons itself and keeps them per manifest URL for the
+//   page, so the page's manifest link is moved to manifest.webmanifest?apk=<icon hash>: pwa/sw.js answers that with
+//   the shipped manifest whose icons are icons/icon-*.png?apk=<hash>, and those with the stored icon. The new URLs
+//   make Chrome read both again. They stay http(s) on purpose: Chrome makes a WebAPK only when the manifest's and
+//   icons' URLs are http(s) (with a blob: manifest and data: icons it only offered a home screen shortcut). The link
+//   is moved once the service worker controls the page (on a first visit it takes over just after loading); without
+//   one, the query is ignored by the server and the placeholders answer.
+// - "홈 화면에 추가" shortcuts and Safari read the page's icon / apple-touch-icon links, pointed at the icon (data: URLs).
 import { apkIcon, isIconPath } from '../extract/build';
 import { readZip } from '../extract/zip';
 import { readIcons, writeIcons, type AppIcons } from './assetStore';
@@ -53,28 +54,34 @@ const dataUrl = (b: Blob) => new Promise<string>((resolve, reject) => {
   r.readAsDataURL(b);
 });
 
-/** Swap the page's manifest (the public build's only) for a copy with the icons inline */
-async function inlineManifest(urls: Record<string, string>): Promise<void> {
-  const link = document.head.querySelector<HTMLLinkElement>('link[rel="manifest"]');
-  if (!link) return;
-  // the shipped manifest, kept so a later call does not read the blob copy
-  const src = link.dataset.src ??= link.href;
-  const m = await (await fetch(src)).json() as Record<string, unknown>;
-  // a blob: URL is no base for relative URLs: make them absolute against the shipped manifest (id is resolved
-  // against start_url's origin by the browser, so it stays as written and the app keeps its identity)
-  for (const k of ['start_url', 'scope'] as const) if (typeof m[k] === 'string') m[k] = new URL(m[k] as string, src).href;
-  m.icons = [['icon-192.png', 192], ['icon-512.png', 512]].filter(([n]) => urls[n])
-    .map(([n, s]) => ({ src: urls[n], sizes: `${s}x${s}`, type: 'image/png', purpose: 'any' }));
-  const old = link.href;
-  link.href = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: 'application/manifest+json' }));
-  if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+/** The service worker that answers the icons, waited for a few seconds on a first visit; false without one */
+async function controlled(): Promise<boolean> {
+  const sw = navigator.serviceWorker;
+  if (!sw) return false;
+  if (sw.controller) return true;
+  if (!(await sw.getRegistration())) return false;
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(false), 10000);
+    sw.addEventListener('controllerchange', () => { clearTimeout(t); resolve(true); }, { once: true });
+  });
 }
 
-/** Point the page's manifest, apple-touch-icon and favicon at the icon (data: URLs) */
+/** Move the page's manifest link (the public build's only) to the service worker's copy with the stored icons */
+async function useStoredManifest(icons: AppIcons): Promise<void> {
+  const link = document.head.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+  const b = icons['icon-512.png'];
+  if (!link || !b || !(await controlled())) return;
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', await b.arrayBuffer()));
+  const v = [...h.subarray(0, 6)].map((x) => x.toString(16).padStart(2, '0')).join('');
+  const url = new URL(link.href);
+  url.search = `?apk=${v}`;
+  if (link.href !== url.href) link.href = url.href;
+}
+
+/** Point the page's apple-touch-icon and favicon at the icon (data: URLs), and its manifest at the stored icons */
 async function showIcons(icons: AppIcons): Promise<void> {
   const urls: Record<string, string> = {};
   for (const [name, b] of Object.entries(icons)) urls[name] = await dataUrl(b);
-  if (urls['icon-192.png'] || urls['icon-512.png']) await inlineManifest(urls);
   for (const [rel, name] of [['apple-touch-icon', 'apple-touch-icon.png'], ['icon', 'icon-192.png']] as const) {
     if (!urls[name]) continue;
     let link = document.head.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
@@ -86,6 +93,8 @@ async function showIcons(icons: AppIcons): Promise<void> {
     link.type = 'image/png';
     link.href = urls[name];
   }
+  // not awaited: a first visit waits for the service worker, the game does not
+  void useStoredManifest(icons).catch((e) => console.warn('app icon manifest:', e));
 }
 
 /** Use the APK's icon for the app: `png` = the launcher icon of an APK just extracted (made and stored again);

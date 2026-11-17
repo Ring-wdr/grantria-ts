@@ -105,7 +105,10 @@ export class DataLogic {
       if (i === 0) { await download(`grantria-backup-${new Date().toISOString().slice(0, 10)}.json`, backupJson(), 'application/json'); this.msg = '백업 파일을 내려받았습니다.'; }
       else if (i === 1) {
         const [f] = await pickFiles('.json,application/json', false);
-        if (f) {
+        // Android's picker "Recent" list can hand a browser a just-downloaded file at the size it was registered with
+        // (0 bytes), though the file itself is whole; the same file chosen from its folder reads in full
+        if (f && f.bytes.length === 0) this.msg = '빈 파일(0B): 폴더에서 다시 고르세요';
+        else if (f) {
           const n = restoreJson(decodeText('utf-8', f.bytes));
           // drop every in-memory copy of what the backup replaced, or the next write puts the old one back
           resetAccountCache(); resetRecordsCache(); resetDevCache(); resetReadLogCache();

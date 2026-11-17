@@ -2,8 +2,9 @@
 // browser can install it as an app. Network first, the last good copy when offline. The game data never goes through
 // here: it lives in IndexedDB (src/web/assetStore.ts), made from the player's own APK.
 // The one exception is the app icon: once the player has imported their APK, icons/*.png answer with the icon made from
-// its launcher icon (src/web/appIcon.ts, the 'icons' record of the 'meta' store), so the browser installs and updates
-// the app with the original icon while the manifest and its URLs stay fixed. Without it, the placeholders in pwa/icons.
+// its launcher icon (src/web/appIcon.ts, the 'icons' record of the 'meta' store), and the page moves its manifest link
+// to manifest.webmanifest?apk=<hash>, answered here with icon URLs carrying the same query, so the browser reads the
+// manifest and the icons again and installs the app with the original icon. Without it, the placeholders in pwa/icons.
 const CACHE = 'grantria-shell-v1';
 const ICON_NAMES = ['icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
@@ -47,8 +48,22 @@ self.addEventListener('fetch', (e) => {
       : shell(e, req)));
     return;
   }
+  if (url.href.startsWith(`${self.registration.scope}manifest.webmanifest`) && url.searchParams.has('apk')) {
+    e.respondWith(apkManifest(e, url));
+    return;
+  }
   e.respondWith(shell(e, req));
 });
+
+/** The shipped manifest with its icons/icon-*.png moved to ?apk=<hash>, when an icon is stored */
+async function apkManifest(e, url) {
+  const res = await shell(e, new Request(`${self.registration.scope}manifest.webmanifest`));
+  if (!res.ok || !(await storedIcon('icon-512.png'))) return res;
+  const m = await res.json();
+  const v = encodeURIComponent(url.searchParams.get('apk'));
+  m.icons = (m.icons ?? []).map((i) => ({ ...i, src: `${i.src}?apk=${v}` }));
+  return new Response(JSON.stringify(m), { headers: { 'content-type': 'application/manifest+json', 'cache-control': 'no-cache' } });
+}
 
 /** network first, the last good copy when offline */
 function shell(e, req) {
